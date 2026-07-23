@@ -44,6 +44,14 @@ export function formatCountdownShort(targetIso: string): string {
   return `${days}일 남음`;
 }
 
+const WEEKDAY_KR = ["일", "월", "화", "수", "목", "금", "토"];
+
+// e.g. "7/24(금)" — used for the category screen's event date chips.
+export function formatEventDateChip(iso: string): string {
+  const date = new Date(iso);
+  return `${date.getMonth() + 1}/${date.getDate()}(${WEEKDAY_KR[date.getDay()]})`;
+}
+
 export function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("ko-KR", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
