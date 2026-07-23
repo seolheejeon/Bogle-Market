@@ -21,6 +21,29 @@ export function formatDeadlineLabel(targetIso: string): string {
   return `${isToday ? "오늘" : `${date.getMonth() + 1}.${date.getDate()}.`} ${timeStr} 마감`;
 }
 
+// Concise variants used on the home screen only (deadline-soon cards).
+export function formatDeadlineShort(targetIso: string): string {
+  const date = new Date(targetIso);
+  const now = new Date();
+  const isToday = date.toDateString() === now.toDateString();
+  const hourLabel = date.toLocaleTimeString("ko-KR", { hour: "numeric", hour12: true });
+  return isToday ? `오늘 ${hourLabel} 마감` : `${date.getMonth() + 1}.${date.getDate()} ${hourLabel} 마감`;
+}
+
+export function formatCountdownShort(targetIso: string): string {
+  const ms = new Date(targetIso).getTime() - Date.now();
+  if (ms <= 0) return "마감됨";
+  const totalMinutes = Math.floor(ms / 60000);
+  if (totalMinutes < 60) return `${totalMinutes}분 남음`;
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) {
+    const m = totalMinutes % 60;
+    return m > 0 ? `${totalHours}시간 ${m}분 남음` : `${totalHours}시간 남음`;
+  }
+  const days = Math.floor(totalHours / 24);
+  return `${days}일 남음`;
+}
+
 export function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("ko-KR", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
 }

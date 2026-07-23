@@ -5,7 +5,7 @@ import Link from "next/link";
 import { listEvents } from "@/lib/data";
 import type { EventType, MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
-import { formatDeadlineLabel, formatPrice } from "@/lib/format";
+import { formatCountdownShort, formatDeadlineShort, formatPrice } from "@/lib/format";
 import { Countdown } from "@/components/Countdown";
 import { ProductGridCard } from "@/components/ProductGridCard";
 
@@ -64,17 +64,17 @@ export function HomeView() {
       {heroSlides.length > 0 && (
         <Link
           href={`/product/${heroSlides[heroIndex].product.id}`}
-          className="relative block overflow-hidden rounded-2xl p-5"
+          className="flex items-stretch gap-3 overflow-hidden rounded-2xl p-4"
           style={{ background: "linear-gradient(135deg, var(--accent-soft), #d7f3e3)" }}
         >
-          <div className="max-w-[64%]">
+          <div className="flex min-w-0 flex-1 flex-col justify-center py-1">
             <p className="text-[13px] font-semibold text-accent-dark">{heroSlides[heroIndex].eyebrow}</p>
-            <span className="mt-2 inline-block rounded-full bg-bg-card px-2.5 py-1 text-[11px] font-extrabold text-accent-dark">
+            <span className="mt-2 inline-block w-fit rounded-full bg-bg-card px-2.5 py-1 text-[11px] font-extrabold text-accent-dark">
               {heroSlides[heroIndex].badge}
             </span>
-            <p className="mt-2.5 text-[19px] font-extrabold text-text">{heroSlides[heroIndex].product.name}</p>
-            <p className="mt-2 text-[19px] font-extrabold text-accent-dark">{formatPrice(heroSlides[heroIndex].product.price)}</p>
-            <span className="mt-2.5 inline-flex rounded-lg bg-accent px-3 py-2 text-[13px] font-bold text-white">지금 주문하기 ›</span>
+            <p className="mt-2.5 line-clamp-2 text-[18px] font-extrabold text-text">{heroSlides[heroIndex].product.name}</p>
+            <p className="mt-1.5 text-[18px] font-extrabold text-accent-dark">{formatPrice(heroSlides[heroIndex].product.price)}</p>
+            <span className="mt-2.5 inline-flex w-fit rounded-lg bg-accent px-3 py-2 text-[13px] font-bold text-white">지금 주문하기 ›</span>
             {heroSlides.length > 1 && (
               <div className="mt-3.5 flex gap-1.5">
                 {heroSlides.map((_, i) => (
@@ -90,7 +90,9 @@ export function HomeView() {
               </div>
             )}
           </div>
-          <span className="absolute top-1/2 right-4 -translate-y-1/2 text-[58px]">{heroSlides[heroIndex].product.emoji}</span>
+          <div className="relative flex w-[45%] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/50">
+            <span className="text-[104px] leading-none drop-shadow-sm">{heroSlides[heroIndex].product.emoji}</span>
+          </div>
         </Link>
       )}
 
@@ -99,14 +101,16 @@ export function HomeView() {
           <p className="mb-2 text-[12.5px] font-bold text-text-muted">⏰ 마감 임박 상품</p>
           <div className="flex gap-2.5 overflow-x-auto">
             {deadlineItems.map((item) => (
-              <Link key={item.product.id} href={`/product/${item.product.id}`} className="w-[118px] shrink-0 rounded-xl border border-border p-2.5">
+              <Link key={item.product.id} href={`/product/${item.product.id}`} className="w-[122px] shrink-0 rounded-xl border border-border p-2.5">
                 <span className="rounded-md bg-[var(--badge-door-bg)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--badge-door-fg)]">
                   {EVENT_TYPE_LABEL[item.badgeType]}
                 </span>
-                <div className="mt-1.5 flex aspect-square items-center justify-center rounded-lg bg-accent-soft text-[28px]">{item.product.emoji}</div>
-                <p className="mt-1.5 mb-0.5 text-[11.5px] font-semibold">{item.product.name}</p>
-                <p className="text-[10px] text-text-muted">{formatDeadlineLabel(item.deadlineAt)}</p>
-                <Countdown targetIso={item.deadlineAt} className="mt-0.5 block text-[11.5px] font-extrabold text-red-600" />
+                <div className="mt-1.5 flex aspect-square items-center justify-center rounded-lg bg-accent-soft text-[38px] leading-none">{item.product.emoji}</div>
+                <p className="mt-1.5 mb-0.5 truncate text-[11.5px] font-semibold">{item.product.name}</p>
+                <p className="text-[10.5px] text-text-muted">{formatDeadlineShort(item.deadlineAt)}</p>
+                <p className="mt-0.5 text-[11px] font-semibold text-text-muted">
+                  ⏰ <Countdown targetIso={item.deadlineAt} format={formatCountdownShort} urgentClassName="text-red-500 font-bold" />
+                </p>
               </Link>
             ))}
           </div>
@@ -116,7 +120,7 @@ export function HomeView() {
       {popular.length > 0 && (
         <section className="mt-5">
           <p className="mb-2 text-[12.5px] font-bold text-text-muted">🔥 인기상품</p>
-          <div className="grid grid-cols-2 gap-x-2.5 gap-y-3.5">
+          <div className="grid grid-cols-2 gap-x-2 gap-y-2.5">
             {popular.map((p, i) => (
               <ProductGridCard key={p.id} product={p} rankBadge={`BEST ${i + 1}`} />
             ))}

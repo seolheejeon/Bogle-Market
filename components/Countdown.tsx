@@ -3,13 +3,27 @@
 import { useEffect, useState } from "react";
 import { formatCountdown } from "@/lib/format";
 
-export function Countdown({ targetIso, className }: { targetIso: string; className?: string }) {
-  const [label, setLabel] = useState(() => formatCountdown(targetIso));
+interface CountdownProps {
+  targetIso: string;
+  className?: string;
+  format?: (targetIso: string) => string;
+  urgentClassName?: string;
+  urgentThresholdMs?: number;
+}
+
+export function Countdown({ targetIso, className, format = formatCountdown, urgentClassName, urgentThresholdMs = 60 * 60 * 1000 }: CountdownProps) {
+  const [label, setLabel] = useState(() => format(targetIso));
+  const [urgent, setUrgent] = useState(() => new Date(targetIso).getTime() - Date.now() < urgentThresholdMs);
 
   useEffect(() => {
-    const id = setInterval(() => setLabel(formatCountdown(targetIso)), 1000);
+    const tick = () => {
+      setLabel(format(targetIso));
+      setUrgent(new Date(targetIso).getTime() - Date.now() < urgentThresholdMs);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [targetIso]);
+  }, [targetIso, format, urgentThresholdMs]);
 
-  return <span className={className}>{label}</span>;
+  return <span className={urgent && urgentClassName ? `${className ?? ""} ${urgentClassName}`.trim() : className}>{label}</span>;
 }
