@@ -1,0 +1,32 @@
+"use client";
+
+import Link from "next/link";
+import { useCart } from "@/lib/cart-context";
+
+export function Header() {
+  const { count } = useCart();
+  return (
+    <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-bg-card px-4 py-3">
+      <Link href="/" className="flex items-center gap-2 font-extrabold text-accent-dark">
+        <span className="text-2xl">🐙</span>
+        <span className="leading-tight">
+          <span className="block">보글마켓</span>
+          <span className="block text-[10.5px] font-medium text-text-muted">우리 동네 맛있는 공동구매</span>
+        </span>
+      </Link>
+      <div className="flex items-center gap-1">
+        <Link href="/cart" className="relative p-1.5 text-xl" aria-label="장바구니">
+          🛒
+          {count > 0 && (
+            <span className="absolute top-0 right-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
+              {count}
+            </span>
+          )}
+        </Link>
+        <Link href="/notifications" className="relative p-1.5 text-xl" aria-label="알림">
+          🔔
+        </Link>
+      </div>
+    </header>
+  );
+}

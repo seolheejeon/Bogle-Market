@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+:root {
+  --accent: #059669;
+  --accent-dark: #047857;
+  --accent-soft: #ecfdf5;
+  --bg-page: #eef1ee;
+  --bg-card: #ffffff;
+  --bg-sunken: #f8faf9;
+  --text: #14201b;
+  --text-muted: #667169;
+  --border: #e4e9e5;
+  --badge-door-bg: #d1fae5;
+  --badge-door-fg: #047857;
+  --badge-group-bg: #ffedd5;
+  --badge-group-fg: #c2410c;
+  --badge-parcel-bg: #dbeafe;
+  --badge-parcel-fg: #1d4ed8;
+  --badge-flash-bg: #fee2e2;
+  --badge-flash-fg: #dc2626;
+  --status-wait-bg: #f1f5f4;
+  --status-wait-fg: #4b5a52;
+  --status-paid-bg: #eef2ff;
+  --status-paid-fg: #4338ca;
+  --status-ship-bg: #dbeafe;
+  --status-ship-fg: #1d4ed8;
+  --status-done-bg: #d1fae5;
+  --status-done-fg: #047857;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-page: #0f1512;
+    --bg-card: #171f1a;
+    --bg-sunken: #1c2621;
+    --text: #eaf1ec;
+    --text-muted: #8ea296;
+    --border: #2a352e;
+    --accent-soft: #103224;
+  }
+}
+
+@theme inline {
+  --color-accent: var(--accent);
+  --color-accent-dark: var(--accent-dark);
+  --color-accent-soft: var(--accent-soft);
+  --color-bg-page: var(--bg-page);
+  --color-bg-card: var(--bg-card);
+  --color-bg-sunken: var(--bg-sunken);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-border: var(--border);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg-page);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", Roboto, Helvetica, Arial, sans-serif;
+}

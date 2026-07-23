@@ -1,0 +1,28 @@
+# Business/personal documents — not app code, keep out of git
+*.pdf
+건강기능식품*
+사업자등록증*
+현금영수증*
+보글마켓 발주서*
+보글마켓 홍보영상*
+보글마켓_이메일*
+
+# Dependencies
+node_modules/
+
+# Build output
+.next/
+dist/
+build/
+
+# Env files
+.env
+.env.local
+.env*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local config
+.claude/

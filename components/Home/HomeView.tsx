@@ -1,0 +1,128 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { listEvents } from "@/lib/data";
+import type { EventType, MarketEvent } from "@/types";
+import { EVENT_TYPE_LABEL } from "@/types";
+import { formatDeadlineLabel, formatPrice } from "@/lib/format";
+import { Countdown } from "@/components/Countdown";
+import { ProductGridCard } from "@/components/ProductGridCard";
+
+function nearestOfType(events: MarketEvent[], type: EventType) {
+  return events
+    .filter((e) => e.type === type)
+    .slice()
+    .sort((a, b) => new Date(a.deadlineAt).getTime() - new Date(b.deadlineAt).getTime())[0];
+}
+
+export function HomeView() {
+  const [events, setEvents] = useState<MarketEvent[] | null>(null);
+  const [heroIndex, setHeroIndex] = useState(0);
+
+  useEffect(() => {
+    listEvents().then(setEvents);
+  }, []);
+
+  const flash = events?.find((e) => e.isFlash);
+  const door = events ? nearestOfType(events, "DOOR") : undefined;
+  const group = events ? nearestOfType(events, "GROUP_BUY") : undefined;
+
+  const heroSlides = useMemo(() => {
+    const slides: { key: string; eyebrow: string; badge: string; eventId: string; product: MarketEvent["products"][number] }[] = [];
+    if (flash?.products[0]) slides.push({ key: "flash", eyebrow: "지금 특가로 만나보세요", badge: "🔥 1시간 특가", eventId: flash.id, product: flash.products[0] });
+    if (door?.products[0]) slides.push({ key: "door", eyebrow: "집에서 즐기는 신선한 한 끼", badge: "이번 회차 PICK", eventId: door.id, product: door.products[0] });
+    if (group?.products[0]) slides.push({ key: "group", eyebrow: "현지에서 직접 사다드려요", badge: group.title, eventId: group.id, product: group.products[0] });
+    return slides;
+  }, [flash, door, group]);
+
+  useEffect(() => {
+    if (heroSlides.length <= 1) return;
+    const id = setInterval(() => setHeroIndex((i) => (i + 1) % heroSlides.length), 4500);
+    return () => clearInterval(id);
+  }, [heroSlides.length]);
+
+  const deadlineItems = useMemo(() => {
+    const items: { badgeType: EventType; eventId: string; product: MarketEvent["products"][number]; deadlineAt: string }[] = [];
+    if (door?.products[0]) items.push({ badgeType: "DOOR", eventId: door.id, product: door.products[0], deadlineAt: door.deadlineAt });
+    if (group?.products[0]) items.push({ badgeType: "GROUP_BUY", eventId: group.id, product: group.products[0], deadlineAt: group.deadlineAt });
+    if (flash?.products[0]) items.push({ badgeType: flash.type, eventId: flash.id, product: flash.products[0], deadlineAt: flash.deadlineAt });
+    return items.sort((a, b) => new Date(a.deadlineAt).getTime() - new Date(b.deadlineAt).getTime());
+  }, [door, group, flash]);
+
+  const popular = useMemo(() => {
+    if (!events) return [];
+    return events.flatMap((e) => e.products).slice(0, 4);
+  }, [events]);
+
+  if (!events) {
+    return <div className="p-4 text-sm text-text-muted">불러오는 중...</div>;
+  }
+
+  return (
+    <div className="p-4">
+      {heroSlides.length > 0 && (
+        <Link
+          href={`/product/${heroSlides[heroIndex].product.id}`}
+          className="relative block overflow-hidden rounded-2xl p-5"
+          style={{ background: "linear-gradient(135deg, var(--accent-soft), #d7f3e3)" }}
+        >
+          <div className="max-w-[64%]">
+            <p className="text-[13px] font-semibold text-accent-dark">{heroSlides[heroIndex].eyebrow}</p>
+            <span className="mt-2 inline-block rounded-full bg-bg-card px-2.5 py-1 text-[11px] font-extrabold text-accent-dark">
+              {heroSlides[heroIndex].badge}
+            </span>
+            <p className="mt-2.5 text-[19px] font-extrabold text-text">{heroSlides[heroIndex].product.name}</p>
+            <p className="mt-2 text-[19px] font-extrabold text-accent-dark">{formatPrice(heroSlides[heroIndex].product.price)}</p>
+            <span className="mt-2.5 inline-flex rounded-lg bg-accent px-3 py-2 text-[13px] font-bold text-white">지금 주문하기 ›</span>
+            {heroSlides.length > 1 && (
+              <div className="mt-3.5 flex gap-1.5">
+                {heroSlides.map((_, i) => (
+                  <button
+                    key={i}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setHeroIndex(i);
+                    }}
+                    className={`h-1.5 rounded-full transition-all ${i === heroIndex ? "w-4 bg-accent" : "w-1.5 bg-[var(--badge-parcel-bg)]"}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+          <span className="absolute top-1/2 right-4 -translate-y-1/2 text-[58px]">{heroSlides[heroIndex].product.emoji}</span>
+        </Link>
+      )}
+
+      {deadlineItems.length > 0 && (
+        <section className="mt-5">
+          <p className="mb-2 text-[12.5px] font-bold text-text-muted">⏰ 마감 임박 상품</p>
+          <div className="flex gap-2.5 overflow-x-auto">
+            {deadlineItems.map((item) => (
+              <Link key={item.product.id} href={`/product/${item.product.id}`} className="w-[118px] shrink-0 rounded-xl border border-border p-2.5">
+                <span className="rounded-md bg-[var(--badge-door-bg)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--badge-door-fg)]">
+                  {EVENT_TYPE_LABEL[item.badgeType]}
+                </span>
+                <div className="mt-1.5 flex aspect-square items-center justify-center rounded-lg bg-accent-soft text-[28px]">{item.product.emoji}</div>
+                <p className="mt-1.5 mb-0.5 text-[11.5px] font-semibold">{item.product.name}</p>
+                <p className="text-[10px] text-text-muted">{formatDeadlineLabel(item.deadlineAt)}</p>
+                <Countdown targetIso={item.deadlineAt} className="mt-0.5 block text-[11.5px] font-extrabold text-red-600" />
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {popular.length > 0 && (
+        <section className="mt-5">
+          <p className="mb-2 text-[12.5px] font-bold text-text-muted">🔥 인기상품</p>
+          <div className="grid grid-cols-2 gap-x-2.5 gap-y-3.5">
+            {popular.map((p, i) => (
+              <ProductGridCard key={p.id} product={p} rankBadge={`BEST ${i + 1}`} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
