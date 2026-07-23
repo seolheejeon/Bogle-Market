@@ -299,6 +299,8 @@ function mapSupabaseProduct(row: Record<string, any>): Product {
     weight: row.weight ?? undefined,
     storage: row.storage ?? undefined,
     description: row.description ?? undefined,
+    // Not a column yet — read through once products.detail_blocks (jsonb) exists.
+    detailBlocks: row.detail_blocks ?? undefined,
   };
 }
 

@@ -6,6 +6,8 @@ import { findProductWithEvent } from "@/lib/data";
 import type { MarketEvent, Product } from "@/types";
 import { formatPrice } from "@/lib/format";
 import { useCart } from "@/lib/cart-context";
+import { ProductDetailContent } from "@/components/Product/ProductDetailContent";
+import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
 
 export function ProductDetailView({ productId }: { productId: string }) {
   const router = useRouter();
@@ -72,6 +74,8 @@ export function ProductDetailView({ productId }: { productId: string }) {
         </div>
 
         {product.description && <p className="mt-4 text-[13px] leading-relaxed whitespace-pre-line text-text-muted">{product.description}</p>}
+
+        <ProductDetailContent blocks={product.detailBlocks ?? DUMMY_DETAIL_BLOCKS} />
       </div>
 
       <div className="sticky bottom-0 mt-4 border-t border-border bg-bg-card px-4 py-3.5">

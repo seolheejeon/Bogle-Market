@@ -4,6 +4,16 @@ export type PaymentMethod = "bank_transfer" | "card" | "kakaopay" | "incheon_eum
 
 export type OrderStatus = "wait" | "paid" | "ship" | "done" | "cancelled";
 
+// The product detail page's long-form "상세설명" content, rendered top to
+// bottom in order — mirrors the shape a future admin editor would write
+// (and a future `products.detail_blocks` jsonb column would store), so
+// swapping the dummy data for real admin-authored content later only means
+// changing where this array comes from, not how it's rendered.
+export type ProductDetailBlock =
+  | { type: "heading"; text: string }
+  | { type: "text"; text: string }
+  | { type: "image"; url: string; alt?: string };
+
 export interface Product {
   id: string;
   eventId: string;
@@ -16,6 +26,7 @@ export interface Product {
   storage?: string;
   eat?: string;
   description?: string;
+  detailBlocks?: ProductDetailBlock[];
 }
 
 export interface MarketEvent {
