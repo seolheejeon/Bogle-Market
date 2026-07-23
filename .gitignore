@@ -15,6 +15,9 @@ node_modules/
 dist/
 build/
 
+# Netlify CLI local cache
+.netlify/
+
 # Env files
 .env
 .env.local
