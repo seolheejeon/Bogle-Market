@@ -82,25 +82,53 @@ alter table products enable row level security;
 alter table orders enable row level security;
 alter table order_items enable row level security;
 
+-- SECURITY DEFINER helper: checks admin status while bypassing RLS itself.
+-- Policies must call this instead of subquerying `profiles` directly — a
+-- policy on `profiles` that subqueries `profiles` (or any policy elsewhere
+-- that does, combined with a policy back on `profiles`) causes Postgres to
+-- report "infinite recursion detected in policy for relation profiles",
+-- which PostgREST surfaces as a 500 on the *calling* query (e.g. /events).
+create or replace function is_admin()
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select coalesce((select p.is_admin from profiles p where p.id = auth.uid()), false);
+$$;
+
+-- All policies are dropped-and-recreated so this whole file can be re-run
+-- safely against a database that already has tables/policies from a
+-- previous run (Postgres has no "create policy if not exists").
+
 -- Anyone can read event/product catalog
+drop policy if exists "events are publicly readable" on events;
 create policy "events are publicly readable" on events for select using (true);
+drop policy if exists "products are publicly readable" on products;
 create policy "products are publicly readable" on products for select using (true);
 
 -- Only admins can write the catalog
+drop policy if exists "admins manage events" on events;
 create policy "admins manage events" on events for all
-  using (exists (select 1 from profiles where id = auth.uid() and is_admin))
-  with check (exists (select 1 from profiles where id = auth.uid() and is_admin));
+  using (is_admin())
+  with check (is_admin());
+drop policy if exists "admins manage products" on products;
 create policy "admins manage products" on products for all
-  using (exists (select 1 from profiles where id = auth.uid() and is_admin))
-  with check (exists (select 1 from profiles where id = auth.uid() and is_admin));
+  using (is_admin())
+  with check (is_admin());
 
 -- Profiles: user manages their own row; admins can read all
+drop policy if exists "user reads own profile" on profiles;
 create policy "user reads own profile" on profiles for select using (auth.uid() = id);
+drop policy if exists "user updates own profile" on profiles;
 create policy "user updates own profile" on profiles for update using (auth.uid() = id);
+drop policy if exists "admins read all profiles" on profiles;
 create policy "admins read all profiles" on profiles for select
-  using (exists (select 1 from profiles p where p.id = auth.uid() and p.is_admin));
+  using (is_admin());
 
 -- Addresses: owner only
+drop policy if exists "user manages own addresses" on addresses;
 create policy "user manages own addresses" on addresses for all
   using (profile_id = auth.uid())
   with check (profile_id = auth.uid());
@@ -108,19 +136,25 @@ create policy "user manages own addresses" on addresses for all
 -- Orders: signed-in users see their own orders; admins see everything.
 -- Guest orders (profile_id is null) are looked up via order number + phone through
 -- a dedicated RPC (see below) rather than direct table access.
+drop policy if exists "user reads own orders" on orders;
 create policy "user reads own orders" on orders for select using (profile_id = auth.uid());
+drop policy if exists "user creates own orders" on orders;
 create policy "user creates own orders" on orders for insert with check (profile_id = auth.uid() or profile_id is null);
+drop policy if exists "admins manage orders" on orders;
 create policy "admins manage orders" on orders for all
-  using (exists (select 1 from profiles where id = auth.uid() and is_admin))
-  with check (exists (select 1 from profiles where id = auth.uid() and is_admin));
+  using (is_admin())
+  with check (is_admin());
 
+drop policy if exists "user reads own order items" on order_items;
 create policy "user reads own order items" on order_items for select
   using (exists (select 1 from orders o where o.id = order_id and o.profile_id = auth.uid()));
+drop policy if exists "user creates own order items" on order_items;
 create policy "user creates own order items" on order_items for insert
   with check (exists (select 1 from orders o where o.id = order_id));
+drop policy if exists "admins manage order items" on order_items;
 create policy "admins manage order items" on order_items for all
-  using (exists (select 1 from profiles where id = auth.uid() and is_admin))
-  with check (exists (select 1 from profiles where id = auth.uid() and is_admin));
+  using (is_admin())
+  with check (is_admin());
 
 -- Guest order lookup: order number + last 4 digits of phone, no auth required.
 create or replace function lookup_guest_order(p_order_number text, p_phone_last4 text)
