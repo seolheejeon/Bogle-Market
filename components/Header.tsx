@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCart } from "@/lib/cart-context";
 
@@ -8,7 +9,7 @@ export function Header() {
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-bg-card px-4 py-3">
       <Link href="/" className="flex items-center gap-2 font-extrabold text-accent-dark">
-        <span className="text-2xl">🐙</span>
+        <Image src="/images/bogle.png" alt="보글마켓 마스코트" width={36} height={36} className="object-contain" />
         <span className="leading-tight">
           <span className="block">보글마켓</span>
           <span className="block text-[10.5px] font-medium text-text-muted">우리 동네 맛있는 공동구매</span>

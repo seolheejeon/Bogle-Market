@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -31,8 +32,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   return (
     <div className="mx-auto min-h-screen max-w-4xl bg-bg-card">
       <header className="flex items-center justify-between border-b border-border px-5 py-3.5">
-        <Link href="/" className="font-extrabold text-accent-dark">
-          🐙 보글마켓 관리자
+        <Link href="/" className="flex items-center gap-2 font-extrabold text-accent-dark">
+          <Image src="/images/bogle.png" alt="보글마켓 마스코트" width={28} height={28} className="object-contain" />
+          보글마켓 관리자
         </Link>
         <Link href="/mypage" className="text-[12.5px] text-text-muted">
           {profile.name || profile.email}
