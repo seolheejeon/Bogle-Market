@@ -3,23 +3,33 @@
 
 create extension if not exists "pgcrypto";
 
--- Profiles (1:1 with auth.users)
+-- Profiles (1:1 with auth.users). No email is ever shown to the user — signup
+-- collects a username, and auth-context.tsx synthesizes `${username}@bogle.internal`
+-- purely so Supabase Auth (which requires an email-shaped identifier) has
+-- something to key on. The real email lives only in auth.users, never here.
 create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  email text not null,
-  name text not null default '',
-  phone text not null default '',
+  username text not null unique,
+  nickname text not null default '',
+  phone text not null unique,
   is_admin boolean not null default false,
   created_at timestamptz not null default now()
 );
 
--- Saved addresses. profile_id is null for guest orders (snapshot lives on the order itself).
+-- Saved addresses. profile_id is null for guest orders (snapshot lives on the
+-- order itself). Only ever one row per member for now (the member's single
+-- 기본 배송지), but modeled as its own table with is_default from the start
+-- so multiple saved addresses per member is a UI change, not a schema change.
 create table if not exists addresses (
   id uuid primary key default gen_random_uuid(),
   profile_id uuid references profiles(id) on delete cascade,
   name text not null,
   phone text not null,
-  address text not null,
+  apartment text not null,
+  dong text not null,
+  ho text not null,
+  entrance_method text,
+  memo text,
   is_default boolean not null default false,
   created_at timestamptz not null default now()
 );
@@ -159,6 +169,30 @@ create policy "admins manage order items" on order_items for all
   using (is_admin())
   with check (is_admin());
 
+-- Username/phone availability checks for the signup form's 중복확인 — plain
+-- SELECT on profiles is scoped to the caller's own row (see RLS above), so
+-- these SECURITY DEFINER functions exist purely to answer "is this taken?"
+-- as a boolean without exposing whose it is.
+create or replace function is_username_taken(p_username text)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists(select 1 from profiles where username = p_username);
+$$;
+
+create or replace function is_phone_taken(p_phone text)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists(select 1 from profiles where phone = p_phone);
+$$;
+
 -- Guest order lookup: name + a 4-digit PIN the guest chose at checkout, no
 -- auth required. Returns every order under that name+PIN (a guest may have
 -- placed more than one), unlike the old order-number lookup which only ever
@@ -198,4 +232,4 @@ create policy "admins delete product photos" on storage.objects for delete
   using (bucket_id = 'product-photos' and is_admin());
 
 -- Create the first admin manually after signing up, e.g.:
--- update profiles set is_admin = true where email = 'you@example.com';
+-- update profiles set is_admin = true where username = 'bogle123';

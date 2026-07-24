@@ -9,6 +9,7 @@ const NAV = [
   { href: "/admin", label: "대시보드" },
   { href: "/admin/events", label: "이벤트/상품" },
   { href: "/admin/orders", label: "주문 관리" },
+  { href: "/admin/customers", label: "고객 관리" },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -37,7 +38,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           보글마켓 관리자
         </Link>
         <Link href="/mypage" className="text-[12.5px] text-text-muted">
-          {profile.name || profile.email}
+          {profile.nickname || profile.username}
         </Link>
       </header>
       <nav className="flex gap-1 border-b border-border px-5">

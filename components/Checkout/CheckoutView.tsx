@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { listEvents, createOrder, listAddresses } from "@/lib/data";
-import type { MarketEvent, PaymentMethod } from "@/types";
+import { listEvents, createOrder, getDefaultAddress, updateAddress } from "@/lib/data";
+import { formatAddress, type MarketEvent, type PaymentMethod } from "@/types";
 import { formatPrice } from "@/lib/format";
 import { useCart } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
@@ -17,7 +17,13 @@ export function CheckoutView() {
   const [events, setEvents] = useState<MarketEvent[] | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
+  const [apartment, setApartment] = useState("");
+  const [dong, setDong] = useState("");
+  const [ho, setHo] = useState("");
+  const [entranceMethod, setEntranceMethod] = useState("");
+  const [memo, setMemo] = useState("");
+  const [defaultAddressId, setDefaultAddressId] = useState<string | null>(null);
+  const [saveAsDefault, setSaveAsDefault] = useState(false);
   const [pin, setPin] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("bank_transfer");
   const [submitting, setSubmitting] = useState(false);
@@ -29,11 +35,16 @@ export function CheckoutView() {
 
   useEffect(() => {
     if (profile) {
-      setName(profile.name);
+      setName(profile.nickname);
       setPhone(profile.phone);
-      listAddresses(profile.id).then((addrs) => {
-        const def = addrs.find((a) => a.isDefault) ?? addrs[0];
-        if (def) setAddress(def.address);
+      getDefaultAddress(profile.id).then((addr) => {
+        if (!addr) return;
+        setDefaultAddressId(addr.id);
+        setApartment(addr.apartment);
+        setDong(addr.dong);
+        setHo(addr.ho);
+        setEntranceMethod(addr.entranceMethod ?? "");
+        setMemo(addr.memo ?? "");
       });
     }
   }, [profile]);
@@ -59,8 +70,8 @@ export function CheckoutView() {
       setError("전화번호를 정확히 입력해 주세요.");
       return;
     }
-    if (!address.trim() || address.trim().length < 5) {
-      setError("배송지 주소를 정확히 입력해 주세요.");
+    if (!apartment.trim() || !dong.trim() || !ho.trim()) {
+      setError("배송지(아파트명/동/호수)를 정확히 입력해 주세요.");
       return;
     }
     if (!profile && !/^\d{4}$/.test(pin)) {
@@ -73,6 +84,16 @@ export function CheckoutView() {
     }
     setSubmitting(true);
     try {
+      const addressFields = {
+        apartment: apartment.trim(),
+        dong: dong.trim(),
+        ho: ho.trim(),
+        entranceMethod: entranceMethod.trim() || undefined,
+        memo: memo.trim() || undefined,
+      };
+      if (profile && saveAsDefault && defaultAddressId) {
+        await updateAddress(defaultAddressId, profile.id, addressFields);
+      }
       const order = await createOrder({
         profileId: profile?.id ?? null,
         guestName: profile ? undefined : name,
@@ -80,7 +101,7 @@ export function CheckoutView() {
         guestPin: profile ? undefined : pin,
         recipientName: name,
         recipientPhone: phone,
-        addressSnapshot: address,
+        addressSnapshot: formatAddress(addressFields),
         paymentMethod: method,
         items: items.map((i) => ({ productId: i.product.id, productName: i.product.name, productEmoji: i.product.emoji, price: i.product.price, quantity: i.qty })),
         total,
@@ -105,10 +126,35 @@ export function CheckoutView() {
       </div>
       <div className="p-4">
         <p className="mt-0 mb-2 text-[12.5px] font-bold text-text-muted">배송 정보</p>
-        <div className="mb-4 flex flex-col gap-2">
+        <div className="mb-2 flex flex-col gap-2">
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="받는 분 이름" value={name} onChange={(e) => setName(e.target.value)} />
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 (010-0000-0000)" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="배송지 주소" value={address} onChange={(e) => setAddress(e.target.value)} />
+          <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="아파트명" value={apartment} onChange={(e) => setApartment(e.target.value)} />
+          <div className="flex gap-2">
+            <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="동" value={dong} onChange={(e) => setDong(e.target.value)} />
+            <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="호수" value={ho} onChange={(e) => setHo(e.target.value)} />
+          </div>
+          <input
+            className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+            placeholder="공동현관 출입방법 (선택)"
+            value={entranceMethod}
+            onChange={(e) => setEntranceMethod(e.target.value)}
+          />
+          <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="배송메모 (선택)" value={memo} onChange={(e) => setMemo(e.target.value)} />
+
+          {profile && defaultAddressId && (
+            <div className="flex flex-col gap-1.5 rounded-[9px] border border-border p-2.5">
+              <label className="flex items-center gap-2 text-[12.5px]">
+                <input type="radio" name="addr-save" checked={!saveAsDefault} onChange={() => setSaveAsDefault(false)} />
+                이번 주문만 이 배송지로 보내기
+              </label>
+              <label className="flex items-center gap-2 text-[12.5px]">
+                <input type="radio" name="addr-save" checked={saveAsDefault} onChange={() => setSaveAsDefault(true)} />
+                이 배송지를 기본 배송지로 저장
+              </label>
+            </div>
+          )}
+
           {!profile && (
             <input
               className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
@@ -120,7 +166,7 @@ export function CheckoutView() {
             />
           )}
         </div>
-        {!profile && <p className="mb-4 -mt-2 text-[11.5px] text-text-muted">회원가입 없이 주문할 수 있어요. 주문 조회는 이름과 확인번호로 할 수 있어요.</p>}
+        {!profile && <p className="mb-4 text-[11.5px] text-text-muted">회원가입 없이 주문할 수 있어요. 주문 조회는 이름과 확인번호로 할 수 있어요.</p>}
 
         <p className="mb-2 text-[12.5px] font-bold text-text-muted">결제 방법</p>
         <div className="mb-4 flex flex-col gap-2">
