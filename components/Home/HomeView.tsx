@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { listEvents } from "@/lib/data";
 import type { EventType, MarketEvent } from "@/types";
@@ -39,9 +39,13 @@ export function HomeView() {
 
   useEffect(() => {
     if (heroSlides.length <= 1) return;
+    // Depending on heroIndex (not just heroSlides.length) restarts this timer
+    // whenever the slide changes for any reason — auto tick, dot click, or a
+    // manual swipe/drag — so the next auto-advance always waits a full
+    // interval from the last change instead of firing early.
     const id = setInterval(() => setHeroIndex((i) => (i + 1) % heroSlides.length), 4500);
     return () => clearInterval(id);
-  }, [heroSlides.length]);
+  }, [heroSlides.length, heroIndex]);
 
   const deadlineItems = useMemo(() => {
     const items: { badgeType: EventType; eventId: string; product: MarketEvent["products"][number]; deadlineAt: string }[] = [];
@@ -56,6 +60,45 @@ export function HomeView() {
     return events.flatMap((e) => e.products).slice(0, 4);
   }, [events]);
 
+  // Pointer Events unify mobile touch swipe and desktop mouse drag in one
+  // handler set. `moved` distinguishes a drag from a tap so the hero's Link
+  // navigation only fires on an actual tap/click.
+  const heroDrag = useRef({ startX: 0, startY: 0, dragging: false, moved: false });
+
+  function goToHero(next: number) {
+    const len = heroSlides.length;
+    setHeroIndex(((next % len) + len) % len);
+  }
+
+  function handleHeroPointerDown(e: React.PointerEvent<HTMLElement>) {
+    heroDrag.current = { startX: e.clientX, startY: e.clientY, dragging: true, moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function handleHeroPointerMove(e: React.PointerEvent<HTMLElement>) {
+    const drag = heroDrag.current;
+    if (!drag.dragging) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (Math.abs(dx) > 6 && Math.abs(dx) > Math.abs(dy)) drag.moved = true;
+  }
+
+  function handleHeroPointerUp(e: React.PointerEvent<HTMLElement>) {
+    const drag = heroDrag.current;
+    if (!drag.dragging) return;
+    drag.dragging = false;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+      drag.moved = true;
+      goToHero(heroIndex + (dx < 0 ? 1 : -1));
+    }
+  }
+
+  function handleHeroClick(e: React.MouseEvent) {
+    if (heroDrag.current.moved) e.preventDefault();
+  }
+
   if (!events) {
     return <div className="p-4 text-sm text-text-muted">불러오는 중...</div>;
   }
@@ -65,7 +108,12 @@ export function HomeView() {
       {heroSlides.length > 0 && (
         <Link
           href={`/product/${heroSlides[heroIndex].product.id}`}
-          className="flex items-stretch gap-3 overflow-hidden rounded-2xl p-4"
+          onClick={handleHeroClick}
+          onPointerDown={handleHeroPointerDown}
+          onPointerMove={handleHeroPointerMove}
+          onPointerUp={handleHeroPointerUp}
+          onPointerCancel={handleHeroPointerUp}
+          className="flex touch-pan-y items-stretch gap-3 overflow-hidden rounded-2xl p-4 select-none active:cursor-grabbing sm:cursor-grab"
           style={{ background: "linear-gradient(135deg, var(--accent-soft), #d7f3e3)" }}
         >
           <div className="flex min-w-0 flex-1 flex-col justify-center py-1">
@@ -91,9 +139,13 @@ export function HomeView() {
               </div>
             )}
           </div>
-          <div className="relative flex w-[45%] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/50">
+          <div
+            className="relative flex w-[45%] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/50"
+            onDragStart={(e) => e.preventDefault()}
+          >
             <ProductPhoto
               photo={heroSlides[heroIndex].product.photos?.[0] ?? heroSlides[heroIndex].product.emoji}
+              fit="contain"
               className="flex h-full w-full items-center justify-center text-[104px] leading-none drop-shadow-sm"
             />
           </div>
