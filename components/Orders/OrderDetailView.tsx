@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { listOrdersForProfile, lookupGuestOrder } from "@/lib/data";
+import { listOrdersForProfile, lookupGuestOrders } from "@/lib/data";
 import type { Order, OrderStatus } from "@/types";
 import { PAYMENT_METHOD_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
@@ -16,7 +16,7 @@ const STEPS: { value: OrderStatus; label: string }[] = [
   { value: "done", label: "배송완료" },
 ];
 
-export function OrderDetailView({ orderId, onParam, p4Param }: { orderId: string; onParam?: string; p4Param?: string }) {
+export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: string; guestName?: string; guestPin?: string }) {
   const router = useRouter();
   const { profile, loading } = useAuth();
   const [order, setOrder] = useState<Order | null | undefined>(undefined);
@@ -25,12 +25,12 @@ export function OrderDetailView({ orderId, onParam, p4Param }: { orderId: string
     if (loading) return;
     if (profile) {
       listOrdersForProfile(profile.id).then((orders) => setOrder(orders.find((o) => o.id === orderId) ?? null));
-    } else if (onParam && p4Param) {
-      lookupGuestOrder(onParam, p4Param).then((o) => setOrder(o && o.id === orderId ? o : null));
+    } else if (guestName && guestPin) {
+      lookupGuestOrders(guestName, guestPin).then((orders) => setOrder(orders.find((o) => o.id === orderId) ?? null));
     } else {
       setOrder(null);
     }
-  }, [profile, loading, orderId, onParam, p4Param]);
+  }, [profile, loading, orderId, guestName, guestPin]);
 
   const stepIndex = order ? STEPS.findIndex((s) => s.value === order.status) : -1;
 

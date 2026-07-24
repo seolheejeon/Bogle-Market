@@ -71,6 +71,7 @@ export interface Order {
   profileId: string | null;
   guestName: string | null;
   guestPhone: string | null;
+  guestPin: string | null;
   addressSnapshot: string;
   recipientName: string;
   recipientPhone: string;

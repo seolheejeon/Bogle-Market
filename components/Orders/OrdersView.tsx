@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
-import { listOrdersForProfile, lookupGuestOrder } from "@/lib/data";
+import { listOrdersForProfile, lookupGuestOrders } from "@/lib/data";
 import type { Order, OrderStatus } from "@/types";
 import { ORDER_STATUS_LABEL } from "@/types";
 import { formatPrice, formatDateTime } from "@/lib/format";
@@ -22,9 +22,9 @@ export function OrdersView() {
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [tab, setTab] = useState<OrderStatus | "all">("all");
 
-  const [orderNumber, setOrderNumber] = useState("");
-  const [phoneLast4, setPhoneLast4] = useState("");
-  const [guestOrder, setGuestOrder] = useState<Order | null | undefined>(undefined);
+  const [guestName, setGuestName] = useState("");
+  const [guestPin, setGuestPin] = useState("");
+  const [guestOrders, setGuestOrders] = useState<Order[] | undefined>(undefined);
 
   useEffect(() => {
     if (profile) listOrdersForProfile(profile.id).then(setOrders);
@@ -36,21 +36,30 @@ export function OrdersView() {
     return (
       <div className="p-4">
         <strong className="mb-3 block text-[15px]">내 주문 조회</strong>
-        <p className="mb-3 text-[12.5px] text-text-muted">비회원으로 주문하셨다면 주문번호와 전화번호 뒷 4자리로 조회할 수 있어요.</p>
+        <p className="mb-3 text-[12.5px] text-text-muted">비회원으로 주문하셨다면 이름과 주문 시 정했던 확인번호 4자리로 조회할 수 있어요.</p>
         <div className="flex flex-col gap-2">
-          <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="주문번호 (예: 20260723-123456)" value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
-          <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 뒷 4자리" value={phoneLast4} onChange={(e) => setPhoneLast4(e.target.value)} maxLength={4} />
+          <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="이름" value={guestName} onChange={(e) => setGuestName(e.target.value)} />
+          <input
+            className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+            placeholder="확인번호 4자리"
+            inputMode="numeric"
+            maxLength={4}
+            value={guestPin}
+            onChange={(e) => setGuestPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+          />
           <button
             className="rounded-[10px] bg-accent py-2.5 text-[13px] font-bold text-white"
-            onClick={async () => setGuestOrder(await lookupGuestOrder(orderNumber.trim(), phoneLast4.trim()))}
+            onClick={async () => setGuestOrders(await lookupGuestOrders(guestName.trim(), guestPin.trim()))}
           >
             조회하기
           </button>
         </div>
-        {guestOrder === null && <p className="mt-3 text-[12.5px] text-red-600">일치하는 주문을 찾을 수 없어요.</p>}
-        {guestOrder && (
+        {guestOrders !== undefined && guestOrders.length === 0 && <p className="mt-3 text-[12.5px] text-red-600">일치하는 주문을 찾을 수 없어요.</p>}
+        {guestOrders !== undefined && guestOrders.length > 0 && (
           <div className="mt-4">
-            <OrderRow order={guestOrder} href={`/orders/${guestOrder.id}?on=${encodeURIComponent(guestOrder.orderNumber)}&p4=${phoneLast4.trim()}`} />
+            {guestOrders.map((o) => (
+              <OrderRow key={o.id} order={o} href={`/orders/${o.id}?gn=${encodeURIComponent(guestName.trim())}&pin=${guestPin.trim()}`} />
+            ))}
           </div>
         )}
       </div>
