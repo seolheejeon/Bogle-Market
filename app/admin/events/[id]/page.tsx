@@ -2,10 +2,11 @@
 
 import { use, useEffect, useState } from "react";
 import { getEvent, updateEvent, addProduct, updateProduct, deleteProduct } from "@/lib/data";
-import type { MarketEvent, Product } from "@/types";
+import type { MarketEvent, Product, ProductDetailBlock } from "@/types";
 import { formatPrice } from "@/lib/format";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { PhotoUploader } from "@/components/admin/PhotoUploader";
+import { DetailBlockEditor } from "@/components/admin/DetailBlockEditor";
 
 function toLocalInputValue(iso: string) {
   const d = new Date(iso);
@@ -95,11 +96,12 @@ function ProductRow({ product, onSaved }: { product: Product; onSaved: () => voi
   const [price, setPrice] = useState(String(product.price));
   const [emoji, setEmoji] = useState(product.emoji);
   const [photos, setPhotos] = useState<string[]>(product.photos ?? []);
+  const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>(product.detailBlocks ?? []);
   const [saving, setSaving] = useState(false);
 
   async function save() {
     setSaving(true);
-    await updateProduct(product.id, { name, price: Number(price) || 0, emoji, photos });
+    await updateProduct(product.id, { name, price: Number(price) || 0, emoji, photos, detailBlocks });
     setSaving(false);
     setEditing(false);
     onSaved();
@@ -135,6 +137,12 @@ function ProductRow({ product, onSaved }: { product: Product; onSaved: () => voi
         <input className="w-14 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-center text-[13px]" value={emoji} onChange={(e) => setEmoji(e.target.value)} />
         <input className="min-w-0 flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} />
         <input className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" type="number" value={price} onChange={(e) => setPrice(e.target.value)} />
+      </div>
+      <div>
+        <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
+        <DetailBlockEditor blocks={detailBlocks} onChange={setDetailBlocks} />
+      </div>
+      <div className="flex gap-2">
         <button onClick={save} disabled={saving} className="rounded-[7px] bg-accent px-2.5 py-1.5 text-[12px] font-bold text-white">
           저장
         </button>
