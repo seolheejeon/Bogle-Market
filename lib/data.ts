@@ -162,6 +162,7 @@ export interface NewOrderInput {
   profileId: string | null;
   guestName?: string;
   guestPhone?: string;
+  guestPin?: string;
   recipientName: string;
   recipientPhone: string;
   addressSnapshot: string;
@@ -181,6 +182,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
         profile_id: input.profileId,
         guest_name: input.guestName ?? null,
         guest_phone: input.guestPhone ?? null,
+        guest_pin: input.guestPin ?? null,
         recipient_name: input.recipientName,
         recipient_phone: input.recipientPhone,
         address_snapshot: input.addressSnapshot,
@@ -208,6 +210,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     profileId: input.profileId,
     guestName: input.guestName ?? null,
     guestPhone: input.guestPhone ?? null,
+    guestPin: input.guestPin ?? null,
     addressSnapshot: input.addressSnapshot,
     recipientName: input.recipientName,
     recipientPhone: input.recipientPhone,
@@ -243,18 +246,26 @@ export async function listAllOrders(): Promise<Order[]> {
   return loadOrders().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export async function lookupGuestOrder(orderNum: string, phoneLast4: string): Promise<Order | null> {
+// Returns every guest order under this name+PIN, newest first — a guest may
+// have placed more than one, unlike the old order-number lookup which only
+// ever matched a single order.
+export async function lookupGuestOrders(name: string, pin: string): Promise<Order[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { data, error } = await supabase.rpc("lookup_guest_order", { p_order_number: orderNum, p_phone_last4: phoneLast4 });
+    const { data, error } = await supabase.rpc("lookup_guest_orders", { p_name: name, p_pin: pin });
     if (error) throw error;
-    const row = data?.[0];
-    if (!row) return null;
-    const { data: items } = await supabase.from("order_items").select("*").eq("order_id", row.id);
-    return mapSupabaseOrder(row, (items ?? []).map(mapSupabaseOrderItem));
+    const rows = data ?? [];
+    return Promise.all(
+      rows.map(async (row: Record<string, any>) => {
+        const { data: items } = await supabase.from("order_items").select("*").eq("order_id", row.id);
+        return mapSupabaseOrder(row, (items ?? []).map(mapSupabaseOrderItem));
+      }),
+    );
   }
-  const order = loadOrders().find((o) => o.orderNumber === orderNum && (o.guestPhone ?? o.recipientPhone).slice(-4) === phoneLast4);
-  return order ?? null;
+  const nameLower = name.trim().toLowerCase();
+  return loadOrders()
+    .filter((o) => o.guestPin === pin && (o.guestName ?? o.recipientName).trim().toLowerCase() === nameLower)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function updateOrderStatus(orderId: string, status: OrderStatus): Promise<void> {
@@ -341,6 +352,7 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     profileId: row.profile_id,
     guestName: row.guest_name,
     guestPhone: row.guest_phone,
+    guestPin: row.guest_pin,
     addressSnapshot: row.address_snapshot,
     recipientName: row.recipient_name,
     recipientPhone: row.recipient_phone,

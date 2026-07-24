@@ -18,6 +18,7 @@ export function CheckoutView() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
+  const [pin, setPin] = useState("");
   const [method, setMethod] = useState<PaymentMethod>("bank_transfer");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +63,10 @@ export function CheckoutView() {
       setError("배송지 주소를 정확히 입력해 주세요.");
       return;
     }
+    if (!profile && !/^\d{4}$/.test(pin)) {
+      setError("주문 조회용 확인번호 4자리를 입력해 주세요.");
+      return;
+    }
     if (items.length === 0) {
       setError("장바구니가 비어있어요.");
       return;
@@ -72,6 +77,7 @@ export function CheckoutView() {
         profileId: profile?.id ?? null,
         guestName: profile ? undefined : name,
         guestPhone: profile ? undefined : phone,
+        guestPin: profile ? undefined : pin,
         recipientName: name,
         recipientPhone: phone,
         addressSnapshot: address,
@@ -83,8 +89,7 @@ export function CheckoutView() {
       if (profile) {
         router.push(`/orders/${order.id}`);
       } else {
-        const p4 = phone.replace(/\D/g, "").slice(-4);
-        router.push(`/orders/${order.id}?on=${encodeURIComponent(order.orderNumber)}&p4=${p4}`);
+        router.push(`/orders/${order.id}?gn=${encodeURIComponent(name)}&pin=${pin}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "주문 중 오류가 발생했어요.");
@@ -104,8 +109,18 @@ export function CheckoutView() {
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="받는 분 이름" value={name} onChange={(e) => setName(e.target.value)} />
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 (010-0000-0000)" value={phone} onChange={(e) => setPhone(e.target.value)} />
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="배송지 주소" value={address} onChange={(e) => setAddress(e.target.value)} />
+          {!profile && (
+            <input
+              className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+              placeholder="주문 조회용 확인번호 4자리 (직접 정해주세요)"
+              inputMode="numeric"
+              maxLength={4}
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            />
+          )}
         </div>
-        {!profile && <p className="mb-4 -mt-2 text-[11.5px] text-text-muted">회원가입 없이 주문할 수 있어요. 주문 조회는 주문번호와 전화번호로 할 수 있어요.</p>}
+        {!profile && <p className="mb-4 -mt-2 text-[11.5px] text-text-muted">회원가입 없이 주문할 수 있어요. 주문 조회는 이름과 확인번호로 할 수 있어요.</p>}
 
         <p className="mb-2 text-[12.5px] font-bold text-text-muted">결제 방법</p>
         <div className="mb-4 flex flex-col gap-2">

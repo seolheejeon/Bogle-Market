@@ -28,8 +28,8 @@
 - 홈: 히어로 배너(상품 사진 원본 비율 그대로 `object-contain` 표시, 자동 슬라이드 + 모바일 스와이프/PC 드래그 전환, 수동 조작 후 자동 슬라이드 자연스럽게 재개), 마감 임박 상품, 인기상품 그리드
 - 카테고리: 상단 배송방식 탭(문고리배송/사다드림/택배) + 하위 날짜 chips(가로 스크롤) → 선택한 이벤트 상품만 표시
 - 상품 상세: 사진 캐러셀(정사각형 박스 + `object-contain`으로 원본 비율 그대로, 잘림 없음), 원산지/중량/보관법/조리법 표, 설명, **상세설명(긴 스크롤형 이미지+텍스트, 관리자가 작성 가능)**, 수량 선택 + 장바구니 담기
-- 장바구니, 체크아웃(무통장입금/카드/카카오페이/인천이음카드 선택), 비회원 체크아웃
-- 내 주문: 회원은 목록+상세, 비회원은 주문번호+전화번호 뒷자리로 조회
+- 장바구니, 체크아웃(무통장입금/카드/카카오페이/인천이음카드 선택), 비회원 체크아웃(주문 조회용 확인번호 4자리 직접 설정)
+- 내 주문: 회원은 목록+상세, 비회원은 **이름 + 확인번호 4자리**로 조회 (같은 이름+번호로 낸 주문 전부를 목록으로 보여줌)
 - 마이페이지: 이메일/비밀번호 로그인·회원가입, 로그아웃
 - 알림 목록 (정적)
 
@@ -60,6 +60,12 @@
 - `components/ProductPhoto.tsx`에 `fit` prop 추가(`cover`(기본) | `contain`) — 상품 상세/홈 히어로처럼 사진 자체가 중요한 곳은 `contain`으로 잘리지 않고 원본 비율 그대로 보이도록, 그리드/장바구니 등 작은 정사각 썸네일은 기존 `cover` 유지
 - 상품 상세페이지 대표 이미지 박스를 고정 높이(220px)에서 정사각형(`aspect-square`)으로 변경 — 세로/가로/정사각 사진 모두 자연스럽게 수용
 - 홈 히어로 배너: Pointer Events 기반으로 모바일 스와이프 + PC 드래그 지원. 드래그 이동량이 임계치를 넘으면 슬라이드 전환, 넘지 않으면 기존처럼 탭=상품 상세 이동. 자동 슬라이드 타이머는 마지막 슬라이드 변경(자동/수동 무관) 시점부터 다시 카운트되도록 해서 수동 조작 직후 바로 튕기듯 넘어가지 않고 자연스럽게 이어짐
+
+**비회원 주문조회를 이름+확인번호(PIN) 방식으로 변경** (`feature/guest-order-pin`)
+- 기존엔 "주문번호 + 전화번호 뒷4자리"였는데, 주문번호를 알려줄 문자/알림 시스템이 없어서 고객이 주문번호를 알기 어려운 문제가 있었음
+- 체크아웃 시 비회원이 직접 4자리 확인번호를 정하고, 나중에 "이름 + 확인번호"로 조회 — 전화번호 뒷4자리를 안 쓰는 이유는 아파트 단지 이웃끼리는 서로 이름/전화번호를 알 수도 있어서, 본인만 아는 별도의 PIN이 더 안전하기 때문
+- `lookup_guest_orders(name, pin)` RPC로 변경 — 기존엔 주문 1건만 찾았지만, 이제 같은 이름+PIN으로 낸 주문을 전부 최신순으로 보여줌 (여러 번 주문한 비회원도 한 번에 조회 가능)
+- `orders.guest_pin` 컬럼 추가
 
 **하단 고정 버튼이 BottomNav에 가려지는 버그 수정** (`fix/sticky-cta-hidden-behind-bottomnav`)
 - 상품 상세페이지 "장바구니 담기", 장바구니 페이지 "주문하기" 버튼이 `sticky bottom-0`으로 `<main>` 안에 있었는데, 마찬가지로 `sticky bottom-0`인 하단 탭바(`BottomNav`)와 같은 화면 위치에서 겹쳐서 탭바에 가려지는 문제 발견 (페이지 내용이 길어서 스크롤이 필요한 경우에만 발생, 맨 아래까지 스크롤하면 일시적으로 보임)
@@ -103,11 +109,11 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `addresses` | id, profile_id, name, phone, address, is_default | 회원 배송지. `profile_id`가 null이면 게스트(직접 입력) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, is_flash, deadline_at, delivery_at, notice | 공동구매 회차 |
 | `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, description | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `detail_blocks`는 관리자가 작성한 상세설명(제목/본문/사진 블록). `image_url`은 미사용 |
-| `orders` | id, order_number, profile_id, guest_name/phone, recipient_name/phone, address_snapshot, payment_method, status, total | 주문. 게스트는 `profile_id=null` |
+| `orders` | id, order_number, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, payment_method, status, total | 주문. 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리 |
 | `order_items` | id, order_id, product_id, product_name, price_snapshot, quantity | 주문 상품 스냅샷 |
 
 - `is_admin()` — SECURITY DEFINER 함수. RLS 정책에서 `profiles`를 직접 서브쿼리하면 무한재귀가 나기 때문에 이 함수를 통해서만 관리자 여부를 확인
-- `lookup_guest_order(order_number, phone_last4)` — 비회원 주문 조회용 RPC (RLS 우회, 인증 불필요)
+- `lookup_guest_orders(name, pin)` — 비회원 주문 조회용 RPC (RLS 우회, 인증 불필요), 이름+확인번호 일치하는 주문 전부 반환
 - 시드 데이터는 고정 UUID(`00000000-...`) 사용, `ON CONFLICT DO NOTHING`이라 재실행해도 안전
 
 # 관리자 기능 계획
