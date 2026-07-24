@@ -61,10 +61,15 @@
 - 상품 상세페이지 대표 이미지 박스를 고정 높이(220px)에서 정사각형(`aspect-square`)으로 변경 — 세로/가로/정사각 사진 모두 자연스럽게 수용
 - 홈 히어로 배너: Pointer Events 기반으로 모바일 스와이프 + PC 드래그 지원. 드래그 이동량이 임계치를 넘으면 슬라이드 전환, 넘지 않으면 기존처럼 탭=상품 상세 이동. 자동 슬라이드 타이머는 마지막 슬라이드 변경(자동/수동 무관) 시점부터 다시 카운트되도록 해서 수동 조작 직후 바로 튕기듯 넘어가지 않고 자연스럽게 이어짐
 
+**하단 고정 버튼이 BottomNav에 가려지는 버그 수정** (`fix/sticky-cta-hidden-behind-bottomnav`)
+- 상품 상세페이지 "장바구니 담기", 장바구니 페이지 "주문하기" 버튼이 `sticky bottom-0`으로 `<main>` 안에 있었는데, 마찬가지로 `sticky bottom-0`인 하단 탭바(`BottomNav`)와 같은 화면 위치에서 겹쳐서 탭바에 가려지는 문제 발견 (페이지 내용이 길어서 스크롤이 필요한 경우에만 발생, 맨 아래까지 스크롤하면 일시적으로 보임)
+- 두 버튼 모두 `fixed` + 탭바 높이만큼 위로 띄우는 방식으로 변경해서 항상 탭바 위에 고정되도록 수정
+
 **인프라**
 - Supabase 스키마(`lib/supabase/schema.sql`) + seed 데이터(`lib/supabase/seed.sql`)
 - RLS 정책 — `is_admin()` SECURITY DEFINER 함수로 profiles 자기참조 무한재귀 버그 수정
-- GitHub 저장소 연결, Netlify 배포 설정 완료 (자동배포 대기 중)
+- GitHub 저장소 연결, Netlify 배포 설정 완료
+- **GitHub 저장소를 Public으로 전환** — Netlify 무료 플랜의 "private repo 1 contributor" 제한 때문에 배포가 막혀서 전환. 코드에 시크릿 없음(`.env`는 gitignore) 확인 후 진행
 
 # 진행 중인 기능
 
