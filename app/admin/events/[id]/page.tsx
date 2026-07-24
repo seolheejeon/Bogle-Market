@@ -4,6 +4,8 @@ import { use, useEffect, useState } from "react";
 import { getEvent, updateEvent, addProduct, updateProduct, deleteProduct } from "@/lib/data";
 import type { MarketEvent, Product } from "@/types";
 import { formatPrice } from "@/lib/format";
+import { ProductPhoto } from "@/components/ProductPhoto";
+import { PhotoUploader } from "@/components/admin/PhotoUploader";
 
 function toLocalInputValue(iso: string) {
   const d = new Date(iso);
@@ -92,11 +94,12 @@ function ProductRow({ product, onSaved }: { product: Product; onSaved: () => voi
   const [name, setName] = useState(product.name);
   const [price, setPrice] = useState(String(product.price));
   const [emoji, setEmoji] = useState(product.emoji);
+  const [photos, setPhotos] = useState<string[]>(product.photos ?? []);
   const [saving, setSaving] = useState(false);
 
   async function save() {
     setSaving(true);
-    await updateProduct(product.id, { name, price: Number(price) || 0, emoji });
+    await updateProduct(product.id, { name, price: Number(price) || 0, emoji, photos });
     setSaving(false);
     setEditing(false);
     onSaved();
@@ -110,7 +113,7 @@ function ProductRow({ product, onSaved }: { product: Product; onSaved: () => voi
   if (!editing) {
     return (
       <div className="flex items-center gap-3 rounded-lg border border-border p-2.5">
-        <span className="text-xl">{product.emoji}</span>
+        <ProductPhoto photo={product.photos?.[0] ?? product.emoji} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-xl" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold">{product.name}</p>
           <p className="text-[12px] text-text-muted">{formatPrice(product.price)}</p>
@@ -126,16 +129,19 @@ function ProductRow({ product, onSaved }: { product: Product; onSaved: () => voi
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-accent bg-accent-soft p-2.5">
-      <input className="w-14 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-center text-[13px]" value={emoji} onChange={(e) => setEmoji(e.target.value)} />
-      <input className="min-w-0 flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} />
-      <input className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" type="number" value={price} onChange={(e) => setPrice(e.target.value)} />
-      <button onClick={save} disabled={saving} className="rounded-[7px] bg-accent px-2.5 py-1.5 text-[12px] font-bold text-white">
-        저장
-      </button>
-      <button onClick={() => setEditing(false)} className="rounded-[7px] border border-border px-2.5 py-1.5 text-[12px]">
-        취소
-      </button>
+    <div className="flex flex-col gap-2.5 rounded-lg border border-accent bg-accent-soft p-2.5">
+      <PhotoUploader photos={photos} onChange={setPhotos} />
+      <div className="flex flex-wrap items-center gap-2">
+        <input className="w-14 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-center text-[13px]" value={emoji} onChange={(e) => setEmoji(e.target.value)} />
+        <input className="min-w-0 flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" value={name} onChange={(e) => setName(e.target.value)} />
+        <input className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" type="number" value={price} onChange={(e) => setPrice(e.target.value)} />
+        <button onClick={save} disabled={saving} className="rounded-[7px] bg-accent px-2.5 py-1.5 text-[12px] font-bold text-white">
+          저장
+        </button>
+        <button onClick={() => setEditing(false)} className="rounded-[7px] border border-border px-2.5 py-1.5 text-[12px]">
+          취소
+        </button>
+      </div>
     </div>
   );
 }
@@ -147,17 +153,19 @@ function AddProductForm({ eventId, onAdded }: { eventId: string; onAdded: () => 
   const [origin, setOrigin] = useState("");
   const [weight, setWeight] = useState("");
   const [storage, setStorage] = useState("");
+  const [photos, setPhotos] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
     if (!name.trim() || !price) return;
     setSubmitting(true);
-    await addProduct(eventId, { name: name.trim(), price: Number(price) || 0, emoji: emoji || "📦", origin, weight, storage });
+    await addProduct(eventId, { name: name.trim(), price: Number(price) || 0, emoji: emoji || "📦", photos, origin, weight, storage });
     setName("");
     setPrice("");
     setOrigin("");
     setWeight("");
     setStorage("");
+    setPhotos([]);
     setSubmitting(false);
     onAdded();
   }
@@ -165,7 +173,8 @@ function AddProductForm({ eventId, onAdded }: { eventId: string; onAdded: () => 
   return (
     <div className="rounded-xl border border-dashed border-border p-3.5">
       <p className="mb-2 text-[12.5px] font-bold text-text-muted">상품 추가</p>
-      <div className="flex flex-wrap gap-2">
+      <PhotoUploader photos={photos} onChange={setPhotos} />
+      <div className="mt-2 flex flex-wrap gap-2">
         <input className="w-14 rounded-[8px] border border-border bg-bg-card px-2 py-2 text-center text-[13px]" value={emoji} onChange={(e) => setEmoji(e.target.value)} placeholder="🥚" />
         <input className="min-w-[140px] flex-1 rounded-[8px] border border-border bg-bg-card px-2.5 py-2 text-[13px]" placeholder="상품명" value={name} onChange={(e) => setName(e.target.value)} />
         <input className="w-28 rounded-[8px] border border-border bg-bg-card px-2.5 py-2 text-[13px]" placeholder="가격" type="number" value={price} onChange={(e) => setPrice(e.target.value)} />

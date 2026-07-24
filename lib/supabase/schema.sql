@@ -42,6 +42,7 @@ create table if not exists products (
   price integer not null check (price >= 0),
   emoji text not null default '📦',
   image_url text,
+  photos jsonb not null default '[]'::jsonb,
   origin text,
   weight text,
   storage text,
@@ -167,6 +168,28 @@ as $$
   where order_number = p_order_number
     and right(coalesce(guest_phone, recipient_phone), 4) = p_phone_last4;
 $$;
+
+-- Storage: public bucket for product photos uploaded from the admin panel.
+insert into storage.buckets (id, name, public)
+values ('product-photos', 'product-photos', true)
+on conflict (id) do nothing;
+
+drop policy if exists "product photos are publicly readable" on storage.objects;
+create policy "product photos are publicly readable" on storage.objects for select
+  using (bucket_id = 'product-photos');
+
+drop policy if exists "admins upload product photos" on storage.objects;
+create policy "admins upload product photos" on storage.objects for insert
+  with check (bucket_id = 'product-photos' and is_admin());
+
+drop policy if exists "admins update product photos" on storage.objects;
+create policy "admins update product photos" on storage.objects for update
+  using (bucket_id = 'product-photos' and is_admin())
+  with check (bucket_id = 'product-photos' and is_admin());
+
+drop policy if exists "admins delete product photos" on storage.objects;
+create policy "admins delete product photos" on storage.objects for delete
+  using (bucket_id = 'product-photos' and is_admin());
 
 -- Create the first admin manually after signing up, e.g.:
 -- update profiles set is_admin = true where email = 'you@example.com';

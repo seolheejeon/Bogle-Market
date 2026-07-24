@@ -8,6 +8,7 @@ import { EVENT_TYPE_LABEL } from "@/types";
 import { formatCountdownShort, formatDeadlineShort, formatPrice } from "@/lib/format";
 import { Countdown } from "@/components/Countdown";
 import { ProductGridCard } from "@/components/ProductGridCard";
+import { ProductPhoto } from "@/components/ProductPhoto";
 
 function nearestOfType(events: MarketEvent[], type: EventType) {
   return events
@@ -91,7 +92,10 @@ export function HomeView() {
             )}
           </div>
           <div className="relative flex w-[45%] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/50">
-            <span className="text-[104px] leading-none drop-shadow-sm">{heroSlides[heroIndex].product.emoji}</span>
+            <ProductPhoto
+              photo={heroSlides[heroIndex].product.photos?.[0] ?? heroSlides[heroIndex].product.emoji}
+              className="flex h-full w-full items-center justify-center text-[104px] leading-none drop-shadow-sm"
+            />
           </div>
         </Link>
       )}
@@ -105,7 +109,10 @@ export function HomeView() {
                 <span className="rounded-md bg-[var(--badge-door-bg)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--badge-door-fg)]">
                   {EVENT_TYPE_LABEL[item.badgeType]}
                 </span>
-                <div className="mt-1.5 flex aspect-square items-center justify-center rounded-lg bg-accent-soft text-[38px] leading-none">{item.product.emoji}</div>
+                <ProductPhoto
+                  photo={item.product.photos?.[0] ?? item.product.emoji}
+                  className="mt-1.5 flex aspect-square items-center justify-center rounded-lg bg-accent-soft text-[38px] leading-none"
+                />
                 <p className="mt-1.5 mb-0.5 truncate text-[11.5px] font-semibold">{item.product.name}</p>
                 <p className="text-[10.5px] text-text-muted">{formatDeadlineShort(item.deadlineAt)}</p>
                 <p className="mt-0.5 text-[11px] font-semibold text-text-muted">

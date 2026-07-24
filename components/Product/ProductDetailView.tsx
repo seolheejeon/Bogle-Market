@@ -8,6 +8,7 @@ import { formatPrice } from "@/lib/format";
 import { useCart } from "@/lib/cart-context";
 import { ProductDetailContent } from "@/components/Product/ProductDetailContent";
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
+import { ProductPhoto } from "@/components/ProductPhoto";
 
 export function ProductDetailView({ productId }: { productId: string }) {
   const router = useRouter();
@@ -35,7 +36,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
       </div>
       <div className="p-4">
         <div className="relative flex h-[220px] w-full items-center justify-center rounded-2xl bg-accent-soft text-[76px]">
-          {photos[photoIndex]}
+          <ProductPhoto photo={photos[photoIndex]} className="flex h-full w-full items-center justify-center rounded-[inherit] text-[76px]" />
           {photos.length > 1 && (
             <span className="absolute right-2.5 bottom-2 rounded-full bg-black/50 px-2 py-0.5 text-[11px] font-semibold text-white">
               {photoIndex + 1}/{photos.length}
