@@ -6,7 +6,7 @@
 // including the admin panel, is testable before a real backend exists.
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { loadEvents, saveEvents, loadOrders, saveOrders, loadNotifications, loadAccounts, genId } from "@/lib/local-store";
+import { loadEvents, saveEvents, loadOrders, saveOrders, loadNotifications, saveNotifications, loadAccounts, genId } from "@/lib/local-store";
 import type { Address, MarketEvent, NotificationItem, Order, OrderItem, OrderStatus, PaymentMethod, Product, Profile } from "@/types";
 
 function orderNumber(): string {
@@ -152,10 +152,55 @@ export async function deleteProduct(productId: string): Promise<void> {
 }
 
 // ---------- Notifications ----------
+// profileId null (viewer not logged in) only ever returns broadcasts;
+// logged-in viewers get broadcasts plus whatever's personally addressed to them.
 
-export async function listNotifications(): Promise<NotificationItem[]> {
-  if (isSupabaseConfigured) return []; // notifications aren't modeled in Supabase yet
-  return loadNotifications();
+export async function listNotifications(profileId: string | null): Promise<NotificationItem[]> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    let query = supabase.from("notifications").select("*").order("created_at", { ascending: false });
+    query = profileId ? query.or(`profile_id.is.null,profile_id.eq.${profileId}`) : query.is("profile_id", null);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map(mapSupabaseNotification);
+  }
+  return loadNotifications().filter((n) => !n.profileId || n.profileId === profileId);
+}
+
+export interface NewNotificationInput {
+  title: string;
+  message: string;
+  icon: string;
+  linkType: NotificationItem["linkType"];
+  linkId?: string;
+  profileId: string | null;
+}
+
+export async function createNotification(input: NewNotificationInput): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("notifications").insert({
+      profile_id: input.profileId,
+      icon: input.icon,
+      title: input.title,
+      message: input.message,
+      link_type: input.linkType,
+      link_id: input.linkId ?? null,
+    });
+    if (error) throw error;
+    return;
+  }
+  const notification: NotificationItem = {
+    id: genId("notif"),
+    icon: input.icon,
+    title: input.title,
+    message: input.message,
+    linkType: input.linkType,
+    linkId: input.linkId,
+    profileId: input.profileId,
+    createdAt: new Date().toISOString(),
+  };
+  saveNotifications([notification, ...loadNotifications()]);
 }
 
 // ---------- Orders ----------
@@ -367,6 +412,19 @@ export async function updateAddress(addressId: string, profileId: string, patch:
 }
 
 // ---------- Supabase row mappers ----------
+
+function mapSupabaseNotification(row: Record<string, any>): NotificationItem {
+  return {
+    id: row.id,
+    icon: row.icon,
+    title: row.title,
+    message: row.message,
+    linkType: row.link_type,
+    linkId: row.link_id ?? undefined,
+    profileId: row.profile_id,
+    createdAt: row.created_at,
+  };
+}
 
 function mapSupabaseAddress(row: Record<string, any>): Address {
   return {

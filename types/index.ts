@@ -97,12 +97,29 @@ export interface Order {
   createdAt: string; // ISO
 }
 
+// PRODUCT/EVENT/ORDER carry linkId to the matching detail page; NONE is a
+// plain announcement with nothing to navigate to.
+export type NotificationLinkType = "PRODUCT" | "EVENT" | "ORDER" | "NONE";
+
 export interface NotificationItem {
   id: string;
   icon: string;
+  title: string;
   message: string;
+  linkType: NotificationLinkType;
+  linkId?: string;
+  // null = broadcast to everyone (admin announcements); set = only that
+  // member sees it (e.g. their own order shipped).
+  profileId: string | null;
   createdAt: string; // ISO
 }
+
+export const NOTIFICATION_LINK_LABEL: Record<NotificationLinkType, string> = {
+  PRODUCT: "상품",
+  EVENT: "이벤트",
+  ORDER: "주문",
+  NONE: "없음",
+};
 
 export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   bank_transfer: "무통장 입금",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listAllOrders, updateOrderStatus } from "@/lib/data";
+import { listAllOrders, updateOrderStatus, createNotification } from "@/lib/data";
 import type { Order, OrderStatus } from "@/types";
 import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
@@ -27,6 +27,17 @@ export default function AdminOrdersPage() {
     const next = NEXT_STATUS[order.status];
     if (!next) return;
     await updateOrderStatus(order.id, next);
+    // Guest orders have no profile to notify — only members get these.
+    if (order.profileId && (next === "ship" || next === "done")) {
+      await createNotification({
+        title: next === "ship" ? "배송이 시작됐어요" : "배송이 완료됐어요",
+        message: `주문번호 ${order.orderNumber} ${next === "ship" ? "배송이 시작됐어요." : "배송이 완료됐어요. 확인해보세요!"}`,
+        icon: "🚚",
+        linkType: "ORDER",
+        linkId: order.id,
+        profileId: order.profileId,
+      });
+    }
     refresh();
   }
   async function cancel(order: Order) {
