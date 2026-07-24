@@ -45,14 +45,26 @@ export interface Address {
   profileId: string | null;
   name: string;
   phone: string;
-  address: string;
+  apartment: string;
+  dong: string;
+  ho: string;
+  entranceMethod?: string;
+  memo?: string;
   isDefault: boolean;
+}
+
+// 아파트명/동/호수 + 선택 항목을 사람이 읽는 한 줄로 합친다 (주문 스냅샷, 관리자 화면 등에 사용).
+export function formatAddress(a: Pick<Address, "apartment" | "dong" | "ho" | "entranceMethod" | "memo">): string {
+  const parts = [`${a.apartment} ${a.dong}동 ${a.ho}호`];
+  if (a.entranceMethod) parts.push(`출입방법: ${a.entranceMethod}`);
+  if (a.memo) parts.push(`배송메모: ${a.memo}`);
+  return parts.join(" · ");
 }
 
 export interface Profile {
   id: string;
-  email: string;
-  name: string;
+  username: string;
+  nickname: string;
   phone: string;
   isAdmin: boolean;
 }

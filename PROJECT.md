@@ -28,14 +28,15 @@
 - 홈: 히어로 배너(상품 사진 원본 비율 그대로 `object-contain` 표시, 자동 슬라이드 + 모바일 스와이프/PC 드래그 전환, 수동 조작 후 자동 슬라이드 자연스럽게 재개), 마감 임박 상품, 인기상품 그리드
 - 카테고리: 상단 배송방식 탭(문고리배송/사다드림/택배) + 하위 날짜 chips(가로 스크롤) → 선택한 이벤트 상품만 표시
 - 상품 상세: 사진 캐러셀(정사각형 박스 + `object-contain`으로 원본 비율 그대로, 잘림 없음), 원산지/중량/보관법/조리법 표, 설명, **상세설명(긴 스크롤형 이미지+텍스트, 관리자가 작성 가능)**, 수량 선택 + 장바구니 담기
-- 장바구니, 체크아웃(무통장입금/카드/카카오페이/인천이음카드 선택), 비회원 체크아웃(주문 조회용 확인번호 4자리 직접 설정)
+- 장바구니, 체크아웃(무통장입금/카드/카카오페이/인천이음카드 선택), 비회원 체크아웃(주문 조회용 확인번호 4자리 직접 설정). 회원은 기본 배송지가 자동으로 채워지고, 주문 시 배송지를 바꾸면 "이번 주문만" 또는 "기본 배송지로 저장" 중 선택 가능
 - 내 주문: 회원은 목록+상세, 비회원은 **이름 + 확인번호 4자리**로 조회 (같은 이름+번호로 낸 주문 전부를 목록으로 보여줌)
-- 마이페이지: 이메일/비밀번호 로그인·회원가입, 로그아웃
+- 마이페이지: **아이디/비밀번호**로 로그인·회원가입 (이메일은 사용자에게 노출 안 됨), 로그아웃, 정보 수정(비밀번호/오픈채팅 닉네임/휴대폰번호), **기본 배송지 수정**(아파트명/동/호수/공동현관 출입방법/배송메모)
 - 알림 목록 (정적)
 
 **관리자 화면 (`/admin`)**
 - 이벤트 등록/수정/삭제, 상품 등록/수정/삭제
 - 주문 목록: 입금확인(무통장입금·이음카드 수동 확인), 배송상태 변경(입금완료→배송중→배송완료), 주문 취소
+- **고객 관리 (`/admin/customers`)**: 회원별 아이디/오픈채팅 닉네임/휴대폰번호/기본 배송지/주문 건수·최근 주문일 조회
 - 대시보드: 진행 중 이벤트 수, 입금확인 대기 건수, 오늘 매출
 
 **상품 사진 업로드** (`feature/product-photo-upload`)
@@ -71,6 +72,19 @@
 - 상품 상세페이지 "장바구니 담기", 장바구니 페이지 "주문하기" 버튼이 `sticky bottom-0`으로 `<main>` 안에 있었는데, 마찬가지로 `sticky bottom-0`인 하단 탭바(`BottomNav`)와 같은 화면 위치에서 겹쳐서 탭바에 가려지는 문제 발견 (페이지 내용이 길어서 스크롤이 필요한 경우에만 발생, 맨 아래까지 스크롤하면 일시적으로 보임)
 - 두 버튼 모두 `fixed` + 탭바 높이만큼 위로 띄우는 방식으로 변경해서 항상 탭바 위에 고정되도록 수정
 
+**회원가입/로그인을 아이디 기반으로 전면 개편** (`feature/username-auth-structured-address`)
+- 오픈채팅으로 유입되는 아파트 공동구매 특성상 이메일 가입은 안 맞아서, **아이디+비밀번호** 방식으로 전환. 이메일은 사용자에게 전혀 안 보이고, Supabase Auth 내부적으로만 `아이디@bogle.internal` 형태로 합성해서 사용 (`lib/auth-context.tsx`)
+- 회원가입 시 이름 대신 **오픈채팅 닉네임**을 받음 — 오픈채팅방 고객과 실제 주문자를 매칭하기 위함
+- **휴대폰번호는 계정당 1개**로 유일해야 함 (중복가입 방지 + 고객식별 + 배송연락 용도)
+- 회원가입 화면에서 아이디 **중복확인** 버튼, 제출 시 휴대폰번호 중복 여부도 확인 — `is_username_taken()` / `is_phone_taken()` SECURITY DEFINER 함수로 RLS를 우회해 "존재 여부"만 안전하게 확인 (`is_admin()`과 같은 패턴)
+- **배송지를 구조화된 필드**(아파트명/동/호수/공동현관 출입방법(선택)/배송메모(선택))로 받음 — 기존의 자유 텍스트 주소 한 줄 대신. 회원가입 시 입력한 배송지가 그대로 기본 배송지로 저장됨
+- 체크아웃 화면에서 기본 배송지가 자동으로 채워지고, 배송지를 수정하면 **"이번 주문만"** 또는 **"기본 배송지로 저장"** 중 선택 가능 (`lib/data.ts`의 `updateAddress`)
+- 마이페이지 수정 가능 항목: 비밀번호, 오픈채팅 닉네임, 휴대폰번호, 기본 배송지. 아이디는 변경 불가
+- 관리자용 **고객 관리(`/admin/customers`)** 페이지 추가 — 아이디/닉네임/휴대폰/기본배송지/주문건수를 한눈에 조회
+- 현재는 회원당 배송지 1개만 구현하지만, `addresses` 테이블 자체는 `profile_id` + `is_default`로 이미 여러 개를 저장할 수 있는 구조라 나중에 다중 배송지 UI만 추가하면 됨
+- 카카오 로그인 등 향후 OAuth 확장을 고려해 Supabase Auth를 그대로 유지 (이메일 인증/이메일 비밀번호 찾기는 구현 안 함)
+- ⚠️ 이 브랜치가 병합되면 이전에 만들었던 `feature/mypage-profile-address` PR(다중 배송지 추가/삭제 UI)은 데이터 모델이 완전히 달라져서 그대로 머지하면 안 됨 — 폐기 필요
+
 **인프라**
 - Supabase 스키마(`lib/supabase/schema.sql`) + seed 데이터(`lib/supabase/seed.sql`)
 - RLS 정책 — `is_admin()` SECURITY DEFINER 함수로 profiles 자기참조 무한재귀 버그 수정
@@ -105,14 +119,15 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 
 | 테이블 | 주요 컬럼 | 설명 |
 | --- | --- | --- |
-| `profiles` | id(=auth.users.id), email, name, phone, is_admin | 1:1 auth 연동. `is_admin=true`가 관리자 |
-| `addresses` | id, profile_id, name, phone, address, is_default | 회원 배송지. `profile_id`가 null이면 게스트(직접 입력) |
+| `profiles` | id(=auth.users.id), username(unique), nickname, phone(unique), is_admin | 1:1 auth 연동. 이메일은 auth.users에만 있고 이 테이블엔 없음(사용자에게 절대 노출 안 함). `is_admin=true`가 관리자 |
+| `addresses` | id, profile_id, name, phone, apartment, dong, ho, entrance_method, memo, is_default | 회원 배송지. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, is_flash, deadline_at, delivery_at, notice | 공동구매 회차 |
 | `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, description | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `detail_blocks`는 관리자가 작성한 상세설명(제목/본문/사진 블록). `image_url`은 미사용 |
 | `orders` | id, order_number, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, payment_method, status, total | 주문. 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리 |
 | `order_items` | id, order_id, product_id, product_name, price_snapshot, quantity | 주문 상품 스냅샷 |
 
 - `is_admin()` — SECURITY DEFINER 함수. RLS 정책에서 `profiles`를 직접 서브쿼리하면 무한재귀가 나기 때문에 이 함수를 통해서만 관리자 여부를 확인
+- `is_username_taken(username)` / `is_phone_taken(phone)` — 회원가입 중복확인용 SECURITY DEFINER 함수. RLS상 남의 프로필은 못 보지만, "존재 여부"만 boolean으로 반환
 - `lookup_guest_orders(name, pin)` — 비회원 주문 조회용 RPC (RLS 우회, 인증 불필요), 이름+확인번호 일치하는 주문 전부 반환
 - 시드 데이터는 고정 UUID(`00000000-...`) 사용, `ON CONFLICT DO NOTHING`이라 재실행해도 안전
 

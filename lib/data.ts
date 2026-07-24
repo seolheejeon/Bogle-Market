@@ -6,8 +6,8 @@
 // including the admin panel, is testable before a real backend exists.
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { loadEvents, saveEvents, loadOrders, saveOrders, loadNotifications, genId } from "@/lib/local-store";
-import type { Address, MarketEvent, NotificationItem, Order, OrderItem, OrderStatus, PaymentMethod, Product } from "@/types";
+import { loadEvents, saveEvents, loadOrders, saveOrders, loadNotifications, loadAccounts, genId } from "@/lib/local-store";
+import type { Address, MarketEvent, NotificationItem, Order, OrderItem, OrderStatus, PaymentMethod, Product, Profile } from "@/types";
 
 function orderNumber(): string {
   const now = new Date();
@@ -278,17 +278,37 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, status } : o)));
 }
 
-// ---------- Addresses (mock mode keeps it simple: last-used address per profile) ----------
+// ---------- Profiles (admin customer lookup) ----------
+
+export async function listAllProfiles(): Promise<Profile[]> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map((row) => ({ id: row.id, username: row.username, nickname: row.nickname, phone: row.phone, isAdmin: row.is_admin }));
+  }
+  return Object.values(loadAccounts()).map((a) => a.profile);
+}
+
+// ---------- Addresses ----------
+// Only ever one address per member for now (their 기본 배송지) — modeled as
+// its own table with is_default from the start so adding multiple saved
+// addresses later is a UI change, not a schema change.
 
 export async function listAddresses(profileId: string): Promise<Address[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase.from("addresses").select("*").eq("profile_id", profileId).order("is_default", { ascending: false });
     if (error) throw error;
-    return (data ?? []).map((row) => ({ id: row.id, profileId: row.profile_id, name: row.name, phone: row.phone, address: row.address, isDefault: row.is_default }));
+    return (data ?? []).map(mapSupabaseAddress);
   }
   const raw = typeof window !== "undefined" ? window.localStorage.getItem(`bogle_addresses_${profileId}`) : null;
   return raw ? (JSON.parse(raw) as Address[]) : [];
+}
+
+export async function getDefaultAddress(profileId: string): Promise<Address | null> {
+  const addresses = await listAddresses(profileId);
+  return addresses.find((a) => a.isDefault) ?? addresses[0] ?? null;
 }
 
 export async function saveAddress(input: Omit<Address, "id">): Promise<Address> {
@@ -296,11 +316,21 @@ export async function saveAddress(input: Omit<Address, "id">): Promise<Address> 
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase
       .from("addresses")
-      .insert({ profile_id: input.profileId, name: input.name, phone: input.phone, address: input.address, is_default: input.isDefault })
+      .insert({
+        profile_id: input.profileId,
+        name: input.name,
+        phone: input.phone,
+        apartment: input.apartment,
+        dong: input.dong,
+        ho: input.ho,
+        entrance_method: input.entranceMethod || null,
+        memo: input.memo || null,
+        is_default: input.isDefault,
+      })
       .select()
       .single();
     if (error) throw error;
-    return { id: data.id, profileId: data.profile_id, name: data.name, phone: data.phone, address: data.address, isDefault: data.is_default };
+    return mapSupabaseAddress(data);
   }
   const address: Address = { ...input, id: genId("addr") };
   if (typeof window !== "undefined" && input.profileId) {
@@ -310,7 +340,46 @@ export async function saveAddress(input: Omit<Address, "id">): Promise<Address> 
   return address;
 }
 
+// Updates the member's saved default address in place (used when checkout's
+// "기본 배송지로 저장" option is chosen instead of creating another row —
+// there's only ever the one address per member right now).
+export async function updateAddress(addressId: string, profileId: string, patch: Partial<Omit<Address, "id" | "profileId">>): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const row: Record<string, unknown> = {};
+    if (patch.name !== undefined) row.name = patch.name;
+    if (patch.phone !== undefined) row.phone = patch.phone;
+    if (patch.apartment !== undefined) row.apartment = patch.apartment;
+    if (patch.dong !== undefined) row.dong = patch.dong;
+    if (patch.ho !== undefined) row.ho = patch.ho;
+    if (patch.entranceMethod !== undefined) row.entrance_method = patch.entranceMethod || null;
+    if (patch.memo !== undefined) row.memo = patch.memo || null;
+    const { error } = await supabase.from("addresses").update(row).eq("id", addressId);
+    if (error) throw error;
+    return;
+  }
+  if (typeof window === "undefined") return;
+  const existing = await listAddresses(profileId);
+  const next = existing.map((a) => (a.id === addressId ? { ...a, ...patch } : a));
+  window.localStorage.setItem(`bogle_addresses_${profileId}`, JSON.stringify(next));
+}
+
 // ---------- Supabase row mappers ----------
+
+function mapSupabaseAddress(row: Record<string, any>): Address {
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    name: row.name,
+    phone: row.phone,
+    apartment: row.apartment,
+    dong: row.dong,
+    ho: row.ho,
+    entranceMethod: row.entrance_method ?? undefined,
+    memo: row.memo ?? undefined,
+    isDefault: row.is_default,
+  };
+}
 
 function mapSupabaseProduct(row: Record<string, any>): Product {
   return {
