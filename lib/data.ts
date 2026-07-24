@@ -94,7 +94,18 @@ export async function addProduct(eventId: string, input: Omit<Product, "id" | "e
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase
       .from("products")
-      .insert({ event_id: eventId, name: input.name, price: input.price, emoji: input.emoji, photos: input.photos ?? [], origin: input.origin, weight: input.weight, storage: input.storage, description: input.description })
+      .insert({
+        event_id: eventId,
+        name: input.name,
+        price: input.price,
+        emoji: input.emoji,
+        photos: input.photos ?? [],
+        detail_blocks: input.detailBlocks ?? [],
+        origin: input.origin,
+        weight: input.weight,
+        storage: input.storage,
+        description: input.description,
+      })
       .select()
       .single();
     if (error) throw error;
@@ -114,6 +125,7 @@ export async function updateProduct(productId: string, patch: Partial<Product>):
     if (patch.price !== undefined) row.price = patch.price;
     if (patch.emoji !== undefined) row.emoji = patch.emoji;
     if (patch.photos !== undefined) row.photos = patch.photos;
+    if (patch.detailBlocks !== undefined) row.detail_blocks = patch.detailBlocks;
     if (patch.origin !== undefined) row.origin = patch.origin;
     if (patch.weight !== undefined) row.weight = patch.weight;
     if (patch.storage !== undefined) row.storage = patch.storage;
@@ -301,8 +313,7 @@ function mapSupabaseProduct(row: Record<string, any>): Product {
     weight: row.weight ?? undefined,
     storage: row.storage ?? undefined,
     description: row.description ?? undefined,
-    // Not a column yet — read through once products.detail_blocks (jsonb) exists.
-    detailBlocks: row.detail_blocks ?? undefined,
+    detailBlocks: row.detail_blocks && row.detail_blocks.length > 0 ? row.detail_blocks : undefined,
   };
 }
 

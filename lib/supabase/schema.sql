@@ -43,6 +43,7 @@ create table if not exists products (
   emoji text not null default '📦',
   image_url text,
   photos jsonb not null default '[]'::jsonb,
+  detail_blocks jsonb not null default '[]'::jsonb,
   origin text,
   weight text,
   storage text,
