@@ -283,6 +283,9 @@ export async function listAddresses(profileId: string): Promise<Address[]> {
 export async function saveAddress(input: Omit<Address, "id">): Promise<Address> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
+    if (input.isDefault && input.profileId) {
+      await supabase.from("addresses").update({ is_default: false }).eq("profile_id", input.profileId);
+    }
     const { data, error } = await supabase
       .from("addresses")
       .insert({ profile_id: input.profileId, name: input.name, phone: input.phone, address: input.address, is_default: input.isDefault })
@@ -294,9 +297,36 @@ export async function saveAddress(input: Omit<Address, "id">): Promise<Address> 
   const address: Address = { ...input, id: genId("addr") };
   if (typeof window !== "undefined" && input.profileId) {
     const existing = await listAddresses(input.profileId);
-    window.localStorage.setItem(`bogle_addresses_${input.profileId}`, JSON.stringify([address, ...existing]));
+    const next = input.isDefault ? existing.map((a) => ({ ...a, isDefault: false })) : existing;
+    window.localStorage.setItem(`bogle_addresses_${input.profileId}`, JSON.stringify([address, ...next]));
   }
   return address;
+}
+
+export async function deleteAddress(profileId: string, addressId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("addresses").delete().eq("id", addressId);
+    if (error) throw error;
+    return;
+  }
+  if (typeof window === "undefined") return;
+  const existing = await listAddresses(profileId);
+  window.localStorage.setItem(`bogle_addresses_${profileId}`, JSON.stringify(existing.filter((a) => a.id !== addressId)));
+}
+
+export async function setDefaultAddress(profileId: string, addressId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    await supabase.from("addresses").update({ is_default: false }).eq("profile_id", profileId);
+    const { error } = await supabase.from("addresses").update({ is_default: true }).eq("id", addressId);
+    if (error) throw error;
+    return;
+  }
+  if (typeof window === "undefined") return;
+  const existing = await listAddresses(profileId);
+  const next = existing.map((a) => ({ ...a, isDefault: a.id === addressId }));
+  window.localStorage.setItem(`bogle_addresses_${profileId}`, JSON.stringify(next));
 }
 
 // ---------- Supabase row mappers ----------

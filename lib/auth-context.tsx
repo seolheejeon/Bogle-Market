@@ -16,6 +16,7 @@ interface AuthContextValue {
   signUp: (input: { email: string; password: string; name: string; phone: string; asAdmin?: boolean }) => Promise<AuthResult>;
   signIn: (email: string, password: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
+  updateProfile: (patch: Partial<Pick<Profile, "name" | "phone">>) => Promise<AuthResult>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -93,6 +94,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return {};
   }, []);
 
+  const updateProfile = useCallback<AuthContextValue["updateProfile"]>(
+    async (patch) => {
+      if (!profile) return { error: "로그인이 필요해요." };
+      if (isSupabaseConfigured) {
+        const supabase = getSupabaseBrowserClient()!;
+        const row: Record<string, unknown> = {};
+        if (patch.name !== undefined) row.name = patch.name;
+        if (patch.phone !== undefined) row.phone = patch.phone;
+        const { error } = await supabase.from("profiles").update(row).eq("id", profile.id);
+        if (error) return { error: error.message };
+        setProfile({ ...profile, ...patch });
+        return {};
+      }
+      const updated: Profile = { ...profile, ...patch };
+      const accounts = loadAccounts();
+      const account = accounts[profile.email];
+      if (account) {
+        account.profile = updated;
+        saveAccounts(accounts);
+      }
+      saveAuthProfile(updated);
+      setProfile(updated);
+      return {};
+    },
+    [profile],
+  );
+
   const signOut = useCallback(async () => {
     if (isSupabaseConfigured) {
       const supabase = getSupabaseBrowserClient()!;
@@ -104,7 +132,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ profile, loading, isMockMode: !isSupabaseConfigured, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={{ profile, loading, isMockMode: !isSupabaseConfigured, signUp, signIn, signOut, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );
