@@ -57,6 +57,7 @@ create table if not exists orders (
   profile_id uuid references profiles(id) on delete set null,
   guest_name text,
   guest_phone text,
+  guest_pin text,
   recipient_name text not null,
   recipient_phone text not null,
   address_snapshot text not null,
@@ -136,7 +137,7 @@ create policy "user manages own addresses" on addresses for all
   with check (profile_id = auth.uid());
 
 -- Orders: signed-in users see their own orders; admins see everything.
--- Guest orders (profile_id is null) are looked up via order number + phone through
+-- Guest orders (profile_id is null) are looked up via name + PIN through
 -- a dedicated RPC (see below) rather than direct table access.
 drop policy if exists "user reads own orders" on orders;
 create policy "user reads own orders" on orders for select using (profile_id = auth.uid());
@@ -158,16 +159,20 @@ create policy "admins manage order items" on order_items for all
   using (is_admin())
   with check (is_admin());
 
--- Guest order lookup: order number + last 4 digits of phone, no auth required.
-create or replace function lookup_guest_order(p_order_number text, p_phone_last4 text)
+-- Guest order lookup: name + a 4-digit PIN the guest chose at checkout, no
+-- auth required. Returns every order under that name+PIN (a guest may have
+-- placed more than one), unlike the old order-number lookup which only ever
+-- matched a single order.
+create or replace function lookup_guest_orders(p_name text, p_pin text)
 returns setof orders
 language sql
 security definer
 set search_path = public
 as $$
   select * from orders
-  where order_number = p_order_number
-    and right(coalesce(guest_phone, recipient_phone), 4) = p_phone_last4;
+  where guest_pin = p_pin
+    and lower(coalesce(guest_name, recipient_name)) = lower(p_name)
+  order by created_at desc;
 $$;
 
 -- Storage: public bucket for product photos uploaded from the admin panel.
