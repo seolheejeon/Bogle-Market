@@ -94,7 +94,7 @@ export async function addProduct(eventId: string, input: Omit<Product, "id" | "e
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase
       .from("products")
-      .insert({ event_id: eventId, name: input.name, price: input.price, emoji: input.emoji, origin: input.origin, weight: input.weight, storage: input.storage, description: input.description })
+      .insert({ event_id: eventId, name: input.name, price: input.price, emoji: input.emoji, photos: input.photos ?? [], origin: input.origin, weight: input.weight, storage: input.storage, description: input.description })
       .select()
       .single();
     if (error) throw error;
@@ -113,6 +113,7 @@ export async function updateProduct(productId: string, patch: Partial<Product>):
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.price !== undefined) row.price = patch.price;
     if (patch.emoji !== undefined) row.emoji = patch.emoji;
+    if (patch.photos !== undefined) row.photos = patch.photos;
     if (patch.origin !== undefined) row.origin = patch.origin;
     if (patch.weight !== undefined) row.weight = patch.weight;
     if (patch.storage !== undefined) row.storage = patch.storage;
@@ -295,6 +296,7 @@ function mapSupabaseProduct(row: Record<string, any>): Product {
     name: row.name,
     price: row.price,
     emoji: row.emoji ?? "📦",
+    photos: row.photos && row.photos.length > 0 ? row.photos : undefined,
     origin: row.origin ?? undefined,
     weight: row.weight ?? undefined,
     storage: row.storage ?? undefined,

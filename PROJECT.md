@@ -38,6 +38,12 @@
 - 주문 목록: 입금확인(무통장입금·이음카드 수동 확인), 배송상태 변경(입금완료→배송중→배송완료), 주문 취소
 - 대시보드: 진행 중 이벤트 수, 입금확인 대기 건수, 오늘 매출
 
+**상품 사진 업로드** (`feature/product-photo-upload`)
+- 관리자 상품 등록/수정 폼에 다중 사진 업로드 위젯 추가 (`components/admin/PhotoUploader.tsx`) — 미리보기 썸네일 + 개별 삭제
+- `lib/supabase/storage.ts`: Supabase Storage(`product-photos` 버킷, 공개 읽기/관리자만 쓰기)에 실제 업로드, mock 모드에서는 data URL로 대체
+- `products.photos` (jsonb 배열) 컬럼 추가, 사진이 있으면 사진을, 없으면 기존 emoji를 대표 이미지로 표시 (`components/ProductPhoto.tsx`의 `isPhotoUrl` 판별)
+- 그리드 카드/상품상세 캐러셀/장바구니/이벤트 상세/홈(히어로·마감임박) 등 대표 이미지가 노출되는 모든 화면에 반영
+
 **인프라**
 - Supabase 스키마(`lib/supabase/schema.sql`) + seed 데이터(`lib/supabase/seed.sql`)
 - RLS 정책 — `is_admin()` SECURITY DEFINER 함수로 profiles 자기참조 무한재귀 버그 수정
@@ -54,7 +60,6 @@
 - [ ] Toss Payments 실제 가맹점 키 연동 (카드/카카오페이 자동결제)
 - [ ] 인천 이음카드 온라인 결제 연동 방법 조사
 - [ ] 관리자용 상세설명 편집기 + `products.detail_blocks` (jsonb) 컬럼 추가
-- [ ] 실제 상품 사진 업로드 (현재는 이모지로 대표 이미지 대체 중, Supabase Storage 연동 필요)
 - [ ] 배송지 다중 저장/선택 UI (현재는 최근 1건만 자동 채움)
 - [ ] 알림을 실시간/DB 기반으로 전환 (현재는 정적 데이터)
 - [ ] 최초 관리자 계정 지정 방법 문서화 (현재는 SQL로 수동 `is_admin = true`)
@@ -77,7 +82,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `profiles` | id(=auth.users.id), email, name, phone, is_admin | 1:1 auth 연동. `is_admin=true`가 관리자 |
 | `addresses` | id, profile_id, name, phone, address, is_default | 회원 배송지. `profile_id`가 null이면 게스트(직접 입력) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, is_flash, deadline_at, delivery_at, notice | 공동구매 회차 |
-| `products` | id, event_id, name, price, emoji, image_url, origin, weight, storage, description | 이벤트별 상품. `image_url`은 아직 미사용(이모지로 대체 중) |
+| `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), origin, weight, storage, description | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `image_url`은 미사용 |
 | `orders` | id, order_number, profile_id, guest_name/phone, recipient_name/phone, address_snapshot, payment_method, status, total | 주문. 게스트는 `profile_id=null` |
 | `order_items` | id, order_id, product_id, product_name, price_snapshot, quantity | 주문 상품 스냅샷 |
 
@@ -95,7 +100,6 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 
 **계획**
 - 상세설명(상품 상세페이지 하단) 작성/편집 에디터 — 이미지 업로드 + 텍스트 블록을 순서대로 구성
-- 상품 이미지 업로드 (Supabase Storage), 현재 emoji 필드를 대체하거나 보완
 - 알림 발송 관리 (이벤트 오픈/마감임박/배송완료 등을 관리자가 직접 트리거)
 - 매출/정산 리포트 (현재 대시보드는 오늘 매출만 단순 합산)
 - 관리자 계정 초대/권한 관리 UI (현재는 SQL로 수동 처리)

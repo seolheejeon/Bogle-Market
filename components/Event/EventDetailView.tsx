@@ -8,6 +8,7 @@ import type { MarketEvent } from "@/types";
 import { formatDeadlineLabel, formatPrice } from "@/lib/format";
 import { EventTypeBadge } from "@/components/Badge";
 import { QtyControl } from "@/components/QtyControl";
+import { ProductPhoto } from "@/components/ProductPhoto";
 
 export function EventDetailView({ eventId }: { eventId: string }) {
   const router = useRouter();
@@ -40,8 +41,11 @@ export function EventDetailView({ eventId }: { eventId: string }) {
         <div className="mt-4">
           {event.products.map((product) => (
             <div key={product.id} className="flex items-center gap-3 border-b border-border py-3 last:border-none">
-              <Link href={`/product/${product.id}`} className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[10px] bg-accent-soft text-2xl">
-                {product.emoji}
+              <Link href={`/product/${product.id}`} className="block h-[52px] w-[52px] shrink-0">
+                <ProductPhoto
+                  photo={product.photos?.[0] ?? product.emoji}
+                  className="flex h-full w-full items-center justify-center rounded-[10px] bg-accent-soft text-2xl"
+                />
               </Link>
               <div className="min-w-0 flex-1">
                 <Link href={`/product/${product.id}`} className="mb-0.5 block truncate text-[13.5px] font-semibold">

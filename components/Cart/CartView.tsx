@@ -7,6 +7,7 @@ import type { MarketEvent } from "@/types";
 import { formatPrice } from "@/lib/format";
 import { useCart } from "@/lib/cart-context";
 import { QtyControl } from "@/components/QtyControl";
+import { ProductPhoto } from "@/components/ProductPhoto";
 
 export function CartView() {
   const { cart } = useCart();
@@ -58,7 +59,10 @@ export function CartView() {
             <p className="mb-2 text-xs font-bold text-accent-dark">{event.title}</p>
             {items.map(({ product, qty }) => (
               <div key={product.id} className="flex items-center gap-3 py-2">
-                <div className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[10px] bg-accent-soft text-2xl">{product.emoji}</div>
+                <ProductPhoto
+                  photo={product.photos?.[0] ?? product.emoji}
+                  className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[10px] bg-accent-soft text-2xl"
+                />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13.5px] font-semibold">{product.name}</p>
                   <p className="text-[13.5px] font-bold">{formatPrice(product.price)}</p>
