@@ -4,12 +4,15 @@ export function isPhotoUrl(value: string): boolean {
   return value.startsWith("http://") || value.startsWith("https://") || value.startsWith("data:");
 }
 
-export function ProductPhoto({ photo, className }: { photo: string; className?: string }) {
+// "cover" crops to fill (fine for small square thumbnails); "contain" shows
+// the full photo uncropped, letterboxed against the wrapper's own background
+// — used wherever the photo itself is the point (product detail, hero banner).
+export function ProductPhoto({ photo, className, fit = "cover" }: { photo: string; className?: string; fit?: "cover" | "contain" }) {
   if (isPhotoUrl(photo)) {
     return (
       <div className={`overflow-hidden ${className ?? ""}`}>
         {/* eslint-disable-next-line @next/next/no-img-element -- source is Supabase Storage or a mock-mode data URI, not a known static domain */}
-        <img src={photo} alt="" className="h-full w-full object-cover" />
+        <img src={photo} alt="" className={`h-full w-full ${fit === "contain" ? "object-contain" : "object-cover"}`} />
       </div>
     );
   }

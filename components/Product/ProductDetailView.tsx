@@ -35,8 +35,12 @@ export function ProductDetailView({ productId }: { productId: string }) {
         </button>
       </div>
       <div className="p-4">
-        <div className="relative flex h-[220px] w-full items-center justify-center rounded-2xl bg-accent-soft text-[76px]">
-          <ProductPhoto photo={photos[photoIndex]} className="flex h-full w-full items-center justify-center rounded-[inherit] text-[76px]" />
+        <div className="relative flex aspect-square w-full items-center justify-center rounded-2xl bg-accent-soft text-[76px]">
+          <ProductPhoto
+            photo={photos[photoIndex]}
+            fit="contain"
+            className="flex h-full w-full items-center justify-center rounded-[inherit] text-[76px]"
+          />
           {photos.length > 1 && (
             <span className="absolute right-2.5 bottom-2 rounded-full bg-black/50 px-2 py-0.5 text-[11px] font-semibold text-white">
               {photoIndex + 1}/{photos.length}
