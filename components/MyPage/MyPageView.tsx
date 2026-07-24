@@ -88,6 +88,10 @@ export function MyPageView() {
       setError("기본 배송지(아파트명/동/호수)를 입력해 주세요.");
       return;
     }
+    if (!entranceMethod.trim()) {
+      setError("공동현관 출입방법을 입력해 주세요.");
+      return;
+    }
     setSubmitting(true);
     const phoneTaken = await checkPhoneTaken(phoneDigits);
     if (phoneTaken) {
@@ -198,7 +202,7 @@ export function MyPageView() {
           </div>
           <input
             className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-            placeholder="공동현관 출입방법 (선택)"
+            placeholder="공동현관 출입방법 (예: 비밀번호, 호출 방법 등)"
             value={entranceMethod}
             onChange={(e) => setEntranceMethod(e.target.value)}
           />

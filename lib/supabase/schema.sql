@@ -54,6 +54,10 @@ create table if not exists products (
   image_url text,
   photos jsonb not null default '[]'::jsonb,
   detail_blocks jsonb not null default '[]'::jsonb,
+  -- null means "inherit the parent event's delivery type" — most products
+  -- don't need to override it, but a few (e.g. a mostly-문고리 event with one
+  -- 택배-only item) can.
+  delivery_type text check (delivery_type in ('DOOR', 'GROUP_BUY', 'PARCEL')),
   origin text,
   weight text,
   storage text,

@@ -26,3 +26,10 @@ export async function uploadProductPhoto(file: File): Promise<string> {
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
   return data.publicUrl;
 }
+
+// Uploads every file and returns their URLs in the same order as `files` —
+// used when multiple photos are selected/dropped/pasted at once (e.g. to
+// create one detail-description image block per file).
+export async function uploadProductPhotos(files: File[]): Promise<string[]> {
+  return Promise.all(files.map((file) => uploadProductPhoto(file)));
+}

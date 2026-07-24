@@ -21,6 +21,9 @@ export interface Product {
   price: number;
   emoji: string;
   photos?: string[];
+  // Overrides the parent event's delivery type when set — undefined means
+  // "inherit the event's type" (the common case).
+  deliveryType?: EventType;
   origin?: string;
   weight?: string;
   storage?: string;

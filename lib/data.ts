@@ -101,6 +101,7 @@ export async function addProduct(eventId: string, input: Omit<Product, "id" | "e
         emoji: input.emoji,
         photos: input.photos ?? [],
         detail_blocks: input.detailBlocks ?? [],
+        delivery_type: input.deliveryType ?? null,
         origin: input.origin,
         weight: input.weight,
         storage: input.storage,
@@ -126,6 +127,7 @@ export async function updateProduct(productId: string, patch: Partial<Product>):
     if (patch.emoji !== undefined) row.emoji = patch.emoji;
     if (patch.photos !== undefined) row.photos = patch.photos;
     if (patch.detailBlocks !== undefined) row.detail_blocks = patch.detailBlocks;
+    if (patch.deliveryType !== undefined) row.delivery_type = patch.deliveryType ?? null;
     if (patch.origin !== undefined) row.origin = patch.origin;
     if (patch.weight !== undefined) row.weight = patch.weight;
     if (patch.storage !== undefined) row.storage = patch.storage;
@@ -389,6 +391,7 @@ function mapSupabaseProduct(row: Record<string, any>): Product {
     price: row.price,
     emoji: row.emoji ?? "📦",
     photos: row.photos && row.photos.length > 0 ? row.photos : undefined,
+    deliveryType: row.delivery_type ?? undefined,
     origin: row.origin ?? undefined,
     weight: row.weight ?? undefined,
     storage: row.storage ?? undefined,
