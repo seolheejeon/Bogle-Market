@@ -31,7 +31,7 @@
 - 장바구니, 체크아웃(무통장입금/카드/카카오페이/인천이음카드 선택), 비회원 체크아웃(주문 조회용 확인번호 4자리 직접 설정). 회원은 기본 배송지가 자동으로 채워지고, 주문 시 배송지를 바꾸면 "이번 주문만" 또는 "기본 배송지로 저장" 중 선택 가능
 - 내 주문: 회원은 목록+상세, 비회원은 **이름 + 확인번호 4자리**로 조회 (같은 이름+번호로 낸 주문 전부를 목록으로 보여줌)
 - 마이페이지: **아이디/비밀번호**로 로그인·회원가입 (이메일은 사용자에게 노출 안 됨), 로그아웃, 정보 수정(비밀번호/오픈채팅 닉네임/휴대폰번호), **기본 배송지 수정**(아파트명/동/호수/공동현관 출입방법/배송메모)
-- 알림 목록 (정적)
+- 알림: 읽음/안읽음 상태, 클릭 시 관련 화면(상품/이벤트/주문)으로 자동 이동, 전체읽음/전체삭제/개별삭제, 헤더 종 아이콘에 안읽은 개수 뱃지
 
 **관리자 화면 (`/admin`)**
 - 이벤트 등록/수정/삭제, 상품 등록/수정/삭제
@@ -98,6 +98,17 @@
 - 회원가입 시 공동현관 출입방법을 **필수 항목**으로 변경 (주관식 입력, 버튼 선택 방식 아님)
 - 관리자 주문 목록(`/admin/orders`)에 배송지 스냅샷 표시 추가 — 기존엔 주소 자체가 전혀 안 보였음
 
+**알림 시스템 개편** (`feature/notification-system`)
+- 알림에 **읽음/안읽음 상태**를 도입 — 안읽은 알림은 강조 표시(연한 배경 + 빨간 점), 알림을 클릭해서 연결 화면으로 이동하면 자동으로 읽음 처리 (`lib/notification-state.ts`)
+- 읽음/삭제 상태는 **브라우저별 localStorage로 관리** — 서버에 별도 "읽음" 테이블을 두지 않는 방식. 알림 자체(제목/내용/링크)는 Supabase 모드에선 DB에서, mock 모드에선 localStorage에서 오지만, "내가 읽었는지/지웠는지"는 항상 클라이언트에만 저장됨. 이렇게 하면 회원/비회원/mock모드 구분 없이 동일하게 동작하고 서버 쪽 RLS 표면도 늘어나지 않음
+- **딥링크**: 알림의 `linkType`(PRODUCT/EVENT/ORDER/NONE) + `linkId`로 클릭 시 해당 상품 상세/이벤트(문고리·사다드림 오픈 공지)/주문 상세로 바로 이동. `NONE`은 이동 없이 내용만 표시(단순 공지용)
+- **알림 관리**: 알림 목록 우측 상단에 전체읽음/전체삭제, 각 항목에 개별삭제 버튼
+- **자동 삭제(보관 기간)**: 알림은 생성 후 기본 30일이 지나면 목록/뱃지 계산에서 자동으로 제외됨 (`NOTIFICATION_RETENTION_DAYS` 상수, `isWithinRetention()`) — 실제로 DB에서 지우는 배치 작업은 아니고 "이 기간이 지난 건 안 보여준다"는 필터. 상수 하나만 바꾸면 되는 구조라 나중에 관리자 화면에서 기간을 조정하는 기능을 얹기 쉬움
+- **헤더 뱃지**: 종 아이콘에 "🔔 3"처럼 안읽은 개수 표시, 0개면 뱃지 자체를 숨김. 알림 상태가 바뀌면(읽음처리/삭제) 페이지 이동 없이도 즉시 갱신되도록 커스텀 이벤트(`onNotificationStateChange`)로 헤더와 알림 목록 페이지를 연결
+- **broadcast vs 개인 알림**: `notifications.profile_id`가 `null`이면 전체 공지(특가/이벤트 오픈 등), 특정 회원 id가 들어있으면 그 회원에게만 보임(배송 시작/완료 등) — 같은 테이블 하나로 두 종류를 구분해서 처리
+- **관리자 알림 발송(`/admin/notifications`)**: 제목/내용/아이콘/연결화면을 선택해서 전체 공지 발송. 연결화면을 "상품"으로 고르면 실제 상품 드롭다운에서 골라서 그 상품 상세로 딥링크되는 알림을 만들 수 있음 (이벤트/주문 대상도 동일한 방식)
+- **배송 상태 변경 시 자동 알림**: 관리자가 주문을 배송중/배송완료로 바꾸면 그 주문 고객에게만(비회원 주문 제외) "배송이 시작됐어요/완료됐어요" 알림이 자동 생성되고, 클릭하면 해당 주문 상세로 이동 (`app/admin/orders/page.tsx`의 `advance()`)
+
 **인프라**
 - Supabase 스키마(`lib/supabase/schema.sql`) + seed 데이터(`lib/supabase/seed.sql`)
 - RLS 정책 — `is_admin()` SECURITY DEFINER 함수로 profiles 자기참조 무한재귀 버그 수정
@@ -114,7 +125,8 @@
 - [ ] Toss Payments 실제 가맹점 키 연동 (카드/카카오페이 자동결제)
 - [ ] 인천 이음카드 온라인 결제 연동 방법 조사
 - [ ] 배송지 다중 저장/선택 UI (현재는 최근 1건만 자동 채움)
-- [ ] 알림을 실시간/DB 기반으로 전환 (현재는 정적 데이터)
+- [ ] 회원가입 배송지를 카카오(다음) 주소검색 API 기반으로 전환 (우편번호/도로명주소 자동입력 + 상세주소/공동현관 출입방법/배송메모)
+- [ ] 알림 보관 기간(현재 하드코딩 30일)을 관리자가 조정할 수 있는 설정 화면
 - [ ] 최초 관리자 계정 지정 방법 문서화 (현재는 SQL로 수동 `is_admin = true`)
 
 # UX 결정사항
@@ -138,6 +150,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), detail_blocks(jsonb), delivery_type, origin, weight, storage, description | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `detail_blocks`는 관리자가 작성한 상세설명(제목/본문/사진 블록). `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `image_url`은 미사용 |
 | `orders` | id, order_number, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, payment_method, status, total | 주문. 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리 |
 | `order_items` | id, order_id, product_id, product_name, price_snapshot, quantity | 주문 상품 스냅샷 |
+| `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
 
 - `is_admin()` — SECURITY DEFINER 함수. RLS 정책에서 `profiles`를 직접 서브쿼리하면 무한재귀가 나기 때문에 이 함수를 통해서만 관리자 여부를 확인
 - `is_username_taken(username)` / `is_phone_taken(phone)` — 회원가입 중복확인용 SECURITY DEFINER 함수. RLS상 남의 프로필은 못 보지만, "존재 여부"만 boolean으로 반환
@@ -152,8 +165,8 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 - 주문 관리: 상태 변경, 입금확인 (`/admin/orders`)
 - 상품 등록/수정 통합 폼(사진+배송방식+기본정보+상세설명을 한 번에 작성·저장), 이미지 드래그드롭/붙여넣기/다중선택 업로드
 - 개발 모드 전용: 회원가입 시 "관리자 계정으로 만들기" 체크박스 (Supabase 미연결 시에만 노출)
+- 알림 발송(`/admin/notifications`): 제목/내용/아이콘/연결화면(상품·이벤트·주문)을 선택해서 전체 고객에게 알림 발송. 배송 시작/완료 알림은 주문 상태 변경 시 자동 발송(수동 발송 불필요)
 
 **계획**
-- 알림 발송 관리 (이벤트 오픈/마감임박/배송완료 등을 관리자가 직접 트리거)
 - 매출/정산 리포트 (현재 대시보드는 오늘 매출만 단순 합산)
 - 관리자 계정 초대/권한 관리 UI (현재는 SQL로 수동 처리)

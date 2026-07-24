@@ -116,10 +116,45 @@ export const MOCK_EVENTS: MarketEvent[] = [
 ];
 
 export const MOCK_NOTIFICATIONS: NotificationItem[] = [
-  { id: "n1", icon: "🔥", message: "[1시간특가] 자연산 돌문어 1kg이(가) 24,900원에 특가로 풀렸어요! 서둘러주세요.", createdAt: inMinutes(-5) },
-  { id: "n2", icon: "📢", message: "[사다드림] 안동 사다드림 특집 판매가 시작됐어요! 주문마감 8/1(토)", createdAt: inHours(-1) },
-  { id: "n3", icon: "📢", message: "[문고리배송] 7/28 문고리배송이 열렸어요! 주문마감 7/28(화)", createdAt: inHours(-24) },
-  { id: "n4", icon: "🚚", message: "[주문 20250719-045] 배송이 완료되었어요. 확인해보세요!", createdAt: inHours(-72) },
+  {
+    id: "n1",
+    icon: "🔥",
+    title: "1시간 특가 오픈!",
+    message: "자연산 돌문어 1kg이(가) 24,900원에 특가로 풀렸어요! 서둘러주세요.",
+    linkType: "PRODUCT",
+    linkId: "octopus",
+    profileId: null,
+    createdAt: inMinutes(-5),
+  },
+  {
+    id: "n2",
+    icon: "📢",
+    title: "사다드림 판매 시작",
+    message: "안동 사다드림 특집 판매가 시작됐어요! 주문마감 8/1(토)",
+    linkType: "EVENT",
+    linkId: "andong",
+    profileId: null,
+    createdAt: inHours(-1),
+  },
+  {
+    id: "n3",
+    icon: "📢",
+    title: "문고리배송 오픈",
+    message: "7/28 문고리배송이 열렸어요! 주문마감 7/28(화)",
+    linkType: "EVENT",
+    linkId: "door2",
+    profileId: null,
+    createdAt: inHours(-24),
+  },
+  {
+    id: "n4",
+    icon: "📋",
+    title: "보글마켓 공지",
+    message: "이용해주셔서 감사합니다. 문의사항은 마이페이지를 통해 남겨주세요.",
+    linkType: "NONE",
+    profileId: null,
+    createdAt: inHours(-72),
+  },
 ];
 
 export function findProduct(productId: string) {

@@ -90,6 +90,22 @@ create table if not exists order_items (
   quantity integer not null check (quantity > 0)
 );
 
+-- profile_id null = broadcast to everyone (admin announcements, flash sales,
+-- event openings); set = personal notification only that member sees (e.g.
+-- their own order shipped). Read/dismissed state is tracked client-side
+-- (see lib/notification-state.ts) rather than here, since it's a per-viewer
+-- concern and this way works the same whether or not Supabase is configured.
+create table if not exists notifications (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid references profiles(id) on delete cascade,
+  icon text not null default '📢',
+  title text not null,
+  message text not null,
+  link_type text not null default 'NONE' check (link_type in ('PRODUCT', 'EVENT', 'ORDER', 'NONE')),
+  link_id uuid,
+  created_at timestamptz not null default now()
+);
+
 -- Row Level Security --------------------------------------------------
 
 alter table profiles enable row level security;
@@ -98,6 +114,7 @@ alter table events enable row level security;
 alter table products enable row level security;
 alter table orders enable row level security;
 alter table order_items enable row level security;
+alter table notifications enable row level security;
 
 -- SECURITY DEFINER helper: checks admin status while bypassing RLS itself.
 -- Policies must call this instead of subquerying `profiles` directly — a
@@ -171,6 +188,15 @@ create policy "user creates own order items" on order_items for insert
 drop policy if exists "admins manage order items" on order_items;
 create policy "admins manage order items" on order_items for all
   using (is_admin())
+  with check (is_admin());
+
+-- Notifications: anyone can read broadcasts (profile_id null); a signed-in
+-- member can also read their own personal ones. Only admins send.
+drop policy if exists "read broadcast or own notifications" on notifications;
+create policy "read broadcast or own notifications" on notifications for select
+  using (profile_id is null or profile_id = auth.uid());
+drop policy if exists "admins send notifications" on notifications;
+create policy "admins send notifications" on notifications for insert
   with check (is_admin());
 
 -- Username/phone availability checks for the signup form's 중복확인 — plain

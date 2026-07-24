@@ -60,6 +60,9 @@ export function loadNotifications(): NotificationItem[] {
   write(KEYS.notifications, MOCK_NOTIFICATIONS);
   return MOCK_NOTIFICATIONS;
 }
+export function saveNotifications(notifications: NotificationItem[]) {
+  write(KEYS.notifications, notifications);
+}
 
 export function loadAuthProfile(): Profile | null {
   return read<Profile | null>(KEYS.authProfile, null);
