@@ -73,15 +73,21 @@ export function CartView() {
           </div>
         ))}
       </div>
-      <div className="sticky bottom-0 border-t border-border bg-bg-card px-4 py-3.5">
-        <div className="mb-2.5 flex justify-between text-[13px]">
-          <span className="text-text-muted">상품 {totalCount}개</span>
-          <strong className="text-[17px]">{formatPrice(totalPrice)}</strong>
+      {/* fixed, not sticky-in-flow: see ProductDetailView for why — a sticky
+          footer nested in <main> gets hidden behind BottomNav's own sticky
+          bar once the page is tall enough to scroll. */}
+      <div className="fixed inset-x-0 bottom-[67px] z-20 border-t border-border bg-bg-card">
+        <div className="mx-auto max-w-2xl px-4 py-3.5">
+          <div className="mb-2.5 flex justify-between text-[13px]">
+            <span className="text-text-muted">상품 {totalCount}개</span>
+            <strong className="text-[17px]">{formatPrice(totalPrice)}</strong>
+          </div>
+          <Link href="/checkout" className="block w-full rounded-[10px] bg-accent py-3 text-center text-[13.5px] font-bold text-white">
+            주문하기
+          </Link>
         </div>
-        <Link href="/checkout" className="block w-full rounded-[10px] bg-accent py-3 text-center text-[13.5px] font-bold text-white">
-          주문하기
-        </Link>
       </div>
+      <div className="h-[130px]" />
     </div>
   );
 }
