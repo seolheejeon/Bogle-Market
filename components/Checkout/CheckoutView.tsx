@@ -51,13 +51,14 @@ export function CheckoutView() {
 
   const items = useMemo(() => {
     if (!events) return [];
-    return events
-      .flatMap((e) => e.products)
-      .filter((p) => cart[p.id])
-      .map((p) => ({ product: p, qty: cart[p.id] }));
+    return events.flatMap((e) => e.products.filter((p) => cart[p.id]).map((p) => ({ product: p, qty: cart[p.id], eventType: e.type })));
   }, [events, cart]);
 
   const total = items.reduce((sum, i) => sum + i.product.price * i.qty, 0);
+
+  // 택배로만 이루어진 주문은 공동현관 출입방법이 필요 없음. 장바구니가 아직
+  // 안 불러와졌을 때는 우선 보여주는 쪽으로 기본값을 둔다.
+  const needsEntranceMethod = items.length === 0 || items.some((i) => (i.product.deliveryType ?? i.eventType) !== "PARCEL");
 
   async function placeOrder() {
     setError(null);
@@ -84,15 +85,14 @@ export function CheckoutView() {
     }
     setSubmitting(true);
     try {
-      const addressFields = {
-        apartment: apartment.trim(),
-        dong: dong.trim(),
-        ho: ho.trim(),
-        entranceMethod: entranceMethod.trim() || undefined,
-        memo: memo.trim() || undefined,
-      };
       if (profile && saveAsDefault && defaultAddressId) {
-        await updateAddress(defaultAddressId, profile.id, addressFields);
+        await updateAddress(defaultAddressId, profile.id, {
+          apartment: apartment.trim(),
+          dong: dong.trim(),
+          ho: ho.trim(),
+          entranceMethod: entranceMethod.trim() || undefined,
+          memo: memo.trim() || undefined,
+        });
       }
       const order = await createOrder({
         profileId: profile?.id ?? null,
@@ -101,7 +101,13 @@ export function CheckoutView() {
         guestPin: profile ? undefined : pin,
         recipientName: name,
         recipientPhone: phone,
-        addressSnapshot: formatAddress(addressFields),
+        addressSnapshot: formatAddress({
+          apartment: apartment.trim(),
+          dong: dong.trim(),
+          ho: ho.trim(),
+          entranceMethod: needsEntranceMethod ? entranceMethod.trim() || undefined : undefined,
+          memo: memo.trim() || undefined,
+        }),
         paymentMethod: method,
         items: items.map((i) => ({ productId: i.product.id, productName: i.product.name, productEmoji: i.product.emoji, price: i.product.price, quantity: i.qty })),
         total,
@@ -134,12 +140,14 @@ export function CheckoutView() {
             <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="동" value={dong} onChange={(e) => setDong(e.target.value)} />
             <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="호수" value={ho} onChange={(e) => setHo(e.target.value)} />
           </div>
-          <input
-            className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-            placeholder="공동현관 출입방법 (선택)"
-            value={entranceMethod}
-            onChange={(e) => setEntranceMethod(e.target.value)}
-          />
+          {needsEntranceMethod && (
+            <input
+              className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+              placeholder="공동현관 출입방법"
+              value={entranceMethod}
+              onChange={(e) => setEntranceMethod(e.target.value)}
+            />
+          )}
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="배송메모 (선택)" value={memo} onChange={(e) => setMemo(e.target.value)} />
 
           {profile && defaultAddressId && (

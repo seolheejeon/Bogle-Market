@@ -65,6 +65,7 @@ export default function AdminOrdersPage() {
             <p className="text-[13px]">
               {o.recipientName} ({o.recipientPhone}) · {PAYMENT_METHOD_LABEL[o.paymentMethod]}
             </p>
+            <p className="mt-1 text-[12.5px] text-text-muted">{o.addressSnapshot}</p>
             <p className="mt-1 text-[12.5px] text-text-muted">
               {o.items.map((i) => `${i.productName} x${i.quantity}`).join(", ")}
             </p>

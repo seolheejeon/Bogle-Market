@@ -77,13 +77,26 @@
 - 회원가입 시 이름 대신 **오픈채팅 닉네임**을 받음 — 오픈채팅방 고객과 실제 주문자를 매칭하기 위함
 - **휴대폰번호는 계정당 1개**로 유일해야 함 (중복가입 방지 + 고객식별 + 배송연락 용도)
 - 회원가입 화면에서 아이디 **중복확인** 버튼, 제출 시 휴대폰번호 중복 여부도 확인 — `is_username_taken()` / `is_phone_taken()` SECURITY DEFINER 함수로 RLS를 우회해 "존재 여부"만 안전하게 확인 (`is_admin()`과 같은 패턴)
-- **배송지를 구조화된 필드**(아파트명/동/호수/공동현관 출입방법(선택)/배송메모(선택))로 받음 — 기존의 자유 텍스트 주소 한 줄 대신. 회원가입 시 입력한 배송지가 그대로 기본 배송지로 저장됨
+- **배송지를 구조화된 필드**(아파트명/동/호수/공동현관 출입방법/배송메모(선택))로 받음 — 기존의 자유 텍스트 주소 한 줄 대신. 회원가입 시 입력한 배송지가 그대로 기본 배송지로 저장됨
 - 체크아웃 화면에서 기본 배송지가 자동으로 채워지고, 배송지를 수정하면 **"이번 주문만"** 또는 **"기본 배송지로 저장"** 중 선택 가능 (`lib/data.ts`의 `updateAddress`)
 - 마이페이지 수정 가능 항목: 비밀번호, 오픈채팅 닉네임, 휴대폰번호, 기본 배송지. 아이디는 변경 불가
 - 관리자용 **고객 관리(`/admin/customers`)** 페이지 추가 — 아이디/닉네임/휴대폰/기본배송지/주문건수를 한눈에 조회
 - 현재는 회원당 배송지 1개만 구현하지만, `addresses` 테이블 자체는 `profile_id` + `is_default`로 이미 여러 개를 저장할 수 있는 구조라 나중에 다중 배송지 UI만 추가하면 됨
 - 카카오 로그인 등 향후 OAuth 확장을 고려해 Supabase Auth를 그대로 유지 (이메일 인증/이메일 비밀번호 찾기는 구현 안 함)
 - ⚠️ 이 브랜치가 병합되면 이전에 만들었던 `feature/mypage-profile-address` PR(다중 배송지 추가/삭제 UI)은 데이터 모델이 완전히 달라져서 그대로 머지하면 안 됨 — 폐기 필요
+
+**관리자 상품 등록/수정 UX 개선 + 상품별 배송방식** (`feature/admin-product-ux-delivery-type`)
+- 상품 등록/수정을 하나의 폼으로 통합 (`app/admin/events/[id]/page.tsx`의 `ProductFormFields`) — 대표사진/배송방식/상품명/가격/원산지/중량/보관법/상세설명(블록 에디터)까지 전부 작성한 뒤 "저장" 한 번으로 등록·수정. 예전엔 상품을 먼저 "추가"해야만 상세설명을 쓸 수 있었고, 수정 시에는 상세설명만 고칠 수 있었음
+- **상품마다 배송방식**(문고리배송/사다드림/택배) 지정 가능 — 소속 이벤트의 배송방식을 기본값으로 하되 상품별로 재정의 가능 (`products.delivery_type`, 비어있으면 이벤트 타입을 그대로 따름)
+- **이미지 업로드 UX 대폭 개선** (`components/admin/PhotoUploader.tsx`, `components/admin/DetailBlockEditor.tsx`, `lib/file-drop.ts`)
+  - 여러 장 한 번에 선택 시 그 순서대로 업로드
+  - 드래그 앤 드롭으로 파일 추가
+  - Ctrl+V로 클립보드 이미지 붙여넣기
+  - 상세설명 사진 블록: 여러 장 선택/드롭/붙여넣기 시 그 개수만큼 이미지 블록이 순서대로 자동 생성 (예: 10장 선택 → 블록 10개)
+  - 대표사진은 ◀▶ 버튼으로, 상세설명 블록은 기존 ▲▼ 버튼으로 순서 변경
+- **배송방식에 따라 체크아웃에서 필요한 입력만 표시** — 장바구니에 문고리/사다드림 상품이 하나라도 있으면 공동현관 출입방법 입력란을 보여주고, 택배 상품만 있으면 숨김 (`CheckoutView.tsx`). 주문의 배송지 스냅샷과 관리자 주문 목록도 이 여부를 그대로 반영
+- 회원가입 시 공동현관 출입방법을 **필수 항목**으로 변경 (주관식 입력, 버튼 선택 방식 아님)
+- 관리자 주문 목록(`/admin/orders`)에 배송지 스냅샷 표시 추가 — 기존엔 주소 자체가 전혀 안 보였음
 
 **인프라**
 - Supabase 스키마(`lib/supabase/schema.sql`) + seed 데이터(`lib/supabase/seed.sql`)
@@ -122,7 +135,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `profiles` | id(=auth.users.id), username(unique), nickname, phone(unique), is_admin | 1:1 auth 연동. 이메일은 auth.users에만 있고 이 테이블엔 없음(사용자에게 절대 노출 안 함). `is_admin=true`가 관리자 |
 | `addresses` | id, profile_id, name, phone, apartment, dong, ho, entrance_method, memo, is_default | 회원 배송지. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, is_flash, deadline_at, delivery_at, notice | 공동구매 회차 |
-| `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, description | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `detail_blocks`는 관리자가 작성한 상세설명(제목/본문/사진 블록). `image_url`은 미사용 |
+| `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), detail_blocks(jsonb), delivery_type, origin, weight, storage, description | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `detail_blocks`는 관리자가 작성한 상세설명(제목/본문/사진 블록). `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `image_url`은 미사용 |
 | `orders` | id, order_number, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, payment_method, status, total | 주문. 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리 |
 | `order_items` | id, order_id, product_id, product_name, price_snapshot, quantity | 주문 상품 스냅샷 |
 
@@ -137,7 +150,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 - 이벤트 CRUD (`/admin/events`, `/admin/events/new`, `/admin/events/[id]`)
 - 상품 CRUD (이벤트 상세 화면 내)
 - 주문 관리: 상태 변경, 입금확인 (`/admin/orders`)
-- 상품 사진 업로드, 상세설명(제목/본문/사진 블록) 편집기
+- 상품 등록/수정 통합 폼(사진+배송방식+기본정보+상세설명을 한 번에 작성·저장), 이미지 드래그드롭/붙여넣기/다중선택 업로드
 - 개발 모드 전용: 회원가입 시 "관리자 계정으로 만들기" 체크박스 (Supabase 미연결 시에만 노출)
 
 **계획**
