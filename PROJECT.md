@@ -49,6 +49,13 @@
 - 사진 블록도 동일한 Storage 업로드 경로(`uploadProductPhoto`) 사용
 - `products.detail_blocks` (jsonb) 컬럼 추가, 저장된 블록이 있으면 그것을, 없으면 기존 더미 콘텐츠(`DUMMY_DETAIL_BLOCKS`)를 상품 상세 페이지에 표시
 
+**상품 상세페이지 장바구니 UX 개선** (`feature/product-detail-cart-ux`)
+- +/- 버튼은 더 이상 실제 장바구니를 바로 바꾸지 않고, "몇 개 담을지"를 정하는 로컬 수량 선택값만 바꿈 (최소 1개)
+- 실제 장바구니 반영은 "장바구니 담기" 버튼을 눌렀을 때만 일어남 (기존 수량에 더해짐), 누른 뒤에도 `/cart`로 이동하지 않고 같은 페이지에 남아 연속으로 여러 상품을 담기 좋게 함
+- 담기 성공 시 "장바구니에 담겼습니다" 토스트(1.8초) + 상품 사진이 헤더 장바구니 아이콘 쪽으로 날아가는 간단한 애니메이션을 보여줌 (`components/Product/ProductDetailView.tsx`의 `flyToCart`)
+- 우측 상단 장바구니 개수는 전역 `cart-context` 상태라서 담자마자 즉시 반영됨
+- 그리드/이벤트/장바구니 목록의 `QtyControl`(즉시-담기 스테퍼)은 이번 변경 대상이 아니라 기존 그대로 유지 — 상품 상세페이지에만 적용된 변경
+
 **상품 이미지 UX 개선** (`feature/product-image-ux`)
 - `components/ProductPhoto.tsx`에 `fit` prop 추가(`cover`(기본) | `contain`) — 상품 상세/홈 히어로처럼 사진 자체가 중요한 곳은 `contain`으로 잘리지 않고 원본 비율 그대로 보이도록, 그리드/장바구니 등 작은 정사각 썸네일은 기존 `cover` 유지
 - 상품 상세페이지 대표 이미지 박스를 고정 높이(220px)에서 정사각형(`aspect-square`)으로 변경 — 세로/가로/정사각 사진 모두 자연스럽게 수용
