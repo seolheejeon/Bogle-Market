@@ -16,7 +16,7 @@ export function Header() {
         </span>
       </Link>
       <div className="flex items-center gap-1">
-        <Link href="/cart" className="relative p-1.5 text-xl" aria-label="장바구니">
+        <Link id="header-cart-link" href="/cart" className="relative p-1.5 text-xl" aria-label="장바구니">
           🛒
           {count > 0 && (
             <span className="absolute top-0 right-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-white">
