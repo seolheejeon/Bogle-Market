@@ -8,6 +8,7 @@ import { formatPrice } from "@/lib/format";
 import { useCart } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { PAYMENT_METHODS } from "@/lib/payments";
+import { openAddressSearch, preloadAddressSearch } from "@/lib/daum-postcode";
 
 export function CheckoutView() {
   const router = useRouter();
@@ -31,6 +32,10 @@ export function CheckoutView() {
 
   useEffect(() => {
     listEvents().then(setEvents);
+  }, []);
+
+  useEffect(() => {
+    preloadAddressSearch();
   }, []);
 
   useEffect(() => {
@@ -59,6 +64,10 @@ export function CheckoutView() {
   // 택배로만 이루어진 주문은 공동현관 출입방법이 필요 없음. 장바구니가 아직
   // 안 불러와졌을 때는 우선 보여주는 쪽으로 기본값을 둔다.
   const needsEntranceMethod = items.length === 0 || items.some((i) => (i.product.deliveryType ?? i.eventType) !== "PARCEL");
+
+  function searchAddress() {
+    openAddressSearch(setApartment);
+  }
 
   async function placeOrder() {
     setError(null);
@@ -135,7 +144,17 @@ export function CheckoutView() {
         <div className="mb-2 flex flex-col gap-2">
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="받는 분 이름" value={name} onChange={(e) => setName(e.target.value)} />
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 (010-0000-0000)" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="아파트명" value={apartment} onChange={(e) => setApartment(e.target.value)} />
+          <div className="flex gap-2">
+            <input
+              className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+              placeholder="아파트명 (검색 또는 직접입력)"
+              value={apartment}
+              onChange={(e) => setApartment(e.target.value)}
+            />
+            <button type="button" onClick={searchAddress} className="shrink-0 rounded-[9px] border border-border px-3 text-[12.5px] font-semibold">
+              주소 검색
+            </button>
+          </div>
           <div className="flex gap-2">
             <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="동" value={dong} onChange={(e) => setDong(e.target.value)} />
             <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="호수" value={ho} onChange={(e) => setHo(e.target.value)} />

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { listAddresses, updateAddress } from "@/lib/data";
 import type { Address, Profile } from "@/types";
+import { openAddressSearch, preloadAddressSearch } from "@/lib/daum-postcode";
 
 type UsernameStatus = "unchecked" | "checking" | "available" | "taken";
 
@@ -31,6 +32,10 @@ export function MyPageView() {
   const [memo, setMemo] = useState("");
   const [asAdmin, setAsAdmin] = useState(false);
 
+  useEffect(() => {
+    preloadAddressSearch();
+  }, []);
+
   if (loading) return <p className="p-4 text-sm text-text-muted">불러오는 중...</p>;
 
   if (profile) {
@@ -43,6 +48,10 @@ export function MyPageView() {
     setUsernameStatus("checking");
     const taken = await checkUsernameTaken(value);
     setUsernameStatus(taken ? "taken" : "available");
+  }
+
+  function searchAddress() {
+    openAddressSearch(setApartment);
   }
 
   async function submitSignIn() {
@@ -195,7 +204,17 @@ export function MyPageView() {
           <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="휴대폰번호" value={phone} onChange={(e) => setPhone(e.target.value)} />
 
           <p className="mt-2 text-[12.5px] font-bold text-text-muted">기본 배송지</p>
-          <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="아파트명" value={apartment} onChange={(e) => setApartment(e.target.value)} />
+          <div className="flex gap-2">
+            <input
+              className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+              placeholder="아파트명 (검색 또는 직접입력)"
+              value={apartment}
+              onChange={(e) => setApartment(e.target.value)}
+            />
+            <button type="button" onClick={searchAddress} className="shrink-0 rounded-[9px] border border-border px-3 text-[12.5px] font-semibold">
+              주소 검색
+            </button>
+          </div>
           <div className="flex gap-2">
             <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="동" value={dong} onChange={(e) => setDong(e.target.value)} />
             <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="호수" value={ho} onChange={(e) => setHo(e.target.value)} />
@@ -258,6 +277,10 @@ function ProfilePanel({
   const [addressSaved, setAddressSaved] = useState(false);
 
   useEffect(() => {
+    preloadAddressSearch();
+  }, []);
+
+  useEffect(() => {
     listAddresses(profile.id).then((addrs) => {
       const def = addrs.find((a) => a.isDefault) ?? addrs[0] ?? null;
       setAddress(def);
@@ -291,6 +314,10 @@ function ProfilePanel({
     setSaving(false);
     setNewPassword("");
     setEditing(false);
+  }
+
+  function searchAddress() {
+    openAddressSearch(setApartment);
   }
 
   async function saveAddressInfo() {
@@ -360,7 +387,17 @@ function ProfilePanel({
 
       <p className="mt-5 mb-2 text-[12.5px] font-bold text-text-muted">기본 배송지</p>
       <div className="flex flex-col gap-2 rounded-xl border border-border p-3">
-        <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="아파트명" value={apartment} onChange={(e) => setApartment(e.target.value)} />
+        <div className="flex gap-2">
+          <input
+            className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+            placeholder="아파트명 (검색 또는 직접입력)"
+            value={apartment}
+            onChange={(e) => setApartment(e.target.value)}
+          />
+          <button type="button" onClick={searchAddress} className="shrink-0 rounded-[9px] border border-border px-3 text-[12.5px] font-semibold">
+            주소 검색
+          </button>
+        </div>
         <div className="flex gap-2">
           <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="동" value={dong} onChange={(e) => setDong(e.target.value)} />
           <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="호수" value={ho} onChange={(e) => setHo(e.target.value)} />
