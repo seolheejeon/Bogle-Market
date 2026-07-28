@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { openAddressSearch, isAddressSearchClosed } from "@/lib/daum-postcode";
+import { useEffect, useState } from "react";
+import { openAddressSearch, preloadAddressSearch, isAddressSearchClosed } from "@/lib/daum-postcode";
 
 export interface AddressFieldsValue {
   zonecode: string;
@@ -36,6 +36,12 @@ interface AddressFieldsProps {
 export function AddressFields({ value, onChange, showEntranceMethod = true, showMemo = true }: AddressFieldsProps) {
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 클릭 시점에야 스크립트를 처음 불러오면 그 사이 user-gesture가 끊겨 팝업이
+  // 차단될 수 있어서, 이 컴포넌트가 화면에 나타나는 즉시 미리 로드해둔다.
+  useEffect(() => {
+    preloadAddressSearch();
+  }, []);
 
   async function search() {
     setError(null);

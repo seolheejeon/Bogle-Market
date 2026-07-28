@@ -1,8 +1,13 @@
 "use client";
 
-// Daum(카카오) 우편번호 서비스 — 스크립트를 한 번만 로드해두고, 검색 팝업은
-// 호출할 때마다 새로 연다. 서비스 도메인 자체가 공식 CDN이라 별도 API 키가
-// 필요 없다.
+// Daum(카카오) 우편번호 서비스 — 별도 API 키 없이 쓸 수 있는 공식 CDN 스크립트.
+//
+// daum.Postcode의 .open()은 내부적으로 window.open()을 쓰는데, 브라우저 팝업
+// 차단은 "클릭 이벤트 핸들러 안에서 동기적으로 호출됐는지"를 기준으로 판단한다.
+// 클릭 시점에야 스크립트를 비동기로 불러오면 로딩을 기다리는 사이 user-gesture가
+// 끊겨서 팝업이 차단될 수 있다. 그래서 화면 마운트 시점에 미리 로드해두고
+// (preloadAddressSearch), 스크립트가 이미 로드돼 있으면 클릭 핸들러에서 항상
+// 동기적으로 팝업을 연다.
 const SCRIPT_SRC = "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
 
 let loadPromise: Promise<void> | null = null;
@@ -25,6 +30,11 @@ function loadScript(): Promise<void> {
   return loadPromise;
 }
 
+// 배송지 입력 화면이 열리면 바로 호출해서 스크립트를 미리 받아둔다.
+export function preloadAddressSearch(): void {
+  loadScript().catch(() => {});
+}
+
 export interface DaumAddressResult {
   zonecode: string;
   roadAddress: string;
@@ -36,26 +46,31 @@ export interface DaumAddressResult {
 
 const CLOSED = new Error("CLOSED");
 
+function runPostcode(resolve: (result: DaumAddressResult) => void, reject: (error: Error) => void) {
+  let resolved = false;
+  new (window as any).daum.Postcode({
+    oncomplete: (data: any) => {
+      resolved = true;
+      resolve({
+        zonecode: data.zonecode ?? "",
+        roadAddress: data.roadAddress ?? "",
+        apartmentName: data.apartment === "Y" ? (data.buildingName ?? "") : "",
+      });
+    },
+    onclose: (state: string) => {
+      if (!resolved && state === "FORCE_CLOSE") reject(CLOSED);
+    },
+  }).open();
+}
+
+// 스크립트가 이미 로드돼 있으면(preloadAddressSearch 호출 후) 팝업을 동기적으로
+// 열어 브라우저 팝업 차단을 피한다. 아직 로드 전이면 기다렸다 여는데, 이 경우
+// 클릭과 팝업 사이에 지연이 생겨 브라우저에 따라 차단될 수 있다.
 export function openAddressSearch(): Promise<DaumAddressResult> {
-  return loadScript().then(
-    () =>
-      new Promise<DaumAddressResult>((resolve, reject) => {
-        let resolved = false;
-        new (window as any).daum.Postcode({
-          oncomplete: (data: any) => {
-            resolved = true;
-            resolve({
-              zonecode: data.zonecode ?? "",
-              roadAddress: data.roadAddress ?? "",
-              apartmentName: data.apartment === "Y" ? (data.buildingName ?? "") : "",
-            });
-          },
-          onclose: (state: string) => {
-            if (!resolved && state === "FORCE_CLOSE") reject(CLOSED);
-          },
-        }).open();
-      }),
-  );
+  if ((window as any).daum?.Postcode) {
+    return new Promise<DaumAddressResult>((resolve, reject) => runPostcode(resolve, reject));
+  }
+  return loadScript().then(() => new Promise<DaumAddressResult>((resolve, reject) => runPostcode(resolve, reject)));
 }
 
 // 사용자가 검색창을 그냥 닫은 경우(선택 안 함)를 구분하기 위한 헬퍼 — 이
