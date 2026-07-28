@@ -213,6 +213,7 @@ export interface NewOrderInput {
   recipientName: string;
   recipientPhone: string;
   addressSnapshot: string;
+  apartmentName?: string;
   paymentMethod: PaymentMethod;
   items: OrderItem[];
   total: number;
@@ -233,6 +234,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
         recipient_name: input.recipientName,
         recipient_phone: input.recipientPhone,
         address_snapshot: input.addressSnapshot,
+        apartment_name: input.apartmentName || null,
         payment_method: input.paymentMethod,
         status: "wait",
         total: input.total,
@@ -259,6 +261,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     guestPhone: input.guestPhone ?? null,
     guestPin: input.guestPin ?? null,
     addressSnapshot: input.addressSnapshot,
+    apartmentName: input.apartmentName || null,
     recipientName: input.recipientName,
     recipientPhone: input.recipientPhone,
     paymentMethod: input.paymentMethod,
@@ -367,9 +370,10 @@ export async function saveAddress(input: Omit<Address, "id">): Promise<Address> 
         profile_id: input.profileId,
         name: input.name,
         phone: input.phone,
-        apartment: input.apartment,
-        dong: input.dong,
-        ho: input.ho,
+        zonecode: input.zonecode,
+        road_address: input.roadAddress,
+        apartment_name: input.apartmentName || "",
+        detail_address: input.detailAddress,
         entrance_method: input.entranceMethod || null,
         memo: input.memo || null,
         is_default: input.isDefault,
@@ -396,9 +400,10 @@ export async function updateAddress(addressId: string, profileId: string, patch:
     const row: Record<string, unknown> = {};
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.phone !== undefined) row.phone = patch.phone;
-    if (patch.apartment !== undefined) row.apartment = patch.apartment;
-    if (patch.dong !== undefined) row.dong = patch.dong;
-    if (patch.ho !== undefined) row.ho = patch.ho;
+    if (patch.zonecode !== undefined) row.zonecode = patch.zonecode;
+    if (patch.roadAddress !== undefined) row.road_address = patch.roadAddress;
+    if (patch.apartmentName !== undefined) row.apartment_name = patch.apartmentName || "";
+    if (patch.detailAddress !== undefined) row.detail_address = patch.detailAddress;
     if (patch.entranceMethod !== undefined) row.entrance_method = patch.entranceMethod || null;
     if (patch.memo !== undefined) row.memo = patch.memo || null;
     const { error } = await supabase.from("addresses").update(row).eq("id", addressId);
@@ -432,9 +437,10 @@ function mapSupabaseAddress(row: Record<string, any>): Address {
     profileId: row.profile_id,
     name: row.name,
     phone: row.phone,
-    apartment: row.apartment,
-    dong: row.dong,
-    ho: row.ho,
+    zonecode: row.zonecode ?? "",
+    roadAddress: row.road_address,
+    apartmentName: row.apartment_name ?? "",
+    detailAddress: row.detail_address,
     entranceMethod: row.entrance_method ?? undefined,
     memo: row.memo ?? undefined,
     isDefault: row.is_default,
@@ -484,6 +490,7 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     guestPhone: row.guest_phone,
     guestPin: row.guest_pin,
     addressSnapshot: row.address_snapshot,
+    apartmentName: row.apartment_name ?? null,
     recipientName: row.recipient_name,
     recipientPhone: row.recipient_phone,
     paymentMethod: row.payment_method,

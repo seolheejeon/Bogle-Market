@@ -20,14 +20,19 @@ create table if not exists profiles (
 -- order itself). Only ever one row per member for now (the member's single
 -- 기본 배송지), but modeled as its own table with is_default from the start
 -- so multiple saved addresses per member is a UI change, not a schema change.
+-- 주소는 Daum(카카오) 주소검색으로만 입력받는다 — road_address/zonecode는
+-- 검색 결과 그대로, apartment_name은 검색 결과가 공동주택일 때만 채워지는
+-- 값(사용자가 입력하는 항목이 아님)으로, 관리자가 아파트 단지별로 주문을
+-- 필터링/일괄 배송처리할 때 쓴다. detail_address(동/호 등)만 사용자가 직접 입력.
 create table if not exists addresses (
   id uuid primary key default gen_random_uuid(),
   profile_id uuid references profiles(id) on delete cascade,
   name text not null,
   phone text not null,
-  apartment text not null,
-  dong text not null,
-  ho text not null,
+  zonecode text not null default '',
+  road_address text not null,
+  apartment_name text not null default '',
+  detail_address text not null,
   entrance_method text,
   memo text,
   is_default boolean not null default false,
@@ -75,6 +80,9 @@ create table if not exists orders (
   recipient_name text not null,
   recipient_phone text not null,
   address_snapshot text not null,
+  -- 주문 시점 배송지의 아파트명 스냅샷(공동주택이 아니면 null) — 관리자가
+  -- 아파트 단지별로 주문을 필터링/일괄 배송처리할 때 쓴다.
+  apartment_name text,
   payment_method text not null check (payment_method in ('bank_transfer', 'card', 'kakaopay', 'incheon_eum')),
   status text not null default 'wait' check (status in ('wait', 'paid', 'ship', 'done', 'cancelled')),
   total integer not null check (total >= 0),

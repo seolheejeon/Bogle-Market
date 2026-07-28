@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { listAddresses, updateAddress } from "@/lib/data";
 import type { Address, Profile } from "@/types";
+import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
 
 type UsernameStatus = "unchecked" | "checking" | "available" | "taken";
 
@@ -24,11 +25,7 @@ export function MyPageView() {
   const [suPasswordConfirm, setSuPasswordConfirm] = useState("");
   const [nickname, setNickname] = useState("");
   const [phone, setPhone] = useState("");
-  const [apartment, setApartment] = useState("");
-  const [dong, setDong] = useState("");
-  const [ho, setHo] = useState("");
-  const [entranceMethod, setEntranceMethod] = useState("");
-  const [memo, setMemo] = useState("");
+  const [address, setAddress] = useState<AddressFieldsValue>(EMPTY_ADDRESS_FIELDS);
   const [asAdmin, setAsAdmin] = useState(false);
 
   if (loading) return <p className="p-4 text-sm text-text-muted">불러오는 중...</p>;
@@ -84,11 +81,15 @@ export function MyPageView() {
       setError("휴대폰번호를 정확히 입력해 주세요.");
       return;
     }
-    if (!apartment.trim() || !dong.trim() || !ho.trim()) {
-      setError("기본 배송지(아파트명/동/호수)를 입력해 주세요.");
+    if (!address.roadAddress.trim()) {
+      setError("주소검색으로 도로명주소를 입력해 주세요.");
       return;
     }
-    if (!entranceMethod.trim()) {
+    if (!address.detailAddress.trim()) {
+      setError("상세주소(동/호수 등)를 입력해 주세요.");
+      return;
+    }
+    if (!address.entranceMethod.trim()) {
       setError("공동현관 출입방법을 입력해 주세요.");
       return;
     }
@@ -105,11 +106,12 @@ export function MyPageView() {
       nickname: nickname.trim(),
       phone: phoneDigits,
       address: {
-        apartment: apartment.trim(),
-        dong: dong.trim(),
-        ho: ho.trim(),
-        entranceMethod: entranceMethod.trim() || undefined,
-        memo: memo.trim() || undefined,
+        zonecode: address.zonecode,
+        roadAddress: address.roadAddress,
+        apartmentName: address.apartmentName,
+        detailAddress: address.detailAddress.trim(),
+        entranceMethod: address.entranceMethod.trim() || undefined,
+        memo: address.memo.trim() || undefined,
       },
       asAdmin,
     });
@@ -195,18 +197,7 @@ export function MyPageView() {
           <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="휴대폰번호" value={phone} onChange={(e) => setPhone(e.target.value)} />
 
           <p className="mt-2 text-[12.5px] font-bold text-text-muted">기본 배송지</p>
-          <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="아파트명" value={apartment} onChange={(e) => setApartment(e.target.value)} />
-          <div className="flex gap-2">
-            <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="동" value={dong} onChange={(e) => setDong(e.target.value)} />
-            <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="호수" value={ho} onChange={(e) => setHo(e.target.value)} />
-          </div>
-          <input
-            className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-            placeholder="공동현관 출입방법 (예: 비밀번호, 호출 방법 등)"
-            value={entranceMethod}
-            onChange={(e) => setEntranceMethod(e.target.value)}
-          />
-          <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="배송메모 (선택)" value={memo} onChange={(e) => setMemo(e.target.value)} />
+          <AddressFields value={address} onChange={(patch) => setAddress((v) => ({ ...v, ...patch }))} />
 
           {isMockMode && (
             <label className="flex items-center gap-2 text-[12px] text-text-muted">
@@ -248,25 +239,24 @@ function ProfilePanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [address, setAddress] = useState<Address | null>(null);
-  const [apartment, setApartment] = useState("");
-  const [dong, setDong] = useState("");
-  const [ho, setHo] = useState("");
-  const [entranceMethod, setEntranceMethod] = useState("");
-  const [memo, setMemo] = useState("");
+  const [savedAddress, setSavedAddress] = useState<Address | null>(null);
+  const [address, setAddress] = useState<AddressFieldsValue>(EMPTY_ADDRESS_FIELDS);
   const [savingAddress, setSavingAddress] = useState(false);
   const [addressSaved, setAddressSaved] = useState(false);
 
   useEffect(() => {
     listAddresses(profile.id).then((addrs) => {
       const def = addrs.find((a) => a.isDefault) ?? addrs[0] ?? null;
-      setAddress(def);
+      setSavedAddress(def);
       if (def) {
-        setApartment(def.apartment);
-        setDong(def.dong);
-        setHo(def.ho);
-        setEntranceMethod(def.entranceMethod ?? "");
-        setMemo(def.memo ?? "");
+        setAddress({
+          zonecode: def.zonecode,
+          roadAddress: def.roadAddress,
+          apartmentName: def.apartmentName,
+          detailAddress: def.detailAddress,
+          entranceMethod: def.entranceMethod ?? "",
+          memo: def.memo ?? "",
+        });
       }
     });
   }, [profile.id]);
@@ -294,14 +284,15 @@ function ProfilePanel({
   }
 
   async function saveAddressInfo() {
-    if (!address || !apartment.trim() || !dong.trim() || !ho.trim()) return;
+    if (!savedAddress || !address.roadAddress.trim() || !address.detailAddress.trim() || !address.entranceMethod.trim()) return;
     setSavingAddress(true);
-    await updateAddress(address.id, profile.id, {
-      apartment: apartment.trim(),
-      dong: dong.trim(),
-      ho: ho.trim(),
-      entranceMethod: entranceMethod.trim() || undefined,
-      memo: memo.trim() || undefined,
+    await updateAddress(savedAddress.id, profile.id, {
+      zonecode: address.zonecode,
+      roadAddress: address.roadAddress,
+      apartmentName: address.apartmentName,
+      detailAddress: address.detailAddress.trim(),
+      entranceMethod: address.entranceMethod.trim(),
+      memo: address.memo.trim() || undefined,
     });
     setSavingAddress(false);
     setAddressSaved(true);
@@ -360,20 +351,13 @@ function ProfilePanel({
 
       <p className="mt-5 mb-2 text-[12.5px] font-bold text-text-muted">기본 배송지</p>
       <div className="flex flex-col gap-2 rounded-xl border border-border p-3">
-        <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="아파트명" value={apartment} onChange={(e) => setApartment(e.target.value)} />
-        <div className="flex gap-2">
-          <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="동" value={dong} onChange={(e) => setDong(e.target.value)} />
-          <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="호수" value={ho} onChange={(e) => setHo(e.target.value)} />
-        </div>
-        <input
-          className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-          placeholder="공동현관 출입방법 (선택)"
-          value={entranceMethod}
-          onChange={(e) => setEntranceMethod(e.target.value)}
-        />
-        <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="배송메모 (선택)" value={memo} onChange={(e) => setMemo(e.target.value)} />
+        <AddressFields value={address} onChange={(patch) => setAddress((v) => ({ ...v, ...patch }))} />
         {addressSaved && <p className="text-[11.5px] font-semibold text-accent-dark">배송지를 저장했어요.</p>}
-        <button className="rounded-[8px] bg-accent py-2 text-[12.5px] font-bold text-white disabled:opacity-50" disabled={savingAddress || !address} onClick={saveAddressInfo}>
+        <button
+          className="rounded-[8px] bg-accent py-2 text-[12.5px] font-bold text-white disabled:opacity-50"
+          disabled={savingAddress || !savedAddress}
+          onClick={saveAddressInfo}
+        >
           {savingAddress ? "저장 중..." : "배송지 저장"}
         </button>
       </div>
