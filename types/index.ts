@@ -48,17 +48,21 @@ export interface Address {
   profileId: string | null;
   name: string;
   phone: string;
-  apartment: string;
-  dong: string;
-  ho: string;
+  zonecode: string;
+  roadAddress: string;
+  // Daum 주소검색 결과가 공동주택일 때만 채워짐(단독주택 등은 빈 문자열).
+  // 사용자가 직접 입력하는 값이 아니라 검색 결과에서 추출한 값 — 관리자가
+  // 아파트 단지별로 필터링/일괄 배송처리를 할 수 있도록 별도 컬럼으로 둔다.
+  apartmentName: string;
+  detailAddress: string;
   entranceMethod?: string;
   memo?: string;
   isDefault: boolean;
 }
 
-// 아파트명/동/호수 + 선택 항목을 사람이 읽는 한 줄로 합친다 (주문 스냅샷, 관리자 화면 등에 사용).
-export function formatAddress(a: Pick<Address, "apartment" | "dong" | "ho" | "entranceMethod" | "memo">): string {
-  const parts = [`${a.apartment} ${a.dong}동 ${a.ho}호`];
+// 도로명주소/상세주소 + 선택 항목을 사람이 읽는 한 줄로 합친다 (주문 스냅샷, 관리자 화면 등에 사용).
+export function formatAddress(a: Pick<Address, "roadAddress" | "detailAddress" | "entranceMethod" | "memo">): string {
+  const parts = [`${a.roadAddress} ${a.detailAddress}`.trim()];
   if (a.entranceMethod) parts.push(`출입방법: ${a.entranceMethod}`);
   if (a.memo) parts.push(`배송메모: ${a.memo}`);
   return parts.join(" · ");
@@ -88,6 +92,10 @@ export interface Order {
   guestPhone: string | null;
   guestPin: string | null;
   addressSnapshot: string;
+  // 주문 시점 배송지의 아파트명 스냅샷(없으면 null) — 관리자가 아파트 단지별로
+  // 주문을 필터링/일괄 배송처리할 때 쓴다. addressSnapshot과 마찬가지로
+  // 주문 이후 회원이 배송지를 바꿔도 이 값은 그대로 남는다.
+  apartmentName: string | null;
   recipientName: string;
   recipientPhone: string;
   paymentMethod: PaymentMethod;

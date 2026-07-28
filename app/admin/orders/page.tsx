@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { listAllOrders, updateOrderStatus, createNotification } from "@/lib/data";
 import type { Order, OrderStatus } from "@/types";
 import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL } from "@/types";
@@ -10,10 +10,26 @@ import { OrderStatusBadge } from "@/components/Badge";
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", paid: "ship", ship: "done" };
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = { wait: "입금확인", paid: "배송시작", ship: "배송완료 처리" };
 
+// 배송중/배송완료로 바뀔 때 해당 주문 고객에게만(비회원 제외) 알림을 보낸다 —
+// 개별 처리와 아파트 단위 일괄 처리 양쪽에서 재사용.
+async function notifyStatusChange(order: Order, next: OrderStatus) {
+  if (!order.profileId || (next !== "ship" && next !== "done")) return;
+  await createNotification({
+    title: next === "ship" ? "배송이 시작됐어요" : "배송이 완료됐어요",
+    message: `주문번호 ${order.orderNumber} ${next === "ship" ? "배송이 시작됐어요." : "배송이 완료됐어요. 확인해보세요!"}`,
+    icon: "🚚",
+    linkType: "ORDER",
+    linkId: order.id,
+    profileId: order.profileId,
+  });
+}
+
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<OrderStatus | "all">("all");
+  const [apartmentFilter, setApartmentFilter] = useState("all");
+  const [bulkCompleting, setBulkCompleting] = useState(false);
 
   function refresh() {
     listAllOrders().then((o) => {
@@ -27,17 +43,7 @@ export default function AdminOrdersPage() {
     const next = NEXT_STATUS[order.status];
     if (!next) return;
     await updateOrderStatus(order.id, next);
-    // Guest orders have no profile to notify — only members get these.
-    if (order.profileId && (next === "ship" || next === "done")) {
-      await createNotification({
-        title: next === "ship" ? "배송이 시작됐어요" : "배송이 완료됐어요",
-        message: `주문번호 ${order.orderNumber} ${next === "ship" ? "배송이 시작됐어요." : "배송이 완료됐어요. 확인해보세요!"}`,
-        icon: "🚚",
-        linkType: "ORDER",
-        linkId: order.id,
-        profileId: order.profileId,
-      });
-    }
+    await notifyStatusChange(order, next);
     refresh();
   }
   async function cancel(order: Order) {
@@ -46,12 +52,29 @@ export default function AdminOrdersPage() {
     refresh();
   }
 
-  const filtered = orders.filter((o) => filter === "all" || o.status === filter);
+  // 검색 결과가 공동주택이 아닌 주문(아파트명이 빈 값)은 필터 목록에서 제외.
+  const apartments = useMemo(() => Array.from(new Set(orders.map((o) => o.apartmentName).filter((v): v is string => !!v))).sort(), [orders]);
+
+  const filtered = orders.filter((o) => (filter === "all" || o.status === filter) && (apartmentFilter === "all" || o.apartmentName === apartmentFilter));
+
+  const shippingInApartment = apartmentFilter === "all" ? [] : orders.filter((o) => o.apartmentName === apartmentFilter && o.status === "ship");
+
+  async function bulkCompleteApartment() {
+    if (shippingInApartment.length === 0) return;
+    if (!confirm(`"${apartmentFilter}"의 배송중 주문 ${shippingInApartment.length}건을 전부 배송완료 처리할까요?`)) return;
+    setBulkCompleting(true);
+    for (const order of shippingInApartment) {
+      await updateOrderStatus(order.id, "done");
+      await notifyStatusChange(order, "done");
+    }
+    setBulkCompleting(false);
+    refresh();
+  }
 
   return (
     <div>
       <p className="mb-4 text-[15px] font-bold">주문 관리</p>
-      <div className="mb-4 flex gap-2 overflow-x-auto">
+      <div className="mb-3 flex gap-2 overflow-x-auto">
         {(["all", "wait", "paid", "ship", "done", "cancelled"] as const).map((s) => (
           <button
             key={s}
@@ -62,6 +85,31 @@ export default function AdminOrdersPage() {
           </button>
         ))}
       </div>
+      {apartments.length > 0 && (
+        <div className="mb-4 flex items-center gap-2">
+          <select
+            className="rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
+            value={apartmentFilter}
+            onChange={(e) => setApartmentFilter(e.target.value)}
+          >
+            <option value="all">전체 아파트</option>
+            {apartments.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          {shippingInApartment.length > 0 && (
+            <button
+              onClick={bulkCompleteApartment}
+              disabled={bulkCompleting}
+              className="rounded-[9px] bg-accent px-3 py-2 text-[12.5px] font-bold text-white disabled:opacity-50"
+            >
+              {bulkCompleting ? "처리 중..." : `배송중 ${shippingInApartment.length}건 일괄 배송완료`}
+            </button>
+          )}
+        </div>
+      )}
       {loading && <p className="text-sm text-text-muted">불러오는 중...</p>}
       {!loading && filtered.length === 0 && <p className="text-sm text-text-muted">해당하는 주문이 없어요.</p>}
       <div className="flex flex-col gap-2">

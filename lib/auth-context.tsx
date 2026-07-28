@@ -11,9 +11,10 @@ interface AuthResult {
 }
 
 export interface SignUpAddressInput {
-  apartment: string;
-  dong: string;
-  ho: string;
+  zonecode: string;
+  roadAddress: string;
+  apartmentName: string;
+  detailAddress: string;
   entranceMethod?: string;
   memo?: string;
 }
@@ -85,9 +86,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         profileId: userId,
         name: nickname,
         phone,
-        apartment: address.apartment,
-        dong: address.dong,
-        ho: address.ho,
+        zonecode: address.zonecode,
+        roadAddress: address.roadAddress,
+        apartmentName: address.apartmentName,
+        detailAddress: address.detailAddress,
         entranceMethod: address.entranceMethod,
         memo: address.memo,
         isDefault: true,
@@ -107,9 +109,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       profileId: newProfile.id,
       name: nickname,
       phone,
-      apartment: address.apartment,
-      dong: address.dong,
-      ho: address.ho,
+      zonecode: address.zonecode,
+      roadAddress: address.roadAddress,
+      apartmentName: address.apartmentName,
+      detailAddress: address.detailAddress,
       entranceMethod: address.entranceMethod,
       memo: address.memo,
       isDefault: true,

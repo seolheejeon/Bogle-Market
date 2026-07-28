@@ -8,7 +8,7 @@ import { formatPrice } from "@/lib/format";
 import { useCart } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { openAddressSearch, preloadAddressSearch } from "@/lib/daum-postcode";
+import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
 
 export function CheckoutView() {
   const router = useRouter();
@@ -18,11 +18,7 @@ export function CheckoutView() {
   const [events, setEvents] = useState<MarketEvent[] | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [apartment, setApartment] = useState("");
-  const [dong, setDong] = useState("");
-  const [ho, setHo] = useState("");
-  const [entranceMethod, setEntranceMethod] = useState("");
-  const [memo, setMemo] = useState("");
+  const [address, setAddress] = useState<AddressFieldsValue>(EMPTY_ADDRESS_FIELDS);
   const [defaultAddressId, setDefaultAddressId] = useState<string | null>(null);
   const [saveAsDefault, setSaveAsDefault] = useState(false);
   const [pin, setPin] = useState("");
@@ -35,21 +31,20 @@ export function CheckoutView() {
   }, []);
 
   useEffect(() => {
-    preloadAddressSearch();
-  }, []);
-
-  useEffect(() => {
     if (profile) {
       setName(profile.nickname);
       setPhone(profile.phone);
       getDefaultAddress(profile.id).then((addr) => {
         if (!addr) return;
         setDefaultAddressId(addr.id);
-        setApartment(addr.apartment);
-        setDong(addr.dong);
-        setHo(addr.ho);
-        setEntranceMethod(addr.entranceMethod ?? "");
-        setMemo(addr.memo ?? "");
+        setAddress({
+          zonecode: addr.zonecode,
+          roadAddress: addr.roadAddress,
+          apartmentName: addr.apartmentName,
+          detailAddress: addr.detailAddress,
+          entranceMethod: addr.entranceMethod ?? "",
+          memo: addr.memo ?? "",
+        });
       });
     }
   }, [profile]);
@@ -65,10 +60,6 @@ export function CheckoutView() {
   // 안 불러와졌을 때는 우선 보여주는 쪽으로 기본값을 둔다.
   const needsEntranceMethod = items.length === 0 || items.some((i) => (i.product.deliveryType ?? i.eventType) !== "PARCEL");
 
-  function searchAddress() {
-    openAddressSearch(setApartment);
-  }
-
   async function placeOrder() {
     setError(null);
     const phoneDigits = phone.replace(/\D/g, "");
@@ -80,8 +71,12 @@ export function CheckoutView() {
       setError("전화번호를 정확히 입력해 주세요.");
       return;
     }
-    if (!apartment.trim() || !dong.trim() || !ho.trim()) {
-      setError("배송지(아파트명/동/호수)를 정확히 입력해 주세요.");
+    if (!address.roadAddress.trim() || !address.detailAddress.trim()) {
+      setError("배송지(주소검색/상세주소)를 정확히 입력해 주세요.");
+      return;
+    }
+    if (needsEntranceMethod && !address.entranceMethod.trim()) {
+      setError("공동현관 출입방법을 입력해 주세요.");
       return;
     }
     if (!profile && !/^\d{4}$/.test(pin)) {
@@ -96,11 +91,12 @@ export function CheckoutView() {
     try {
       if (profile && saveAsDefault && defaultAddressId) {
         await updateAddress(defaultAddressId, profile.id, {
-          apartment: apartment.trim(),
-          dong: dong.trim(),
-          ho: ho.trim(),
-          entranceMethod: entranceMethod.trim() || undefined,
-          memo: memo.trim() || undefined,
+          zonecode: address.zonecode,
+          roadAddress: address.roadAddress,
+          apartmentName: address.apartmentName,
+          detailAddress: address.detailAddress.trim(),
+          entranceMethod: address.entranceMethod.trim() || undefined,
+          memo: address.memo.trim() || undefined,
         });
       }
       const order = await createOrder({
@@ -111,12 +107,12 @@ export function CheckoutView() {
         recipientName: name,
         recipientPhone: phone,
         addressSnapshot: formatAddress({
-          apartment: apartment.trim(),
-          dong: dong.trim(),
-          ho: ho.trim(),
-          entranceMethod: needsEntranceMethod ? entranceMethod.trim() || undefined : undefined,
-          memo: memo.trim() || undefined,
+          roadAddress: address.roadAddress,
+          detailAddress: address.detailAddress.trim(),
+          entranceMethod: needsEntranceMethod ? address.entranceMethod.trim() || undefined : undefined,
+          memo: address.memo.trim() || undefined,
         }),
+        apartmentName: address.apartmentName || undefined,
         paymentMethod: method,
         items: items.map((i) => ({ productId: i.product.id, productName: i.product.name, productEmoji: i.product.emoji, price: i.product.price, quantity: i.qty })),
         total,
@@ -144,30 +140,7 @@ export function CheckoutView() {
         <div className="mb-2 flex flex-col gap-2">
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="받는 분 이름" value={name} onChange={(e) => setName(e.target.value)} />
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 (010-0000-0000)" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          <div className="flex gap-2">
-            <input
-              className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-              placeholder="아파트명 (검색 또는 직접입력)"
-              value={apartment}
-              onChange={(e) => setApartment(e.target.value)}
-            />
-            <button type="button" onClick={searchAddress} className="shrink-0 rounded-[9px] border border-border px-3 text-[12.5px] font-semibold">
-              주소 검색
-            </button>
-          </div>
-          <div className="flex gap-2">
-            <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="동" value={dong} onChange={(e) => setDong(e.target.value)} />
-            <input className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="호수" value={ho} onChange={(e) => setHo(e.target.value)} />
-          </div>
-          {needsEntranceMethod && (
-            <input
-              className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-              placeholder="공동현관 출입방법"
-              value={entranceMethod}
-              onChange={(e) => setEntranceMethod(e.target.value)}
-            />
-          )}
-          <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="배송메모 (선택)" value={memo} onChange={(e) => setMemo(e.target.value)} />
+          <AddressFields value={address} onChange={(patch) => setAddress((v) => ({ ...v, ...patch }))} showEntranceMethod={needsEntranceMethod} />
 
           {profile && defaultAddressId && (
             <div className="flex flex-col gap-1.5 rounded-[9px] border border-border p-2.5">

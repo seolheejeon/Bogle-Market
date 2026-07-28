@@ -3,7 +3,7 @@
 보글마켓 개발 진행상황과 주요 기획 결정을 기록하는 문서입니다.
 **기능이 완료되거나 기획이 바뀔 때마다 이 문서도 함께 업데이트합니다.**
 
-마지막 업데이트: 2026-07-24 (주소검색 API 연동 추가)
+마지막 업데이트: 2026-07-28 (주소검색 API 연동 추가)
 
 ---
 
@@ -30,8 +30,7 @@
 - 상품 상세: 사진 캐러셀(정사각형 박스 + `object-contain`으로 원본 비율 그대로, 잘림 없음), 원산지/중량/보관법/조리법 표, 설명, **상세설명(긴 스크롤형 이미지+텍스트, 관리자가 작성 가능)**, 수량 선택 + 장바구니 담기
 - 장바구니, 체크아웃(무통장입금/카드/카카오페이/인천이음카드 선택), 비회원 체크아웃(주문 조회용 확인번호 4자리 직접 설정). 회원은 기본 배송지가 자동으로 채워지고, 주문 시 배송지를 바꾸면 "이번 주문만" 또는 "기본 배송지로 저장" 중 선택 가능
 - 내 주문: 회원은 목록+상세, 비회원은 **이름 + 확인번호 4자리**로 조회 (같은 이름+번호로 낸 주문 전부를 목록으로 보여줌)
-- 마이페이지: **아이디/비밀번호**로 로그인·회원가입 (이메일은 사용자에게 노출 안 됨), 로그아웃, 정보 수정(비밀번호/오픈채팅 닉네임/휴대폰번호), **기본 배송지 수정**(아파트명/동/호수/공동현관 출입방법/배송메모)
-- **주소 검색**(회원가입/마이페이지 기본배송지/체크아웃 3곳): 다음(카카오) 우편번호 서비스 팝업으로 아파트명 검색해서 자동입력, 오타 방지용이라 직접입력도 그대로 가능 (`lib/daum-postcode.ts`). 무료·API 키 불필요. DB 스키마는 그대로 두고 기존 `apartment` 필드만 채움
+- 마이페이지: **아이디/비밀번호**로 로그인·회원가입 (이메일은 사용자에게 노출 안 됨), 로그아웃, 정보 수정(비밀번호/오픈채팅 닉네임/휴대폰번호), **기본 배송지 수정**(Daum 주소검색 → 도로명주소 자동입력 → 상세주소/공동현관 출입방법/배송메모)
 - 알림: 읽음/안읽음 상태, 클릭 시 관련 화면(상품/이벤트/주문)으로 자동 이동, 전체읽음/전체삭제/개별삭제, 헤더 종 아이콘에 안읽은 개수 뱃지
 
 **관리자 화면 (`/admin`)**
@@ -110,6 +109,16 @@
 - **관리자 알림 발송(`/admin/notifications`)**: 제목/내용/아이콘/연결화면을 선택해서 전체 공지 발송. 연결화면을 "상품"으로 고르면 실제 상품 드롭다운에서 골라서 그 상품 상세로 딥링크되는 알림을 만들 수 있음 (이벤트/주문 대상도 동일한 방식)
 - **배송 상태 변경 시 자동 알림**: 관리자가 주문을 배송중/배송완료로 바꾸면 그 주문 고객에게만(비회원 주문 제외) "배송이 시작됐어요/완료됐어요" 알림이 자동 생성되고, 클릭하면 해당 주문 상세로 이동 (`app/admin/orders/page.tsx`의 `advance()`)
 
+**주소 입력 방식을 Daum(카카오) 주소검색으로 통일** (`feature/kakao-address-search`)
+- 회원가입/마이페이지/체크아웃 세 곳에서 각자 다르게 입력받던 배송지를 공통 컴포넌트(`components/AddressFields.tsx`) 하나로 통일 — "주소검색 버튼 → 도로명주소 자동입력 → 상세주소(동/호 등) 직접입력 → 공동현관 출입방법(필수) → 배송메모(선택)" 순서가 세 화면 모두 동일
+- 기존의 "아파트명 직접 입력" 텍스트란은 완전히 제거하고, Daum 우편번호 서비스(`lib/daum-postcode.ts`, `t1.daumcdn.net` 스크립트를 화면 마운트 시 미리 로드해두고 클릭하면 즉시 팝업 오픈)로 대체. 별도 API 키 없이 쓸 수 있는 공식 CDN이라 환경변수 설정이 필요 없음
+- **사용자 입력은 통일하되 내부 저장은 분리**: 주소검색 결과가 공동주택(아파트/오피스텔 등)일 때만 채워지는 `apartmentName`을 사용자가 보거나 입력하지 않는 별도 컬럼으로 저장해서, 관리자가 아파트 단지 단위로 회원/주문을 다룰 수 있게 함 — `Address.apartment` + `dong` + `ho` 세 필드를 `Address.roadAddress`(도로명주소) + `Address.detailAddress`(상세주소, 자유입력) + `Address.apartmentName`(검색 결과에서 추출, 사용자 입력 아님)로 재구성
+- 주문에도 주문 시점 배송지의 `apartmentName`을 스냅샷으로 저장(`orders.apartment_name`) — `addressSnapshot`과 마찬가지로 이후 회원이 배송지를 바꿔도 과거 주문의 값은 그대로 남음
+- **관리자 아파트별 필터**: 고객 관리(`/admin/customers`)와 주문 관리(`/admin/orders`) 양쪽에 아파트명 드롭다운 필터 추가(회원 주소/주문의 `apartmentName`에서 자동으로 목록 생성)
+- **아파트 단위 일괄 배송완료**: 주문 관리에서 특정 아파트로 필터링하면 그 아파트의 "배송중" 주문 개수가 버튼에 표시되고, 누르면 전부 배송완료로 바꾸면서 각 주문 고객에게 배송완료 알림을 한 번에 발송 (`bulkCompleteApartment()` — 개별 처리와 동일한 알림 로직(`notifyStatusChange`)을 재사용)
+- 택배배송은 기존과 동일하게 공동현관 출입방법 입력란 자체를 숨김(`AddressFields`의 `showEntranceMethod` prop) — 배송방식별 조건부 로직은 그대로 유지, UI 컴포넌트만 공통화됨
+- 향후 "문고리 배송 가능 단지 자동 판별" 같은 기능은 이번에 저장해둔 `roadAddress`/`apartmentName` 컬럼을 그대로 활용하면 되도록 설계 (스키마 변경 없이 확장 가능)
+
 **인프라**
 - Supabase 스키마(`lib/supabase/schema.sql`) + seed 데이터(`lib/supabase/seed.sql`)
 - RLS 정책 — `is_admin()` SECURITY DEFINER 함수로 profiles 자기참조 무한재귀 버그 수정
@@ -127,6 +136,7 @@
 - [ ] 인천 이음카드 온라인 결제 연동 방법 조사
 - [ ] 배송지 다중 저장/선택 UI (현재는 최근 1건만 자동 채움)
 - [ ] 알림 보관 기간(현재 하드코딩 30일)을 관리자가 조정할 수 있는 설정 화면
+- [ ] 주소검색 결과 기반 문고리배송 가능 단지 자동 판별/배송 가능 지역 체크 (아파트명 컬럼이 이미 있어서 자연스러운 확장)
 - [ ] 최초 관리자 계정 지정 방법 문서화 (현재는 SQL로 수동 `is_admin = true`)
 
 # UX 결정사항
@@ -137,7 +147,7 @@
 - **Hero 배너** — 마스코트(보글이) 대신 실제 판매 상품을 크게(전체 폭의 약 45%) 보여줌. 보글이는 헤더 로고 용도로만 사용
 - **결제수단 4종 지원 예정** — 무통장입금(기본, 완성) / 카드 / 카카오페이 / 인천 이음카드. 자동결제 미연동 상태에선 전부 무통장입금과 동일한 수동확인 플로우로 동작
 - **상세설명은 확장 가능한 블록 구조** — `{type: "heading"|"text"|"image"}` 배열로 설계, 관리자가 나중에 작성한 콘텐츠를 그대로 얹을 수 있도록 렌더러와 데이터를 분리
-- **주소 검색 팝업은 화면 진입 시 미리 로드(preload)해둔다** — 다음 우편번호 스크립트를 클릭 시점에야 비동기로 불러오면, 로딩을 기다리는 사이 user-gesture가 끊겨서 브라우저 팝업 차단에 걸림. `lib/daum-postcode.ts`의 `preloadAddressSearch()`를 화면 마운트 시 호출해두고, 클릭 핸들러(`openAddressSearch()`)는 항상 동기적으로 팝업을 열도록 분리함
+- **주소 검색 팝업은 화면 진입 시 미리 로드(preload)해둔다** — 다음 우편번호 스크립트를 클릭 시점에야 비동기로 불러오면, 로딩을 기다리는 사이 user-gesture가 끊겨서 브라우저 팝업 차단에 걸릴 수 있음. `components/AddressFields.tsx`가 마운트되자마자 `lib/daum-postcode.ts`의 `preloadAddressSearch()`를 호출해두므로, 이 컴포넌트를 쓰는 회원가입/마이페이지/체크아웃 세 화면 모두 별도 처리 없이 동일하게 적용됨 — 클릭 시점엔 스크립트가 이미 로드돼 있어 `openAddressSearch()`가 동기적으로 팝업을 열 수 있음
 
 # DB 구조
 
@@ -146,10 +156,10 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | 테이블 | 주요 컬럼 | 설명 |
 | --- | --- | --- |
 | `profiles` | id(=auth.users.id), username(unique), nickname, phone(unique), is_admin | 1:1 auth 연동. 이메일은 auth.users에만 있고 이 테이블엔 없음(사용자에게 절대 노출 안 함). `is_admin=true`가 관리자 |
-| `addresses` | id, profile_id, name, phone, apartment, dong, ho, entrance_method, memo, is_default | 회원 배송지. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
+| `addresses` | id, profile_id, name, phone, zonecode, road_address, apartment_name, detail_address, entrance_method, memo, is_default | 회원 배송지. Daum 주소검색으로만 입력받음 — `road_address`/`zonecode`는 검색 결과 그대로, `apartment_name`은 검색 결과가 공동주택일 때만 채워지는 값(사용자가 입력하는 항목 아님, 관리자 아파트별 필터용), `detail_address`(동/호 등)만 사용자가 직접 입력. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, is_flash, deadline_at, delivery_at, notice | 공동구매 회차 |
 | `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), detail_blocks(jsonb), delivery_type, origin, weight, storage, description | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `detail_blocks`는 관리자가 작성한 상세설명(제목/본문/사진 블록). `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `image_url`은 미사용 |
-| `orders` | id, order_number, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, payment_method, status, total | 주문. 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리 |
+| `orders` | id, order_number, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, total | 주문. 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용) |
 | `order_items` | id, order_id, product_id, product_name, price_snapshot, quantity | 주문 상품 스냅샷 |
 | `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
 
@@ -167,6 +177,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 - 상품 등록/수정 통합 폼(사진+배송방식+기본정보+상세설명을 한 번에 작성·저장), 이미지 드래그드롭/붙여넣기/다중선택 업로드
 - 개발 모드 전용: 회원가입 시 "관리자 계정으로 만들기" 체크박스 (Supabase 미연결 시에만 노출)
 - 알림 발송(`/admin/notifications`): 제목/내용/아이콘/연결화면(상품·이벤트·주문)을 선택해서 전체 고객에게 알림 발송. 배송 시작/완료 알림은 주문 상태 변경 시 자동 발송(수동 발송 불필요)
+- 아파트별 필터(`/admin/customers`, `/admin/orders`) + 주문 관리에서 아파트 단위 "배송중 전체 배송완료" 일괄 처리(처리된 주문마다 고객에게 배송완료 알림 자동 발송)
 
 **계획**
 - 매출/정산 리포트 (현재 대시보드는 오늘 매출만 단순 합산)
