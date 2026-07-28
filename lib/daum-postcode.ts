@@ -10,11 +10,26 @@
 // 동기적으로 팝업을 연다.
 const SCRIPT_SRC = "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js";
 
+interface DaumPostcodeData {
+  zonecode: string;
+  roadAddress: string;
+  apartment: "Y" | "N";
+  buildingName: string;
+}
+
+declare global {
+  interface Window {
+    daum?: {
+      Postcode: new (options: { oncomplete: (data: DaumPostcodeData) => void; onclose?: (state: string) => void }) => { open: () => void };
+    };
+  }
+}
+
 let loadPromise: Promise<void> | null = null;
 
 function loadScript(): Promise<void> {
   if (typeof window === "undefined") return Promise.reject(new Error("주소검색은 브라우저에서만 사용할 수 있어요."));
-  if ((window as any).daum?.Postcode) return Promise.resolve();
+  if (window.daum?.Postcode) return Promise.resolve();
   if (!loadPromise) {
     loadPromise = new Promise((resolve, reject) => {
       const script = document.createElement("script");
@@ -48,8 +63,8 @@ const CLOSED = new Error("CLOSED");
 
 function runPostcode(resolve: (result: DaumAddressResult) => void, reject: (error: Error) => void) {
   let resolved = false;
-  new (window as any).daum.Postcode({
-    oncomplete: (data: any) => {
+  new window.daum!.Postcode({
+    oncomplete: (data) => {
       resolved = true;
       resolve({
         zonecode: data.zonecode ?? "",
@@ -57,7 +72,7 @@ function runPostcode(resolve: (result: DaumAddressResult) => void, reject: (erro
         apartmentName: data.apartment === "Y" ? (data.buildingName ?? "") : "",
       });
     },
-    onclose: (state: string) => {
+    onclose: (state) => {
       if (!resolved && state === "FORCE_CLOSE") reject(CLOSED);
     },
   }).open();
@@ -67,7 +82,7 @@ function runPostcode(resolve: (result: DaumAddressResult) => void, reject: (erro
 // 열어 브라우저 팝업 차단을 피한다. 아직 로드 전이면 기다렸다 여는데, 이 경우
 // 클릭과 팝업 사이에 지연이 생겨 브라우저에 따라 차단될 수 있다.
 export function openAddressSearch(): Promise<DaumAddressResult> {
-  if ((window as any).daum?.Postcode) {
+  if (window.daum?.Postcode) {
     return new Promise<DaumAddressResult>((resolve, reject) => runPostcode(resolve, reject));
   }
   return loadScript().then(() => new Promise<DaumAddressResult>((resolve, reject) => runPostcode(resolve, reject)));
