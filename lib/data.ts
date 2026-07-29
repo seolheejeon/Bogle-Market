@@ -80,6 +80,42 @@ export async function updateEvent(id: string, patch: Partial<Omit<MarketEvent, "
   saveEvents(events.map((e) => (e.id === id ? { ...e, ...patch } : e)));
 }
 
+// 같은 이벤트를 다음 회차로 복제 — 상품 구성/가격/사진/상세설명은 원본을 그대로
+// 복사하고, 회차마다 바뀌는 제목/마감/배송일만 새로 받는다("이벤트 복제" UX의
+// 핵심은 이 세 값만 입력하면 끝나는 것). 재고는 원본 값을 그대로 복사하므로
+// 새 회차의 실제 재고에 맞게 admin이 따로 조정해야 한다.
+export async function duplicateEvent(eventId: string, overrides: { title: string; deadlineAt: string; deliveryAt: string }): Promise<MarketEvent> {
+  const source = await getEvent(eventId);
+  if (!source) throw new Error("이벤트를 찾을 수 없어요.");
+  const created = await createEvent({
+    type: source.type,
+    title: overrides.title,
+    isFlash: source.isFlash,
+    deadlineAt: overrides.deadlineAt,
+    deliveryAt: overrides.deliveryAt,
+    notice: source.notice,
+  });
+  for (const p of source.products) {
+    await addProduct(created.id, {
+      name: p.name,
+      price: p.price,
+      emoji: p.emoji,
+      photos: p.photos,
+      deliveryType: p.deliveryType,
+      origin: p.origin,
+      weight: p.weight,
+      storage: p.storage,
+      eat: p.eat,
+      description: p.description,
+      detailBlocks: p.detailBlocks,
+      stock: p.stock,
+      visible: p.visible,
+    });
+  }
+  const full = await getEvent(created.id);
+  return full!;
+}
+
 export async function deleteEvent(id: string): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
@@ -108,6 +144,7 @@ export async function addProduct(eventId: string, input: Omit<Product, "id" | "e
         storage: input.storage,
         description: input.description,
         stock: input.stock ?? null,
+        visible: input.visible ?? true,
       })
       .select()
       .single();
@@ -138,12 +175,38 @@ export async function updateProduct(productId: string, patch: Partial<Product>):
     // 비우는 것도 유효한 값 변경이라, patch.stock이 undefined인 채로 명시적으로
     // 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
     if ("stock" in patch) row.stock = patch.stock ?? null;
+    if (patch.visible !== undefined) row.visible = patch.visible;
     const { error } = await supabase.from("products").update(row).eq("id", productId);
     if (error) throw error;
     return;
   }
   const events = loadEvents();
   saveEvents(events.map((e) => ({ ...e, products: e.products.map((p) => (p.id === productId ? { ...p, ...patch } : p)) })));
+}
+
+// 같은 이벤트 안에 상품을 하나 더 복사 — 비슷한 상품(용량/구성만 다른 변형 등)을
+// 빠르게 추가하고 싶을 때, 처음부터 새로 입력하지 않고 기존 상품을 베이스로
+// 시작할 수 있게 한다. 재고는 복사하지 않고 항상 무제한(undefined)으로 시작
+// — 원본 재고 수량을 그대로 복사하면 실제로는 없는 재고가 두 배로 잡히는
+// 착시가 생기기 때문에, 새 상품의 재고는 admin이 직접 다시 정하게 한다.
+export async function duplicateProduct(productId: string): Promise<Product> {
+  const found = await findProductWithEvent(productId);
+  if (!found) throw new Error("상품을 찾을 수 없어요.");
+  const { product: p, event } = found;
+  return addProduct(event.id, {
+    name: `${p.name} (사본)`,
+    price: p.price,
+    emoji: p.emoji,
+    photos: p.photos,
+    deliveryType: p.deliveryType,
+    origin: p.origin,
+    weight: p.weight,
+    storage: p.storage,
+    eat: p.eat,
+    description: p.description,
+    detailBlocks: p.detailBlocks,
+    visible: p.visible,
+  });
 }
 
 export async function deleteProduct(productId: string): Promise<void> {
@@ -281,6 +344,8 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     recipientPhone: input.recipientPhone,
     paymentMethod: input.paymentMethod,
     status: "wait",
+    cancelRequested: false,
+    cancelReason: null,
     items: input.items,
     total: input.total,
     createdAt: new Date().toISOString(),
@@ -405,6 +470,61 @@ export async function cancelOrder(orderId: string, opts: { profileId?: string | 
     throw new Error("이미 발주가 확인된 주문이에요. 취소가 필요하면 관리자에게 문의해 주세요.");
   }
   await updateOrderStatus(orderId, "cancelled");
+}
+
+// 발주확인(confirmed)/배송중(ship) 단계의 취소는 즉시 처리하지 않고 "요청"만
+// 남긴다 — status는 그대로 두어 배송 준비가 계속 진행되게 하고, 관리자가
+// 승인(실제 취소 + 재고 복구)하거나 거절(사유와 함께 알림)할 때까지 기다린다.
+export async function requestCancellation(
+  orderId: string,
+  opts: { profileId?: string | null; guestName?: string; guestPin?: string; reason?: string },
+): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    if (opts.profileId) {
+      const { error } = await supabase.from("orders").update({ cancel_requested: true, cancel_reason: opts.reason || null }).eq("id", orderId);
+      if (error) throw error;
+      return;
+    }
+    const { error } = await supabase.rpc("request_guest_cancel", {
+      p_order_id: orderId,
+      p_name: opts.guestName,
+      p_pin: opts.guestPin,
+      p_reason: opts.reason || null,
+    });
+    if (error) throw error;
+    return;
+  }
+  const target = loadOrders().find((o) => o.id === orderId);
+  if (!target || (target.status !== "confirmed" && target.status !== "ship")) {
+    throw new Error("지금 상태에서는 취소를 요청할 수 없어요.");
+  }
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, cancelRequested: true, cancelReason: opts.reason || null } : o)));
+}
+
+// 관리자가 취소 요청을 승인 — 실제로 주문을 취소 처리하고(재고 복구는
+// updateOrderStatus가 처리) 요청 플래그를 내린다.
+export async function approveCancelRequest(orderId: string): Promise<void> {
+  await updateOrderStatus(orderId, "cancelled");
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("orders").update({ cancel_requested: false }).eq("id", orderId);
+    if (error) throw error;
+    return;
+  }
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, cancelRequested: false } : o)));
+}
+
+// 관리자가 취소 요청을 거절 — 주문 상태(발주확인/배송중)는 그대로 두고 요청
+// 플래그만 내린다. 거절 사유는 고객 알림에 담아 보내는 쪽(호출부)에서 처리.
+export async function rejectCancelRequest(orderId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("orders").update({ cancel_requested: false }).eq("id", orderId);
+    if (error) throw error;
+    return;
+  }
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, cancelRequested: false } : o)));
 }
 
 // 고객이 배송완료 후 반품/환불을 신청 — 관리자가 확인 후 수동으로 환불완료
@@ -587,6 +707,7 @@ function mapSupabaseProduct(row: Record<string, any>): Product {
     description: row.description ?? undefined,
     detailBlocks: row.detail_blocks && row.detail_blocks.length > 0 ? row.detail_blocks : undefined,
     stock: row.stock ?? undefined,
+    visible: row.visible ?? true,
   };
 }
 
@@ -623,6 +744,8 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     recipientPhone: row.recipient_phone,
     paymentMethod: row.payment_method,
     status: row.status,
+    cancelRequested: row.cancel_requested ?? false,
+    cancelReason: row.cancel_reason ?? null,
     items,
     total: row.total,
     createdAt: row.created_at,

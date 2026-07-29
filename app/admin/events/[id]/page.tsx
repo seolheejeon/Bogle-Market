@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import { getEvent, updateEvent, addProduct, updateProduct, deleteProduct } from "@/lib/data";
+import { getEvent, updateEvent, addProduct, updateProduct, deleteProduct, duplicateProduct } from "@/lib/data";
 import type { EventType, MarketEvent, Product, ProductDetailBlock } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice } from "@/lib/format";
@@ -129,6 +129,7 @@ function ProductFormFields({
     photos: string[];
     detailBlocks: ProductDetailBlock[];
     stock: string;
+    visible: boolean;
   };
   setters: {
     setEmoji: (v: string) => void;
@@ -141,6 +142,7 @@ function ProductFormFields({
     setPhotos: (v: string[]) => void;
     setDetailBlocks: (v: ProductDetailBlock[]) => void;
     setStock: (v: string) => void;
+    setVisible: (v: boolean) => void;
   };
 }) {
   return (
@@ -213,6 +215,11 @@ function ProductFormFields({
         />
       </div>
 
+      <label className="flex items-center gap-2 text-[12.5px] text-text-muted">
+        <input type="checkbox" checked={values.visible} onChange={(e) => setters.setVisible(e.target.checked)} />
+        고객 화면에 노출
+      </label>
+
       <div>
         <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
         <DetailBlockEditor blocks={values.detailBlocks} onChange={setters.setDetailBlocks} />
@@ -233,7 +240,9 @@ function ProductRow({ product, eventType, onSaved }: { product: Product; eventTy
   const [photos, setPhotos] = useState<string[]>(product.photos ?? []);
   const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>(product.detailBlocks ?? []);
   const [stock, setStock] = useState(product.stock !== undefined ? String(product.stock) : "");
+  const [visible, setVisible] = useState(product.visible !== false);
   const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   async function save() {
     if (!name.trim() || !price) return;
@@ -249,6 +258,7 @@ function ProductRow({ product, eventType, onSaved }: { product: Product; eventTy
       weight,
       storage,
       stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
+      visible,
     });
     setSaving(false);
     setEditing(false);
@@ -259,24 +269,63 @@ function ProductRow({ product, eventType, onSaved }: { product: Product; eventTy
     await deleteProduct(product.id);
     onSaved();
   }
+  // 노출 스위치/품절 처리는 편집 화면을 열지 않고 목록에서 바로 한 번에 끝낸다.
+  async function toggleVisible() {
+    setBusy(true);
+    await updateProduct(product.id, { visible: !(product.visible !== false) });
+    setBusy(false);
+    onSaved();
+  }
+  async function toggleSoldout() {
+    setBusy(true);
+    await updateProduct(product.id, { stock: product.stock === 0 ? undefined : 0 });
+    setBusy(false);
+    onSaved();
+  }
+  async function duplicate() {
+    setBusy(true);
+    await duplicateProduct(product.id);
+    setBusy(false);
+    onSaved();
+  }
 
   if (!editing) {
+    const isSoldout = product.stock === 0;
+    const isVisible = product.visible !== false;
     return (
       <div className="flex items-center gap-3 rounded-lg border border-border p-2.5">
         <ProductPhoto photo={product.photos?.[0] ?? product.emoji} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-xl" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-semibold">{product.name}</p>
+          <p className="truncate text-[13px] font-semibold">
+            {product.name}
+            {!isVisible && <span className="ml-1.5 rounded-md bg-bg-sunken px-1.5 py-0.5 text-[10.5px] font-bold text-text-muted">숨김</span>}
+          </p>
           <p className="text-[12px] text-text-muted">
             {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
             {product.stock !== undefined && ` · 재고 ${product.stock}개`}
           </p>
         </div>
-        <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
-          수정
-        </button>
-        <button onClick={remove} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold text-red-600">
-          삭제
-        </button>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <button onClick={toggleVisible} disabled={busy} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50">
+            {isVisible ? "숨기기" : "노출"}
+          </button>
+          <button
+            onClick={toggleSoldout}
+            disabled={busy}
+            className={`rounded-[7px] border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50 ${isSoldout ? "border-red-200 bg-red-50 text-red-600" : "border-border"}`}
+          >
+            {isSoldout ? "품절중" : "품절 처리"}
+          </button>
+          <button onClick={duplicate} disabled={busy} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50">
+            복사
+          </button>
+          <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
+            수정
+          </button>
+          <button onClick={remove} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold text-red-600">
+            삭제
+          </button>
+        </div>
       </div>
     );
   }
@@ -286,8 +335,8 @@ function ProductRow({ product, eventType, onSaved }: { product: Product; eventTy
       <ProductFormFields
         eventType={eventType}
         initial={product}
-        values={{ emoji, name, price, origin, weight, storage, deliveryType, photos, detailBlocks, stock }}
-        setters={{ setEmoji, setName, setPrice, setOrigin, setWeight, setStorage, setDeliveryType, setPhotos, setDetailBlocks, setStock }}
+        values={{ emoji, name, price, origin, weight, storage, deliveryType, photos, detailBlocks, stock, visible }}
+        setters={{ setEmoji, setName, setPrice, setOrigin, setWeight, setStorage, setDeliveryType, setPhotos, setDetailBlocks, setStock, setVisible }}
       />
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} className="rounded-[7px] bg-accent px-2.5 py-1.5 text-[12px] font-bold text-white">
@@ -312,6 +361,7 @@ function AddProductForm({ eventId, eventType, onAdded }: { eventId: string; even
   const [photos, setPhotos] = useState<string[]>([]);
   const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>([]);
   const [stock, setStock] = useState("");
+  const [visible, setVisible] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
@@ -328,6 +378,7 @@ function AddProductForm({ eventId, eventType, onAdded }: { eventId: string; even
       weight,
       storage,
       stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
+      visible,
     });
     setEmoji("📦");
     setName("");
@@ -339,6 +390,7 @@ function AddProductForm({ eventId, eventType, onAdded }: { eventId: string; even
     setPhotos([]);
     setDetailBlocks([]);
     setStock("");
+    setVisible(true);
     setSubmitting(false);
     onAdded();
   }
@@ -348,8 +400,8 @@ function AddProductForm({ eventId, eventType, onAdded }: { eventId: string; even
       <p className="text-[12.5px] font-bold text-text-muted">상품 추가</p>
       <ProductFormFields
         eventType={eventType}
-        values={{ emoji, name, price, origin, weight, storage, deliveryType, photos, detailBlocks, stock }}
-        setters={{ setEmoji, setName, setPrice, setOrigin, setWeight, setStorage, setDeliveryType, setPhotos, setDetailBlocks, setStock }}
+        values={{ emoji, name, price, origin, weight, storage, deliveryType, photos, detailBlocks, stock, visible }}
+        setters={{ setEmoji, setName, setPrice, setOrigin, setWeight, setStorage, setDeliveryType, setPhotos, setDetailBlocks, setStock, setVisible }}
       />
       <button onClick={submit} disabled={submitting} className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50">
         {submitting ? "저장 중..." : "저장"}

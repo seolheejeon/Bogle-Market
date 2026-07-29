@@ -33,6 +33,9 @@ export interface Product {
   // undefined = 재고 제한 없음(상시 판매). 정해두면 그 수량만큼만 주문 가능하고,
   // 0이 되면 품절 처리된다.
   stock?: number;
+  // false면 고객 화면(그리드/이벤트 상세 등)에서 숨김 — 상품은 남겨두되 잠시
+  // 판매만 중단하고 싶을 때(예: 다음 회차 준비 중) 삭제 없이 끄는 용도.
+  visible?: boolean;
 }
 
 export interface MarketEvent {
@@ -109,6 +112,13 @@ export interface Order {
   recipientPhone: string;
   paymentMethod: PaymentMethod;
   status: OrderStatus;
+  // 발주확인(confirmed) 이후 고객이 취소를 "요청"하면 true — 상태 자체는 그대로
+  // 두고(배송 준비는 계속 진행) 이 플래그만 세워서, 관리자가 승인(취소 처리)
+  // 하거나 거절(사유와 함께 알림)할 때까지 대기시킨다. wait/paid 단계의 셀프
+  // 취소는 이 플래그 없이 바로 status를 cancelled로 바꾼다(cancelOrder()).
+  cancelRequested: boolean;
+  // 고객이 취소 요청 시 남긴 사유(선택) — 관리자가 승인/거절을 판단할 때 참고.
+  cancelReason: string | null;
   items: OrderItem[];
   total: number;
   createdAt: string; // ISO

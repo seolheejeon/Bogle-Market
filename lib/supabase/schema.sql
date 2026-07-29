@@ -69,6 +69,8 @@ create table if not exists products (
   description text,
   -- null = 재고 제한 없음(상시 판매). 정해두면 주문 시 차감되고, 취소/환불 시 복구된다.
   stock integer check (stock is null or stock >= 0),
+  -- false면 고객 화면에서 숨김(삭제 없이 판매만 잠시 중단). 기본은 true.
+  visible boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -104,6 +106,11 @@ create table if not exists orders (
   -- 붙는 상태. cancelled는 wait/paid 단계에서만 고객이 스스로 취소하거나
   -- 관리자가 언제든 취소할 때.
   status text not null default 'wait' check (status in ('wait', 'paid', 'confirmed', 'ship', 'done', 'refund_requested', 'refunded', 'cancelled')),
+  -- 발주확인(confirmed) 이후 고객이 취소를 "요청"하면 true — status는 그대로 두고
+  -- (배송 준비는 계속 진행) 이 플래그만 세워서, 관리자가 승인(cancelled로 전환 +
+  -- 재고 복구) 하거나 거절(플래그만 해제 + 사유와 함께 알림)할 때까지 대기시킨다.
+  cancel_requested boolean not null default false,
+  cancel_reason text,
   total integer not null check (total >= 0),
   created_at timestamptz not null default now()
 );
@@ -179,7 +186,7 @@ $$;
 drop policy if exists "events are publicly readable" on events;
 create policy "events are publicly readable" on events for select using (true);
 drop policy if exists "products are publicly readable" on products;
-create policy "products are publicly readable" on products for select using (true);
+create policy "products are publicly readable" on products for select using (visible or is_admin());
 
 -- Only admins can write the catalog
 drop policy if exists "admins manage events" on events;
@@ -220,6 +227,13 @@ drop policy if exists "user cancels own order" on orders;
 create policy "user cancels own order" on orders for update
   using (profile_id = auth.uid() and status in ('wait', 'paid'))
   with check (status = 'cancelled');
+-- 발주확인(confirmed) 이후엔 즉시 취소 대신 "취소 요청"만 회원 스스로 남길 수
+-- 있다 — status는 안 건드리고 cancel_requested/cancel_reason만 바꾸도록 강제.
+-- 승인/거절(플래그를 다시 false로 되돌리는 것 포함)은 관리자 전용 정책으로 처리.
+drop policy if exists "user requests cancel" on orders;
+create policy "user requests cancel" on orders for update
+  using (profile_id = auth.uid() and status in ('confirmed', 'ship') and cancel_requested = false)
+  with check (status in ('confirmed', 'ship') and cancel_requested = true);
 drop policy if exists "admins manage orders" on orders;
 create policy "admins manage orders" on orders for all
   using (is_admin())
@@ -323,6 +337,26 @@ begin
       and oi.product_id = p.id
       and p.stock is not null;
   end if;
+end;
+$$;
+
+-- 게스트의 발주확인 이후 취소 요청: 즉시 취소가 아니라 cancel_requested만
+-- 세운다(status는 그대로 둬서 배송 준비가 계속 진행됨). 승인/거절은 관리자가
+-- 관리자 세션으로 직접 orders를 업데이트하므로 별도 RPC가 필요 없다.
+create or replace function request_guest_cancel(p_order_id uuid, p_name text, p_pin text, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update orders
+  set cancel_requested = true, cancel_reason = p_reason
+  where id = p_order_id
+    and guest_pin = p_pin
+    and lower(coalesce(guest_name, recipient_name)) = lower(p_name)
+    and status in ('confirmed', 'ship')
+    and cancel_requested = false;
 end;
 $$;
 

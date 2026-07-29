@@ -3,7 +3,7 @@
 보글마켓 개발 진행상황과 주요 기획 결정을 기록하는 문서입니다.
 **기능이 완료되거나 기획이 바뀔 때마다 이 문서도 함께 업데이트합니다.**
 
-마지막 업데이트: 2026-07-29 (발주확인 단계 + 셀프취소/반품환불 + 재고 제한 추가)
+마지막 업데이트: 2026-07-29 (관리자 페이지를 운영 메인 하나로 재설계)
 
 ---
 
@@ -136,10 +136,22 @@
 
 **발주확인 단계 + 셀프취소/반품환불 + 재고 제한**
 - **주문 상태에 "발주확인" 단계 추가**: 입금대기→입금완료→**발주확인**→배송중→배송완료 순서로 확장(`OrderStatus`에 `confirmed` 추가). 발주확인은 사장님이 실제로 공급처에 발주를 넣은 시점을 뜻하며, 이 시점 이후로는 고객이 스스로 주문을 취소할 수 없다는 게 핵심
-- **고객 셀프취소(치명적 TODO 해결)**: 주문상세에 "주문 취소" 버튼 추가 — 입금대기/입금완료 단계에서만 보이고, 발주확인 이후엔 버튼 대신 "이미 발주가 확인된 주문이에요. 취소가 필요하시면 관리자에게 문의해 주세요." 안내만 표시. 회원은 Supabase RLS 정책(`user cancels own order`, wait/paid 상태일 때만 자기 주문을 cancelled로 바꿀 수 있음)으로, 비회원은 인증이 없어 이름+PIN을 검증하는 `cancel_guest_order` RPC로 서버 측에서도 강제됨 (`lib/data.ts`의 `cancelOrder()`)
+- **고객 셀프취소(치명적 TODO 해결)**: 주문상세에 "주문 취소" 버튼 추가 — 입금대기/입금완료 단계에서만 즉시 취소되고, 발주확인 이후엔 "취소 요청" 버튼으로 바뀌어 관리자 승인/거절을 거친다(자세한 내용은 아래 "관리자 페이지 재설계" 항목 참고). 회원은 Supabase RLS 정책(`user cancels own order`, wait/paid 상태일 때만 자기 주문을 cancelled로 바꿀 수 있음)으로, 비회원은 인증이 없어 이름+PIN을 검증하는 `cancel_guest_order` RPC로 서버 측에서도 강제됨 (`lib/data.ts`의 `cancelOrder()`)
 - **반품/환불**: 배송완료 이후 주문상세에 "반품/환불 신청" 버튼이 나타나고, 누르면 `refund_requested` 상태로 전환돼 관리자 확인을 기다림. 관리자 주문관리에서 "환불완료 처리" 버튼으로 `refunded`로 마무리 — 이 두 상태 전환 모두 신청/완료 시점에 고객에게 알림이 감(입금확인·환불완료만 알림, 발주확인은 고객이 딱히 할 일 없는 내부 상태라 알림 없음)
 - **재고/수량 제한(치명적 TODO 해결)**: `Product.stock`(비우면 재고 제한 없음)을 추가해 상품별로 판매 수량 한도를 걸 수 있음. 관리자 상품 폼에 "재고(비우면 무제한)" 입력란 추가. 주문 생성 시 자동 차감(`decrement_stock` RPC/mock), 취소·환불 시 자동 복구(`increment_stock` RPC/mock) — 재고가 0인 상품은 상품상세/그리드/장바구니/이벤트상세에서 "품절"로 표시되고 담기 자체가 막힘. 체크아웃에서도 담긴 수량이 현재 재고를 넘으면 제출을 막고 어떤 상품이 얼마나 부족한지 알려줌(서버측 차감이 최종 방어선이라 완벽한 동시성 보장은 아니지만, 소규모 운영 단위에서는 충분한 수준)
 - 이 세 가지는 서로 독립적이지만 같은 라운드에 묶어서 처리 — 관리자 주문관리 필터 칩과 대시보드 "오늘 매출" 집계도 새 상태들(`confirmed`/`refund_requested`/`refunded`)을 반영하도록 업데이트
+
+**관리자 페이지를 "운영 메인" 하나로 재설계** (`feature/admin-ops-redesign`)
+- 배경: 기능은 웬만큼 갖췄으니 이제부터는 "매일 직접 운영하기 편한 속도"가 더 중요하다는 판단 — 스마트스토어처럼 클릭 수·페이지 이동을 최소화하고 목록에서 대부분의 작업을 끝내는 구조로 관리자 페이지 전체를 다시 설계. 구현 전에 인터랙티브 HTML 목업으로 화면구조/클릭흐름을 먼저 확인받고 진행함
+- **대시보드+주문관리를 한 페이지로 통합**(`/admin`) — 기존엔 `/admin`(요약 3칸)과 `/admin/orders`(목록)가 분리돼 있었는데, 로그인하면 바로 오늘 할 일과 주문 목록이 한 화면에 다 보이도록 합침. `/admin/orders`는 옛 북마크가 계속 동작하도록 `/admin`으로 리다이렉트만 함
+- **오늘 할 일 타일 9개**: 입금대기/발주확인 대기/오늘 배송예정/배송중/오늘 배송완료/취소 요청/반품·환불 요청/품절 상품(→`/admin/events`)/진행중 이벤트(→`/admin/events`). 타일을 누르면 아래 주문 목록이 그 조건으로 즉시 필터됨(페이지 이동 없음). "오늘 배송예정/배송완료"는 정확한 상태변경 시각을 안 남겨두고 있어서, 해당 이벤트의 배송예정일(`deliveryAt`)이 오늘인지로 판단하는 근사치임 — 실제 상태변경 시각을 기록하려면 스키마에 컬럼이 더 필요해서 지금은 보류
+- **주문 필터를 배송방식 우선 종속(cascading) 구조로 전환**: 기존 이벤트→상태→배송방식 순서 대신, 1차로 배송방식(전체/문고리/사다드림/택배)을 고르면 2차 드롭다운 내용이 바뀜 — 문고리·사다드림은 회차(이벤트) 목록, 택배는 상품명 목록(정확한 상품명 기준 — "복숭아"처럼 뭉뚱그린 상품군 매칭은 하지 않음, 별도 "상품군" 개념을 새로 만들지 않기 위한 의도적 단순화). 뒤이어 주문상태·검색(주문번호/고객명)·조회기간 필터가 붙음
+- **조회 기간 필터 + 이력 보존**: 배송완료/취소/환불 주문도 삭제하지 않고 그대로 남기되, 기본 조회 범위만 최근 30일로 좁힘. 최근 7일/30일/3개월/1년/전체 중 고를 수 있고, "오늘 배송예정/완료" 타일처럼 날짜 자체로 조건을 거는 경우는 기간 필터가 30일 안쪽으로 걸려 있으면 결과가 가려질 수 있어 자동으로 "전체"로 풀어줌
+- **취소 요청 → 승인/거절**: 발주확인 이후 고객의 "취소 요청"은 주문 상태를 안 건드리고(`orders.cancel_requested`/`cancel_reason` 컬럼만 세움 — 배송준비는 계속 진행되어야 하므로) 관리자가 승인(재고 복구 + 실제 취소 + 알림)하거나 거절(사유를 적어 알림으로 그대로 전달, 주문은 원래 상태로 계속 진행)할 수 있음. 회원은 RLS 정책(`user requests cancel`, confirmed/ship 상태에서만 cancel_requested를 true로 바꿀 수 있음), 게스트는 `request_guest_cancel` RPC로 서버에서도 강제
+- **배송 관리(아파트별 그룹)**: 문고리·사다드림처럼 아파트 단위로 배송하는 주문을, 배송중 상태 기준으로 이벤트→아파트로 자동 그룹핑해서 보여주고 아파트별로 "배송완료 처리 + 알림 발송" 버튼 하나로 그 아파트 주문만 일괄 처리(기존의 "아파트 필터 선택 후 일괄버튼" 방식을 대체)
+- **이벤트 복제**: `/admin/events` 목록에서 "복제" 누르면 인라인으로 짧은 폼(제목/마감/배송일 세 칸)이 펼쳐지고, 상품 구성·가격·사진·상세설명은 원본을 그대로 복사(`duplicateEvent()`)해 바로 다음 회차가 만들어짐. "종료"는 마감시각을 즉시 지금으로 당겨 고객 화면에 마감으로 표시만 함(서버측 주문 차단은 아직 안 함 — 배송방식별 판매 정책 설계가 끝난 뒤 다시 연결할 예정, 위 "마감시간 차단은 이번 라운드에서 뺐다가 되돌림" 항목 참고)
+- **상품 관리**: 노출 여부(`products.visible`, 끄면 고객 화면 그리드/이벤트상세/홈에서만 숨김 — 직접 링크로는 계속 보임), 품절 처리(재고를 0으로 세팅하는 원클릭 버튼), 상품 복사(`duplicateProduct()` — 재고는 복사 안 하고 항상 무제한으로 시작, 실제 재고는 새로 정하게 함)를 상품 목록에서 바로 처리
+- 관리자 페이지 사이드바에서 "주문 관리" 탭 제거(운영 메인에 흡수), "대시보드" → "운영 메인"으로 이름 변경
 
 **인프라**
 - Supabase 스키마(`lib/supabase/schema.sql`) + seed 데이터(`lib/supabase/seed.sql`)
@@ -191,8 +203,8 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `profiles` | id(=auth.users.id), username(unique), nickname, phone(unique), is_admin | 1:1 auth 연동. 이메일은 auth.users에만 있고 이 테이블엔 없음(사용자에게 절대 노출 안 함). `is_admin=true`가 관리자 |
 | `addresses` | id, profile_id, name, phone, zonecode, road_address, apartment_name, detail_address, entrance_method, memo, is_default | 회원 배송지. Daum 주소검색으로만 입력받음 — `road_address`/`zonecode`는 검색 결과 그대로, `apartment_name`은 검색 결과가 공동주택일 때만 채워지는 값(사용자가 입력하는 항목 아님, 관리자 아파트별 필터용), `detail_address`(동/호 등)만 사용자가 직접 입력. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, is_flash, deadline_at, delivery_at, notice | 공동구매 회차 |
-| `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), detail_blocks(jsonb), delivery_type, origin, weight, storage, description, stock | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `detail_blocks`는 관리자가 작성한 상세설명(제목/본문/사진 블록). `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `stock`이 null이면 재고 제한 없음(상시 판매), 값이 있으면 그 수량만큼만 판매되고 0이면 품절. `image_url`은 미사용 |
-| `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, total | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용). `status`는 `wait`→`paid`→`confirmed`(발주확인, 이후 고객 셀프취소 불가)→`ship`→`done` 순서로 진행하고, `done` 이후 `refund_requested`/`refunded`가 곁가지로 붙을 수 있으며 `wait`/`paid` 단계에서는 고객이 직접 `cancelled`로 바꿀 수 있음(RLS/RPC로 서버에서도 이 조건을 강제) |
+| `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), detail_blocks(jsonb), delivery_type, origin, weight, storage, description, stock, visible | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `detail_blocks`는 관리자가 작성한 상세설명(제목/본문/사진 블록). `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `stock`이 null이면 재고 제한 없음(상시 판매), 값이 있으면 그 수량만큼만 판매되고 0이면 품절. `visible=false`면 고객 화면 그리드/이벤트상세/홈에서 숨김(삭제 아님, 직접 링크 접근은 계속 됨) — RLS도 `visible or is_admin()`으로 비노출 상품을 비관리자에게 숨김. `image_url`은 미사용 |
+| `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, cancel_requested, cancel_reason, total | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용). `status`는 `wait`→`paid`→`confirmed`(발주확인)→`ship`→`done` 순서로 진행하고, `done` 이후 `refund_requested`/`refunded`가 곁가지로 붙을 수 있으며 `wait`/`paid` 단계에서는 고객이 직접 `cancelled`로 바꿀 수 있음(RLS/RPC로 서버에서도 강제). `cancel_requested`는 발주확인 이후 고객이 취소를 "요청"했는지 나타내는 플래그 — status는 그대로 두고(배송 준비 계속 진행) 관리자가 승인(cancelled로 전환)하거나 거절(플래그만 해제)할 때까지 대기. `cancel_reason`은 고객이 남긴 취소 사유(선택) |
 | `order_items` | id, order_id, product_id, product_name, price_snapshot, quantity | 주문 상품 스냅샷 |
 | `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
 | `store_settings` | id(boolean, 항상 true — 싱글턴 강제), bank_name, account_number, account_holder, updated_at | 무통장입금 안내용 계좌 정보. 매장 전체에 한 행만 존재. 조회는 게스트 포함 전체 공개, 수정은 관리자만 |
@@ -201,21 +213,21 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 - `is_username_taken(username)` / `is_phone_taken(phone)` — 회원가입 중복확인용 SECURITY DEFINER 함수. RLS상 남의 프로필은 못 보지만, "존재 여부"만 boolean으로 반환
 - `lookup_guest_orders(name, pin)` — 비회원 주문 조회용 RPC (RLS 우회, 인증 불필요), 이름+확인번호 일치하는 주문 전부 반환
 - `cancel_guest_order(order_id, name, pin)` — 비회원 셀프취소용 RPC. 이름+확인번호가 맞고 아직 발주확인 전(wait/paid)일 때만 취소로 전환, 실제로 취소됐을 때만 재고를 복구
+- `request_guest_cancel(order_id, name, pin, reason)` — 비회원의 발주확인 이후 취소 "요청"용 RPC. status는 안 건드리고 confirmed/ship일 때만 cancel_requested를 true로 세움
 - `decrement_stock(product_id, qty)` / `increment_stock(product_id, qty)` — 재고 차감/복구 RPC. `stock`이 null(재고 제한 없음)인 상품은 건드리지 않고, 차감은 0 밑으로 안 내려감
 - 시드 데이터는 고정 UUID(`00000000-...`) 사용, `ON CONFLICT DO NOTHING`이라 재실행해도 안전
 
 # 관리자 기능 계획
 
 **완료**
-- 이벤트 CRUD (`/admin/events`, `/admin/events/new`, `/admin/events/[id]`)
-- 상품 CRUD (이벤트 상세 화면 내)
-- 주문 관리: 상태 변경(입금확인→발주확인→배송시작→배송완료), 환불완료 처리 (`/admin/orders`)
+- 이벤트 CRUD (`/admin/events`, `/admin/events/new`, `/admin/events/[id]`) + 이벤트 복제(인라인 폼, 상품 그대로 복사) + 조기 종료
+- 상품 CRUD (이벤트 상세 화면 내) + 노출 여부 토글, 품절 처리 버튼, 상품 복사
+- 운영 메인(`/admin`)에서 대시보드 타일 + 주문 목록 + 배송 관리를 한 화면에서 처리: 상태 변경(입금확인→발주확인→배송시작→배송완료), 취소 요청 승인/거절, 환불완료 처리, 배송방식→종속 필터, 조회기간 필터
 - 상품 등록/수정 통합 폼(사진+배송방식+기본정보+상세설명을 한 번에 작성·저장), 이미지 드래그드롭/붙여넣기/다중선택 업로드
 - 개발 모드 전용: 회원가입 시 "관리자 계정으로 만들기" 체크박스 (Supabase 미연결 시에만 노출)
 - 알림 발송(`/admin/notifications`): 제목/내용/아이콘/연결화면(상품·이벤트·주문)을 선택해서 전체 고객에게 알림 발송. 배송 시작/완료 알림은 주문 상태 변경 시 자동 발송(수동 발송 불필요)
-- 아파트별 필터(`/admin/customers`, `/admin/orders`) + 주문 관리에서 아파트 단위 "배송중 전체 배송완료" 일괄 처리(처리된 주문마다 고객에게 배송완료 알림 자동 발송)
+- 아파트별 필터(`/admin/customers`) + 운영 메인의 "배송 관리" 패널에서 이벤트→아파트로 자동 그룹핑해 아파트 단위 "배송완료 처리 + 알림 발송" 원클릭 처리
 - 설정(`/admin/settings`): 무통장입금 계좌 정보(은행명/계좌번호/예금주) 등록 — 체크아웃/주문상세에 그대로 노출됨
-- 이벤트 필터(`/admin/orders`): 주문 목록을 이벤트별로 조회 가능, 각 주문 카드에도 소속 이벤트명 표시
 - 상품 폼에 재고 입력란 추가(비우면 무제한), 상품 목록에 남은 재고 표시
 
 **계획**
