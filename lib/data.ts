@@ -107,6 +107,7 @@ export async function addProduct(eventId: string, input: Omit<Product, "id" | "e
         weight: input.weight,
         storage: input.storage,
         description: input.description,
+        stock: input.stock ?? null,
       })
       .select()
       .single();
@@ -133,6 +134,10 @@ export async function updateProduct(productId: string, patch: Partial<Product>):
     if (patch.weight !== undefined) row.weight = patch.weight;
     if (patch.storage !== undefined) row.storage = patch.storage;
     if (patch.description !== undefined) row.description = patch.description;
+    // "stock" in patch (아닌 !== undefined)로 확인 — 재고 한도를 다시 "무제한"으로
+    // 비우는 것도 유효한 값 변경이라, patch.stock이 undefined인 채로 명시적으로
+    // 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
+    if ("stock" in patch) row.stock = patch.stock ?? null;
     const { error } = await supabase.from("products").update(row).eq("id", productId);
     if (error) throw error;
     return;
@@ -256,6 +261,9 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     }));
     const { error: itemError } = await supabase.from("order_items").insert(itemRows);
     if (itemError) throw itemError;
+    for (const item of input.items) {
+      await supabase.rpc("decrement_stock", { p_product_id: item.productId, p_qty: item.quantity });
+    }
     return mapSupabaseOrder(orderRow, input.items);
   }
   const order: Order = {
@@ -278,7 +286,34 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     createdAt: new Date().toISOString(),
   };
   saveOrders([order, ...loadOrders()]);
+  saveEvents(decrementProductStock(loadEvents(), input.items));
   return order;
+}
+
+// 재고가 있는 상품(stock이 정해진 상품)만 골라 주문 수량만큼 차감한다(0 밑으로는
+// 안 내려감). stock이 undefined인 상품(재고 제한 없음)은 그대로 둔다.
+function decrementProductStock(events: MarketEvent[], items: OrderItem[]): MarketEvent[] {
+  const deltaByProduct = new Map(items.map((i) => [i.productId, i.quantity]));
+  return events.map((e) => ({
+    ...e,
+    products: e.products.map((p) => {
+      const qty = deltaByProduct.get(p.id);
+      if (!qty || p.stock === undefined) return p;
+      return { ...p, stock: Math.max(0, p.stock - qty) };
+    }),
+  }));
+}
+
+function restoreProductStock(events: MarketEvent[], items: OrderItem[]): MarketEvent[] {
+  const deltaByProduct = new Map(items.map((i) => [i.productId, i.quantity]));
+  return events.map((e) => ({
+    ...e,
+    products: e.products.map((p) => {
+      const qty = deltaByProduct.get(p.id);
+      if (!qty || p.stock === undefined) return p;
+      return { ...p, stock: p.stock + qty };
+    }),
+  }));
 }
 
 export async function listOrdersForProfile(profileId: string): Promise<Order[]> {
@@ -325,14 +360,63 @@ export async function lookupGuestOrders(name: string, pin: string): Promise<Orde
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+// 취소/환불로 바뀔 때는 차감됐던 재고를 되돌려준다(재고 제한이 있는 상품만).
+function isRestockingStatus(status: OrderStatus): boolean {
+  return status === "cancelled" || status === "refunded";
+}
+
 export async function updateOrderStatus(orderId: string, status: OrderStatus): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
+    if (isRestockingStatus(status)) {
+      const { data: itemRows } = await supabase.from("order_items").select("product_id, quantity").eq("order_id", orderId);
+      for (const item of itemRows ?? []) {
+        if (item.product_id) await supabase.rpc("increment_stock", { p_product_id: item.product_id, p_qty: item.quantity });
+      }
+    }
     const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
     if (error) throw error;
     return;
   }
-  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, status } : o)));
+  const orders = loadOrders();
+  if (isRestockingStatus(status)) {
+    const target = orders.find((o) => o.id === orderId);
+    if (target) saveEvents(restoreProductStock(loadEvents(), target.items));
+  }
+  saveOrders(orders.map((o) => (o.id === orderId ? { ...o, status } : o)));
+}
+
+// 고객 셀프취소 — 발주확인(confirmed) 이전 단계(wait/paid)에서만 가능. 회원은
+// RLS가, 게스트는 SECURITY DEFINER RPC(cancel_guest_order)가 이 조건을
+// 서버 측에서도 강제한다. mock 모드는 별도 인증 계층이 없어 여기서 직접 확인.
+export async function cancelOrder(orderId: string, opts: { profileId?: string | null; guestName?: string; guestPin?: string }): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    if (opts.profileId) {
+      await updateOrderStatus(orderId, "cancelled");
+      return;
+    }
+    const { error } = await supabase.rpc("cancel_guest_order", { p_order_id: orderId, p_name: opts.guestName, p_pin: opts.guestPin });
+    if (error) throw error;
+    return;
+  }
+  const target = loadOrders().find((o) => o.id === orderId);
+  if (!target || (target.status !== "wait" && target.status !== "paid")) {
+    throw new Error("이미 발주가 확인된 주문이에요. 취소가 필요하면 관리자에게 문의해 주세요.");
+  }
+  await updateOrderStatus(orderId, "cancelled");
+}
+
+// 고객이 배송완료 후 반품/환불을 신청 — 관리자가 확인 후 수동으로 환불완료
+// 처리한다(입금확인 등 다른 상태 전환과 같은 패턴).
+export async function requestRefund(orderId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("orders").update({ status: "refund_requested" }).eq("id", orderId);
+    if (error) throw error;
+    return;
+  }
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, status: "refund_requested" as OrderStatus } : o)));
 }
 
 // ---------- Profiles (admin customer lookup) ----------
@@ -502,6 +586,7 @@ function mapSupabaseProduct(row: Record<string, any>): Product {
     storage: row.storage ?? undefined,
     description: row.description ?? undefined,
     detailBlocks: row.detail_blocks && row.detail_blocks.length > 0 ? row.detail_blocks : undefined,
+    stock: row.stock ?? undefined,
   };
 }
 

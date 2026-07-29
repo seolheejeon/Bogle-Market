@@ -7,19 +7,28 @@ import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 
-const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", paid: "ship", ship: "done" };
-const NEXT_LABEL: Partial<Record<OrderStatus, string>> = { wait: "입금확인", paid: "배송시작", ship: "배송완료 처리" };
+const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", paid: "confirmed", confirmed: "ship", ship: "done" };
+const NEXT_LABEL: Partial<Record<OrderStatus, string>> = { wait: "입금확인", paid: "발주확인", confirmed: "배송시작", ship: "배송완료 처리" };
 
-// 배송중/배송완료로 바뀔 때 해당 주문 고객에게만(비회원 제외) 알림을 보낸다 —
-// 개별 처리와 아파트 단위 일괄 처리 양쪽에서 재사용. eventTitle이 있으면
-// 어느 이벤트 배송인지 알림 문구에 같이 넣어준다.
+// 주요 상태 전환 시 해당 주문 고객에게만(비회원 제외) 알림을 보낸다 — 개별
+// 처리와 아파트 단위 일괄 처리 양쪽에서 재사용. eventTitle이 있으면 어느
+// 이벤트 배송인지 알림 문구에 같이 넣어준다. 발주확인(confirmed)은 고객이
+// 딱히 할 일이 없는 내부 진행 상태라 알림을 보내지 않는다.
+const STATUS_CHANGE_NOTICE: Partial<Record<OrderStatus, { title: string; message: string; icon: string }>> = {
+  paid: { title: "입금이 확인됐어요", message: "입금이 확인됐어요. 발주 준비 중이에요.", icon: "💰" },
+  ship: { title: "배송이 시작됐어요", message: "배송이 시작됐어요.", icon: "🚚" },
+  done: { title: "배송이 완료됐어요", message: "배송이 완료됐어요. 확인해보세요!", icon: "🚚" },
+  refunded: { title: "환불이 완료됐어요", message: "환불 처리가 완료됐어요.", icon: "💸" },
+};
+
 async function notifyStatusChange(order: Order, next: OrderStatus, eventTitle?: string) {
-  if (!order.profileId || (next !== "ship" && next !== "done")) return;
+  const notice = STATUS_CHANGE_NOTICE[next];
+  if (!order.profileId || !notice) return;
   const prefix = eventTitle ? `[${eventTitle}] ` : "";
   await createNotification({
-    title: next === "ship" ? "배송이 시작됐어요" : "배송이 완료됐어요",
-    message: `${prefix}주문번호 ${order.orderNumber} ${next === "ship" ? "배송이 시작됐어요." : "배송이 완료됐어요. 확인해보세요!"}`,
-    icon: "🚚",
+    title: notice.title,
+    message: `${prefix}주문번호 ${order.orderNumber} ${notice.message}`,
+    icon: notice.icon,
     linkType: "ORDER",
     linkId: order.id,
     profileId: order.profileId,
@@ -60,6 +69,12 @@ export default function AdminOrdersPage() {
     await updateOrderStatus(order.id, "cancelled");
     refresh();
   }
+  async function markRefunded(order: Order) {
+    if (!confirm("환불 처리를 완료했나요?")) return;
+    await updateOrderStatus(order.id, "refunded");
+    await notifyStatusChange(order, "refunded", eventTitleById.get(order.eventId));
+    refresh();
+  }
 
   // 검색 결과가 공동주택이 아닌 주문(아파트명이 빈 값)은 필터 목록에서 제외.
   const apartments = useMemo(() => Array.from(new Set(orders.map((o) => o.apartmentName).filter((v): v is string => !!v))).sort(), [orders]);
@@ -92,7 +107,7 @@ export default function AdminOrdersPage() {
     <div>
       <p className="mb-4 text-[15px] font-bold">주문 관리</p>
       <div className="mb-3 flex gap-2 overflow-x-auto">
-        {(["all", "wait", "paid", "ship", "done", "cancelled"] as const).map((s) => (
+        {(["all", "wait", "paid", "confirmed", "ship", "done", "refund_requested", "refunded", "cancelled"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setFilter(s)}
@@ -170,7 +185,15 @@ export default function AdminOrdersPage() {
                     {NEXT_LABEL[o.status]}
                   </button>
                 )}
-                {o.status !== "done" && o.status !== "cancelled" && (
+                {o.status === "refund_requested" && (
+                  <button onClick={() => markRefunded(o)} className="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white">
+                    환불완료 처리
+                  </button>
+                )}
+                {o.status !== "done" &&
+                  o.status !== "cancelled" &&
+                  o.status !== "refund_requested" &&
+                  o.status !== "refunded" && (
                   <button onClick={() => cancel(o)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-semibold text-red-600">
                     취소
                   </button>

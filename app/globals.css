@@ -26,6 +26,12 @@
   --status-ship-fg: #1d4ed8;
   --status-done-bg: #d1fae5;
   --status-done-fg: #047857;
+  --status-confirmed-bg: #ede9fe;
+  --status-confirmed-fg: #6d28d9;
+  --status-refund-requested-bg: #ffedd5;
+  --status-refund-requested-fg: #c2410c;
+  --status-refunded-bg: #f1f5f4;
+  --status-refunded-fg: #4b5a52;
 }
 
 @media (prefers-color-scheme: dark) {

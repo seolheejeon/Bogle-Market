@@ -16,7 +16,9 @@ export default function AdminDashboardPage() {
   }, []);
 
   const waitCount = orders.filter((o) => o.status === "wait").length;
-  const todaySales = orders.filter((o) => o.status !== "cancelled" && new Date(o.createdAt).toDateString() === new Date().toDateString()).reduce((s, o) => s + o.total, 0);
+  const todaySales = orders
+    .filter((o) => o.status !== "cancelled" && o.status !== "refund_requested" && o.status !== "refunded" && new Date(o.createdAt).toDateString() === new Date().toDateString())
+    .reduce((s, o) => s + o.total, 0);
 
   return (
     <div>

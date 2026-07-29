@@ -128,6 +128,7 @@ function ProductFormFields({
     deliveryType: EventType;
     photos: string[];
     detailBlocks: ProductDetailBlock[];
+    stock: string;
   };
   setters: {
     setEmoji: (v: string) => void;
@@ -139,6 +140,7 @@ function ProductFormFields({
     setDeliveryType: (v: EventType) => void;
     setPhotos: (v: string[]) => void;
     setDetailBlocks: (v: ProductDetailBlock[]) => void;
+    setStock: (v: string) => void;
   };
 }) {
   return (
@@ -201,6 +203,14 @@ function ProductFormFields({
           value={values.storage}
           onChange={(e) => setters.setStorage(e.target.value)}
         />
+        <input
+          className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+          placeholder="재고(비우면 무제한)"
+          type="number"
+          min={0}
+          value={values.stock}
+          onChange={(e) => setters.setStock(e.target.value)}
+        />
       </div>
 
       <div>
@@ -222,6 +232,7 @@ function ProductRow({ product, eventType, onSaved }: { product: Product; eventTy
   const [deliveryType, setDeliveryType] = useState<EventType>(product.deliveryType ?? eventType);
   const [photos, setPhotos] = useState<string[]>(product.photos ?? []);
   const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>(product.detailBlocks ?? []);
+  const [stock, setStock] = useState(product.stock !== undefined ? String(product.stock) : "");
   const [saving, setSaving] = useState(false);
 
   async function save() {
@@ -237,6 +248,7 @@ function ProductRow({ product, eventType, onSaved }: { product: Product; eventTy
       origin,
       weight,
       storage,
+      stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
     });
     setSaving(false);
     setEditing(false);
@@ -256,6 +268,7 @@ function ProductRow({ product, eventType, onSaved }: { product: Product; eventTy
           <p className="truncate text-[13px] font-semibold">{product.name}</p>
           <p className="text-[12px] text-text-muted">
             {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
+            {product.stock !== undefined && ` · 재고 ${product.stock}개`}
           </p>
         </div>
         <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
@@ -273,8 +286,8 @@ function ProductRow({ product, eventType, onSaved }: { product: Product; eventTy
       <ProductFormFields
         eventType={eventType}
         initial={product}
-        values={{ emoji, name, price, origin, weight, storage, deliveryType, photos, detailBlocks }}
-        setters={{ setEmoji, setName, setPrice, setOrigin, setWeight, setStorage, setDeliveryType, setPhotos, setDetailBlocks }}
+        values={{ emoji, name, price, origin, weight, storage, deliveryType, photos, detailBlocks, stock }}
+        setters={{ setEmoji, setName, setPrice, setOrigin, setWeight, setStorage, setDeliveryType, setPhotos, setDetailBlocks, setStock }}
       />
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} className="rounded-[7px] bg-accent px-2.5 py-1.5 text-[12px] font-bold text-white">
@@ -298,12 +311,24 @@ function AddProductForm({ eventId, eventType, onAdded }: { eventId: string; even
   const [deliveryType, setDeliveryType] = useState<EventType>(eventType);
   const [photos, setPhotos] = useState<string[]>([]);
   const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>([]);
+  const [stock, setStock] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
     if (!name.trim() || !price) return;
     setSubmitting(true);
-    await addProduct(eventId, { name: name.trim(), price: Number(price) || 0, emoji: emoji || "📦", photos, detailBlocks, deliveryType, origin, weight, storage });
+    await addProduct(eventId, {
+      name: name.trim(),
+      price: Number(price) || 0,
+      emoji: emoji || "📦",
+      photos,
+      detailBlocks,
+      deliveryType,
+      origin,
+      weight,
+      storage,
+      stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
+    });
     setEmoji("📦");
     setName("");
     setPrice("");
@@ -313,6 +338,7 @@ function AddProductForm({ eventId, eventType, onAdded }: { eventId: string; even
     setDeliveryType(eventType);
     setPhotos([]);
     setDetailBlocks([]);
+    setStock("");
     setSubmitting(false);
     onAdded();
   }
@@ -322,8 +348,8 @@ function AddProductForm({ eventId, eventType, onAdded }: { eventId: string; even
       <p className="text-[12.5px] font-bold text-text-muted">상품 추가</p>
       <ProductFormFields
         eventType={eventType}
-        values={{ emoji, name, price, origin, weight, storage, deliveryType, photos, detailBlocks }}
-        setters={{ setEmoji, setName, setPrice, setOrigin, setWeight, setStorage, setDeliveryType, setPhotos, setDetailBlocks }}
+        values={{ emoji, name, price, origin, weight, storage, deliveryType, photos, detailBlocks, stock }}
+        setters={{ setEmoji, setName, setPrice, setOrigin, setWeight, setStorage, setDeliveryType, setPhotos, setDetailBlocks, setStock }}
       />
       <button onClick={submit} disabled={submitting} className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50">
         {submitting ? "저장 중..." : "저장"}

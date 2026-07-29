@@ -67,6 +67,8 @@ create table if not exists products (
   weight text,
   storage text,
   description text,
+  -- null = 재고 제한 없음(상시 판매). 정해두면 주문 시 차감되고, 취소/환불 시 복구된다.
+  stock integer check (stock is null or stock >= 0),
   created_at timestamptz not null default now()
 );
 
@@ -96,7 +98,12 @@ create table if not exists orders (
   -- 아파트 단지별로 주문을 필터링/일괄 배송처리할 때 쓴다.
   apartment_name text,
   payment_method text not null check (payment_method in ('bank_transfer', 'card', 'kakaopay', 'incheon_eum')),
-  status text not null default 'wait' check (status in ('wait', 'paid', 'ship', 'done', 'cancelled')),
+  -- wait(입금대기) -> paid(입금완료) -> confirmed(발주확인, 사장님이 실제 발주를
+  -- 넣은 시점 — 이후로는 고객 셀프취소 불가) -> ship(배송중) -> done(배송완료).
+  -- refund_requested/refunded는 done 이후 반품/환불 요청이 있을 때만 곁가지로
+  -- 붙는 상태. cancelled는 wait/paid 단계에서만 고객이 스스로 취소하거나
+  -- 관리자가 언제든 취소할 때.
+  status text not null default 'wait' check (status in ('wait', 'paid', 'confirmed', 'ship', 'done', 'refund_requested', 'refunded', 'cancelled')),
   total integer not null check (total >= 0),
   created_at timestamptz not null default now()
 );
@@ -206,6 +213,13 @@ drop policy if exists "user reads own orders" on orders;
 create policy "user reads own orders" on orders for select using (profile_id = auth.uid());
 drop policy if exists "user creates own orders" on orders;
 create policy "user creates own orders" on orders for insert with check (profile_id = auth.uid() or profile_id is null);
+-- 발주확인(confirmed) 전 단계(wait/paid)에서만 회원 본인이 셀프취소 가능 —
+-- 발주가 들어간 뒤엔 관리자에게 문의해야 한다(앱에서 버튼 자체를 숨김).
+-- 게스트 주문의 셀프취소는 인증이 없어 이 정책이 아니라 별도 RPC(cancel_guest_order)로 처리.
+drop policy if exists "user cancels own order" on orders;
+create policy "user cancels own order" on orders for update
+  using (profile_id = auth.uid() and status in ('wait', 'paid'))
+  with check (status = 'cancelled');
 drop policy if exists "admins manage orders" on orders;
 create policy "admins manage orders" on orders for all
   using (is_admin())
@@ -278,6 +292,62 @@ as $$
   where guest_pin = p_pin
     and lower(coalesce(guest_name, recipient_name)) = lower(p_name)
   order by created_at desc;
+$$;
+
+-- 게스트 주문 셀프취소: 이름+PIN이 맞고, 아직 발주확인 전(wait/paid) 단계일
+-- 때만 취소로 전환한다. lookup_guest_orders와 같은 방식으로 인증 없이 호출되므로
+-- SECURITY DEFINER + 조건을 함수 안에서 직접 검증. 실제로 취소됐을 때만
+-- (조건이 안 맞아 0행이 바뀐 경우는 제외) 차감됐던 재고를 복구한다.
+create or replace function cancel_guest_order(p_order_id uuid, p_name text, p_pin text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_cancelled_id uuid;
+begin
+  update orders
+  set status = 'cancelled'
+  where id = p_order_id
+    and guest_pin = p_pin
+    and lower(coalesce(guest_name, recipient_name)) = lower(p_name)
+    and status in ('wait', 'paid')
+  returning id into v_cancelled_id;
+
+  if v_cancelled_id is not null then
+    update products p
+    set stock = p.stock + oi.quantity
+    from order_items oi
+    where oi.order_id = v_cancelled_id
+      and oi.product_id = p.id
+      and p.stock is not null;
+  end if;
+end;
+$$;
+
+-- 재고 차감/복구: 주문 생성 시 차감, 취소/환불 시 복구. stock이 null인
+-- 상품(재고 제한 없음)은 그대로 null 유지. 0 밑으로는 내려가지 않는다.
+create or replace function decrement_stock(p_product_id uuid, p_qty integer)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update products set stock = greatest(stock - p_qty, 0) where id = p_product_id and stock is not null;
+end;
+$$;
+
+create or replace function increment_stock(p_product_id uuid, p_qty integer)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update products set stock = stock + p_qty where id = p_product_id and stock is not null;
+end;
 $$;
 
 -- Storage: public bucket for product photos uploaded from the admin panel.

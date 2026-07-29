@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
-import { listOrdersForProfile, lookupGuestOrders, getEvent } from "@/lib/data";
+import { listOrdersForProfile, lookupGuestOrders, getEvent, cancelOrder, requestRefund } from "@/lib/data";
 import type { MarketEvent, Order, OrderStatus } from "@/types";
 import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL } from "@/types";
 import { formatDateTime, formatPrice, formatEventDateChip } from "@/lib/format";
@@ -14,6 +14,7 @@ import { BankAccountInfo } from "@/components/BankAccountInfo";
 const STEPS: { value: OrderStatus; label: string }[] = [
   { value: "wait", label: "입금대기" },
   { value: "paid", label: "입금완료" },
+  { value: "confirmed", label: "발주확인" },
   { value: "ship", label: "배송중" },
   { value: "done", label: "배송완료" },
 ];
@@ -26,14 +27,17 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
   // 하나뿐인 보통의 주문에서는 항상 빈 배열.
   const [batchSiblings, setBatchSiblings] = useState<Order[]>([]);
   const [event, setEvent] = useState<MarketEvent | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [requestingRefund, setRequestingRefund] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (loading) return;
-    function apply(all: Order[]) {
-      const found = all.find((o) => o.id === orderId) ?? null;
-      setOrder(found);
-      setBatchSiblings(found ? all.filter((o) => o.batchId === found.batchId && o.id !== found.id) : []);
-    }
+  function apply(all: Order[]) {
+    const found = all.find((o) => o.id === orderId) ?? null;
+    setOrder(found);
+    setBatchSiblings(found ? all.filter((o) => o.batchId === found.batchId && o.id !== found.id) : []);
+  }
+
+  function refresh() {
     if (profile) {
       listOrdersForProfile(profile.id).then(apply);
     } else if (guestName && guestPin) {
@@ -41,6 +45,12 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
     } else {
       setOrder(null);
     }
+  }
+
+  useEffect(() => {
+    if (loading) return;
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, loading, orderId, guestName, guestPin]);
 
   useEffect(() => {
@@ -48,8 +58,48 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
     getEvent(order.eventId).then(setEvent);
   }, [order]);
 
-  const stepIndex = order ? STEPS.findIndex((s) => s.value === order.status) : -1;
+  // done 이후 refund_requested/refunded로 갈라져도(STEPS엔 없는 상태) 스테퍼는
+  // "배송완료"까지 다 밟은 것으로 표시 — 실제로 그 단계를 다 거쳐야 도달하는 상태라서.
+  const stepIndex = order
+    ? order.status === "refund_requested" || order.status === "refunded"
+      ? STEPS.length - 1
+      : STEPS.findIndex((s) => s.value === order.status)
+    : -1;
   const siblingHref = (id: string) => (guestName && guestPin ? `/orders/${id}?gn=${encodeURIComponent(guestName)}&pin=${guestPin}` : `/orders/${id}`);
+
+  const canSelfCancel = order?.status === "wait" || order?.status === "paid";
+  const cancelLocked = order?.status === "confirmed" || order?.status === "ship";
+  const canRequestRefund = order?.status === "done";
+
+  async function handleCancel() {
+    if (!order) return;
+    if (!confirm("이 주문을 취소할까요?")) return;
+    setActionError(null);
+    setCancelling(true);
+    try {
+      await cancelOrder(order.id, { profileId: profile?.id ?? null, guestName, guestPin });
+      refresh();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "취소 중 오류가 발생했어요.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function handleRequestRefund() {
+    if (!order) return;
+    if (!confirm("반품/환불을 신청할까요? 확인 후 처리해드릴게요.")) return;
+    setActionError(null);
+    setRequestingRefund(true);
+    try {
+      await requestRefund(order.id);
+      refresh();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "신청 중 오류가 발생했어요.");
+    } finally {
+      setRequestingRefund(false);
+    }
+  }
 
   return (
     <div>
@@ -102,6 +152,37 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
                 <span className="text-text-muted">결제 방법</span> {PAYMENT_METHOD_LABEL[order.paymentMethod]}
               </p>
             </div>
+
+            {actionError && <p className="mb-4 text-[12.5px] font-semibold text-red-600">{actionError}</p>}
+
+            {canSelfCancel && (
+              <button
+                onClick={handleCancel}
+                disabled={cancelling}
+                className="mb-4 w-full rounded-[10px] border border-border py-2.5 text-[13px] font-semibold text-red-600 disabled:opacity-50"
+              >
+                {cancelling ? "취소 처리 중..." : "주문 취소"}
+              </button>
+            )}
+            {cancelLocked && (
+              <p className="mb-4 rounded-[10px] bg-bg-sunken p-3 text-[12.5px] text-text-muted">
+                이미 발주가 확인된 주문이에요. 취소가 필요하시면 관리자에게 문의해 주세요.
+              </p>
+            )}
+            {canRequestRefund && (
+              <button
+                onClick={handleRequestRefund}
+                disabled={requestingRefund}
+                className="mb-4 w-full rounded-[10px] border border-border py-2.5 text-[13px] font-semibold disabled:opacity-50"
+              >
+                {requestingRefund ? "신청 처리 중..." : "반품/환불 신청"}
+              </button>
+            )}
+            {order.status === "refund_requested" && (
+              <p className="mb-4 rounded-[10px] bg-bg-sunken p-3 text-[12.5px] text-text-muted">
+                반품/환불 신청이 접수됐어요. 확인 후 처리해드릴게요.
+              </p>
+            )}
 
             {batchSiblings.length > 0 && (
               <div className="mb-4 rounded-[10px] border border-border p-3">

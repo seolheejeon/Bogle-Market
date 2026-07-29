@@ -2,7 +2,7 @@ export type EventType = "DOOR" | "GROUP_BUY" | "PARCEL";
 
 export type PaymentMethod = "bank_transfer" | "card" | "kakaopay" | "incheon_eum";
 
-export type OrderStatus = "wait" | "paid" | "ship" | "done" | "cancelled";
+export type OrderStatus = "wait" | "paid" | "confirmed" | "ship" | "done" | "refund_requested" | "refunded" | "cancelled";
 
 // The product detail page's long-form "상세설명" content, rendered top to
 // bottom in order — mirrors the shape a future admin editor would write
@@ -30,6 +30,9 @@ export interface Product {
   eat?: string;
   description?: string;
   detailBlocks?: ProductDetailBlock[];
+  // undefined = 재고 제한 없음(상시 판매). 정해두면 그 수량만큼만 주문 가능하고,
+  // 0이 되면 품절 처리된다.
+  stock?: number;
 }
 
 export interface MarketEvent {
@@ -145,8 +148,11 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   wait: "입금대기",
   paid: "입금완료",
+  confirmed: "발주확인",
   ship: "배송중",
   done: "배송완료",
+  refund_requested: "반품/환불 신청",
+  refunded: "환불완료",
   cancelled: "취소",
 };
 

@@ -101,6 +101,11 @@ export function CheckoutView() {
       setError("장바구니가 비어있어요.");
       return;
     }
+    const overStock = items.filter((i) => i.product.stock !== undefined && i.qty > i.product.stock);
+    if (overStock.length > 0) {
+      setError(`재고가 부족한 상품이 있어요: ${overStock.map((i) => `${i.product.name}(재고 ${i.product.stock}개)`).join(", ")}. 장바구니에서 수량을 줄여주세요.`);
+      return;
+    }
     setSubmitting(true);
     try {
       if (profile && saveAsDefault && defaultAddressId) {

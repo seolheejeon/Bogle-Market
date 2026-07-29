@@ -55,7 +55,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                 </Link>
                 <p className="text-[13.5px] font-bold">{formatPrice(product.price)}</p>
               </div>
-              <QtyControl productId={product.id} />
+              <QtyControl productId={product.id} max={product.stock} />
             </div>
           ))}
         </div>
