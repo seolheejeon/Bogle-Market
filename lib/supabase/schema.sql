@@ -50,23 +50,38 @@ create table if not exists events (
   created_at timestamptz not null default now()
 );
 
+-- 카탈로그 상품 — 사진/설명/원산지 등 "내용물"만 담고 이벤트와 무관하게 하나만
+-- 존재한다. 여러 이벤트가 event_products를 통해 같은 카탈로그 상품을 그대로
+-- 재사용한다("상품 관리"에서 한 번 고치면 어디서 팔든 다 반영됨).
 create table if not exists products (
   id uuid primary key default gen_random_uuid(),
-  event_id uuid not null references events(id) on delete cascade,
   name text not null,
-  price integer not null check (price >= 0),
   emoji text not null default '📦',
   image_url text,
   photos jsonb not null default '[]'::jsonb,
   detail_blocks jsonb not null default '[]'::jsonb,
+  origin text,
+  weight text,
+  storage text,
+  eat text,
+  description text,
+  created_at timestamptz not null default now()
+);
+
+-- 이벤트별 상품 등록(리스팅) — 카탈로그 상품 하나를 이번 회차에 어떤
+-- 가격/재고/노출로 팔지 나타낸다. 장바구니/주문/재고는 전부 이 테이블의 id
+-- 기준으로 돈다 — 같은 카탈로그 상품이 여러 이벤트에 동시에 걸려도 이벤트별로
+-- 독립된 재고를 가져야 하기 때문. product_id는 삭제 방지(on delete restrict가
+-- 기본 NO ACTION과 동일하게 동작) — 사용 중인 카탈로그 상품은 삭제가 막힌다.
+create table if not exists event_products (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null references events(id) on delete cascade,
+  product_id uuid not null references products(id),
+  price integer not null check (price >= 0),
   -- null means "inherit the parent event's delivery type" — most products
   -- don't need to override it, but a few (e.g. a mostly-문고리 event with one
   -- 택배-only item) can.
   delivery_type text check (delivery_type in ('DOOR', 'GROUP_BUY', 'PARCEL')),
-  origin text,
-  weight text,
-  storage text,
-  description text,
   -- null = 재고 제한 없음(상시 판매). 정해두면 주문 시 차감되고, 취소/환불 시 복구된다.
   stock integer check (stock is null or stock >= 0),
   -- false면 고객 화면에서 숨김(삭제 없이 판매만 잠시 중단). 기본은 true.
@@ -118,7 +133,9 @@ create table if not exists orders (
 create table if not exists order_items (
   id uuid primary key default gen_random_uuid(),
   order_id uuid not null references orders(id) on delete cascade,
-  product_id uuid references products(id) on delete set null,
+  -- 카탈로그 상품(products)이 아니라 이벤트별 리스팅(event_products)을 가리킨다
+  -- — 재고 차감/복구가 이벤트별 리스팅 단위로 동작해야 하기 때문.
+  event_product_id uuid references event_products(id) on delete set null,
   product_name text not null,
   price_snapshot integer not null,
   quantity integer not null check (quantity > 0)
@@ -157,6 +174,7 @@ alter table profiles enable row level security;
 alter table addresses enable row level security;
 alter table events enable row level security;
 alter table products enable row level security;
+alter table event_products enable row level security;
 alter table orders enable row level security;
 alter table order_items enable row level security;
 alter table notifications enable row level security;
@@ -182,11 +200,15 @@ $$;
 -- safely against a database that already has tables/policies from a
 -- previous run (Postgres has no "create policy if not exists").
 
--- Anyone can read event/product catalog
+-- Anyone can read event/product catalog. 카탈로그 상품(products) 자체는
+-- 내용물(사진/설명)이라 민감할 게 없어 공개 조회, 실제로 지금 사길 수
+-- 있는지는 event_products의 visible로 따로 가린다.
 drop policy if exists "events are publicly readable" on events;
 create policy "events are publicly readable" on events for select using (true);
 drop policy if exists "products are publicly readable" on products;
-create policy "products are publicly readable" on products for select using (visible or is_admin());
+create policy "products are publicly readable" on products for select using (true);
+drop policy if exists "event_products are publicly readable" on event_products;
+create policy "event_products are publicly readable" on event_products for select using (visible or is_admin());
 
 -- Only admins can write the catalog
 drop policy if exists "admins manage events" on events;
@@ -195,6 +217,10 @@ create policy "admins manage events" on events for all
   with check (is_admin());
 drop policy if exists "admins manage products" on products;
 create policy "admins manage products" on products for all
+  using (is_admin())
+  with check (is_admin());
+drop policy if exists "admins manage event_products" on event_products;
+create policy "admins manage event_products" on event_products for all
   using (is_admin())
   with check (is_admin());
 
@@ -330,12 +356,12 @@ begin
   returning id into v_cancelled_id;
 
   if v_cancelled_id is not null then
-    update products p
-    set stock = p.stock + oi.quantity
+    update event_products ep
+    set stock = ep.stock + oi.quantity
     from order_items oi
     where oi.order_id = v_cancelled_id
-      and oi.product_id = p.id
-      and p.stock is not null;
+      and oi.event_product_id = ep.id
+      and ep.stock is not null;
   end if;
 end;
 $$;
@@ -360,27 +386,27 @@ begin
 end;
 $$;
 
--- 재고 차감/복구: 주문 생성 시 차감, 취소/환불 시 복구. stock이 null인
--- 상품(재고 제한 없음)은 그대로 null 유지. 0 밑으로는 내려가지 않는다.
-create or replace function decrement_stock(p_product_id uuid, p_qty integer)
+-- 재고 차감/복구: 주문 생성 시 차감, 취소/환불 시 복구. 리스팅(event_products)의
+-- stock이 null인 경우(재고 제한 없음)는 그대로 null 유지. 0 밑으로는 안 내려감.
+create or replace function decrement_stock(p_event_product_id uuid, p_qty integer)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
 begin
-  update products set stock = greatest(stock - p_qty, 0) where id = p_product_id and stock is not null;
+  update event_products set stock = greatest(stock - p_qty, 0) where id = p_event_product_id and stock is not null;
 end;
 $$;
 
-create or replace function increment_stock(p_product_id uuid, p_qty integer)
+create or replace function increment_stock(p_event_product_id uuid, p_qty integer)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
 begin
-  update products set stock = stock + p_qty where id = p_product_id and stock is not null;
+  update event_products set stock = stock + p_qty where id = p_event_product_id and stock is not null;
 end;
 $$;
 

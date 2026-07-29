@@ -3,7 +3,7 @@
 보글마켓 개발 진행상황과 주요 기획 결정을 기록하는 문서입니다.
 **기능이 완료되거나 기획이 바뀔 때마다 이 문서도 함께 업데이트합니다.**
 
-마지막 업데이트: 2026-07-29 (관리자 페이지를 운영 메인 하나로 재설계)
+마지막 업데이트: 2026-07-29 (상품/이벤트 카탈로그 분리 — 안 B로 전환)
 
 ---
 
@@ -131,7 +131,7 @@
 - 여러 이벤트가 섞여 있어도 고객 입장에선 결제를 한 번만 하므로, 같이 생성된 주문들을 묶는 `orders.batch_id`(uuid, FK 아님, 그냥 같은 값을 공유하는 그룹 키)를 도입. 이벤트가 하나뿐인 보통의 주문도 자기 자신만 담긴 배치로 취급됨(컬럼 기본값 `gen_random_uuid()`)
 - **부수 효과로 해결된 문제들**: (1) 주문 상세/체크아웃에 이벤트 제목·배송예정일이 표시됨(`orders.event_id`로 이벤트를 다시 조회할 수 있게 됐으므로), (2) 관리자 주문 관리(`/admin/orders`)에 이벤트 필터와 각 주문의 이벤트명이 추가됨("이벤트별 주문 조회" 요구사항 충족), (3) 아파트 단위 일괄 배송완료가 이제 항상 단일 이벤트 주문만 다루므로 "일부만 배송된 주문을 통째로 완료 처리"하던 잠재 버그가 구조적으로 사라짐
 - 주문 상세 페이지에 "이번에 함께 결제한 다른 주문"(batch_id가 같은 형제 주문) 목록을 추가 — 배송시작/완료 알림 문구에도 이벤트명을 넣어 어떤 주문인지 바로 알 수 있게 함
-- **Product/Event 구조는 그대로 유지(안 A 채택)** — Product가 Event에 1:1로 종속된 현재 구조를 유지하고, Product를 카탈로그(내용)와 이벤트별 등록(EventProduct, 가격/배송방식)으로 분리하는 정규화는 지금 하지 않기로 결정. 재진행(같은 상품을 다른 회차에 다시 파는 것) 시 상품을 복제하는 기능도 이번엔 만들지 않음 — 나중에 실제로 "같은 상품을 여러 회차에 반복 재사용"하는 운영 패턴이 확인되면 그때 검토. 복제 기능을 나중에 만들 때 `origin_product_id`(복제 출처를 가리키는 자기참조 컬럼) 같은 이력 필드를 같이 넣어두면, 훨씬 나중에 EventProduct로 넘어가야 할 때도 "어떤 상품 row들이 같은 카탈로그 상품의 반복 판매인지" 자동으로 알 수 있어 마이그레이션이 쉬워짐 — 지금은 그 컬럼도 보류
+- ~~**Product/Event 구조는 그대로 유지(안 A 채택)**~~ — 이 시점엔 Product-Event 1:1 구조를 유지하고 카탈로그/리스팅 분리(안 B)는 보류하기로 했었으나, 실제 운영("관리자 페이지를 운영 메인 하나로 재설계" 이후) 과정에서 같은 상품이 회차마다 중복 등록되는 불편이 확인돼 **아래 "상품/이벤트 카탈로그 분리" 라운드에서 안 B로 전환함**
 - **마감시간 차단은 이번 라운드에서 뺐다가 되돌림** — 처음엔 `deadline_at` 하나로 모든 이벤트를 일괄 차단(`assertEventIsOpen()` + UI disabled 처리)하도록 만들었으나, 실제 운영 정책이 배송방식마다 다르다는 게 확인됨: 사다드림은 마감 후 주문 불가가 기본이지만, 문고리는 재고 있는 상품이면 마감 후에도 주문을 받아 다음날 배송하는 경우가 있고, 택배는 상시 판매(시즌 ON/OFF만 관리)라 애초에 "마감"이라는 개념이 안 맞음. `deadline_at` 하나로는 이 세 정책을 표현할 수 없어서, 서버 측 강제(`assertEventIsOpen`)와 UI 비활성화 로직을 전부 되돌리고 `deadline_at` 자체(및 정보성 표시)만 남겨뒀다. `event_id`/`batch_id` 구조는 이 정책과 독립적이라 그대로 유지. 다음 단계로 이벤트별 판매 정책(예: `STRICT_DEADLINE`/`SOFT_DEADLINE`/`ALWAYS_OPEN`)을 먼저 설계한 뒤, 그 정책에 맞춰 마감 로직을 다시 구현할 예정 — 아래 TODO 참고
 
 **발주확인 단계 + 셀프취소/반품환불 + 재고 제한**
@@ -152,6 +152,15 @@
 - **이벤트 복제**: `/admin/events` 목록에서 "복제" 누르면 인라인으로 짧은 폼(제목/마감/배송일 세 칸)이 펼쳐지고, 상품 구성·가격·사진·상세설명은 원본을 그대로 복사(`duplicateEvent()`)해 바로 다음 회차가 만들어짐. "종료"는 마감시각을 즉시 지금으로 당겨 고객 화면에 마감으로 표시만 함(서버측 주문 차단은 아직 안 함 — 배송방식별 판매 정책 설계가 끝난 뒤 다시 연결할 예정, 위 "마감시간 차단은 이번 라운드에서 뺐다가 되돌림" 항목 참고)
 - **상품 관리**: 노출 여부(`products.visible`, 끄면 고객 화면 그리드/이벤트상세/홈에서만 숨김 — 직접 링크로는 계속 보임), 품절 처리(재고를 0으로 세팅하는 원클릭 버튼), 상품 복사(`duplicateProduct()` — 재고는 복사 안 하고 항상 무제한으로 시작, 실제 재고는 새로 정하게 함)를 상품 목록에서 바로 처리
 - 관리자 페이지 사이드바에서 "주문 관리" 탭 제거(운영 메인에 흡수), "대시보드" → "운영 메인"으로 이름 변경
+
+**상품/이벤트 카탈로그 분리** (`feature/product-catalog-split`)
+- 배경: 관리자 페이지를 실제로 운영해보니, 상품이 이벤트에 종속돼 있어서 "유정란 20구" 같은 같은 상품이 문고리 1회차·2회차마다 각각 새 상품으로 다시 등록되는 게 불편하다는 문제 발견 — 특정 상품을 고치려면 그 상품이 들어간 이벤트를 하나하나 찾아 들어가야 했음. 이전 라운드("주문을 이벤트에 묶기")에서 "안 A(Product-Event 1:1 유지)"로 결정하며 보류해뒀던 정규화를 이번에 실제로 진행(안 B로 전환)
+- **`products`를 순수 카탈로그로 재정의**하고 **`event_products` 조인 테이블을 새로 추가** — 상품의 "내용"(이름/이모지/사진/원산지/중량/보관법/조리법/설명/상세블록)은 `products`에 상품당 한 행만 존재하고, 이벤트별 "판매 정보"(가격/배송방식/재고/노출여부)는 `event_products`가 `event_id` + `product_id`로 갖는 구조. 예: "유정란 20구"는 카탈로그에 한 번만 있고, 문고리 1회차/2회차는 각자 다른 `event_products` 행(=리스팅)으로 같은 카탈로그 상품을 참조하며 가격도 회차마다 다르게 정할 수 있음
+- **화면에 쓰이는 `Product` 타입은 거의 그대로 유지** — 컴포넌트 15곳 이상을 건드리지 않기 위해, `Product`는 여전히 평평한(flat) 모양이고 `catalogProductId` 필드 하나만 추가됨. `lib/data.ts`가 mock 모드는 클라이언트에서, Supabase 모드는 중첩 select(`event_products(*, products(*))`)로 카탈로그+리스팅을 합쳐서 기존과 똑같은 `Product` 객체를 만들어 돌려줌 — 장바구니/주문/재고 로직은 전혀 안 건드림. **`Product.id`(=`OrderItem.productId`)는 여전히 리스팅(=옛 이벤트별 상품) id를 가리킴** — 재고 차감/복구, 취소·환불, 과거 주문 조회가 전부 이 id 기준으로 이미 동작하고 있었으므로, 카탈로그가 분리돼도 주문 관련 로직은 손댈 필요가 없었음
+- **새 상품 관리 화면**(`/admin/products`) — 카탈로그 상품 검색/등록/수정/삭제 전담 화면. 여기서 고친 사진·설명·원산지 등은 그 상품을 쓰는 모든 이벤트에 즉시 반영됨. 가격·재고·노출은 각 이벤트 관리 화면(`/admin/events/[id]`)에서 회차별로 따로 정함
+- **이벤트 관리 화면 개편** — 이벤트 상세에서 더 이상 상품을 새로 만들지 않고, 기존 카탈로그 상품을 검색해서 가격/재고/노출만 정해 추가(`AddExistingProductForm`). 상품 내용을 고치고 싶으면 "상품 관리"로 안내하는 링크만 보여줌. 이벤트 복제(`duplicateEvent`)도 리스팅만 복사하므로 카탈로그 상품 수가 늘어나지 않음(검증 완료: 8개 상품짜리 이벤트를 복제해도 카탈로그는 그대로, 새 리스팅 8개만 생김)
+- **삭제 보호**: 이벤트에서 사용 중인 카탈로그 상품은 삭제 불가 — Supabase는 `event_products.product_id`의 FK(ON DELETE 기본값 NO ACTION)가 막고 에러코드(`23503`)를 친절한 메시지로 변환, mock 모드는 삭제 전에 모든 이벤트의 리스팅을 직접 스캔해서 같은 메시지를 띄움. 반대로 리스팅(이벤트에서의 상품)을 "제거"하는 건 카탈로그 상품 자체엔 영향 없음(검증 완료)
+- 브라우저로 실제 검증: 카탈로그에서 "유정란 20구" 설명을 한 번 수정 → 문고리 1회차/2회차 두 상품 상세 페이지 모두에 즉시 반영됨(동일 카탈로그 재사용 확인). 안동 사다드림에 유정란을 새 가격(8,500원)으로 추가해도 문고리 회차들의 가격(7,900원)은 안 바뀜(리스팅별 독립 가격 확인). 특정 회차에서만 노출을 꺼도 다른 회차의 같은 상품은 그대로 보임(리스팅별 독립 노출 확인)
 
 **인프라**
 - Supabase 스키마(`lib/supabase/schema.sql`) + seed 데이터(`lib/supabase/seed.sql`)
@@ -203,9 +212,10 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `profiles` | id(=auth.users.id), username(unique), nickname, phone(unique), is_admin | 1:1 auth 연동. 이메일은 auth.users에만 있고 이 테이블엔 없음(사용자에게 절대 노출 안 함). `is_admin=true`가 관리자 |
 | `addresses` | id, profile_id, name, phone, zonecode, road_address, apartment_name, detail_address, entrance_method, memo, is_default | 회원 배송지. Daum 주소검색으로만 입력받음 — `road_address`/`zonecode`는 검색 결과 그대로, `apartment_name`은 검색 결과가 공동주택일 때만 채워지는 값(사용자가 입력하는 항목 아님, 관리자 아파트별 필터용), `detail_address`(동/호 등)만 사용자가 직접 입력. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, is_flash, deadline_at, delivery_at, notice | 공동구매 회차 |
-| `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), detail_blocks(jsonb), delivery_type, origin, weight, storage, description, stock, visible | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `detail_blocks`는 관리자가 작성한 상세설명(제목/본문/사진 블록). `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `stock`이 null이면 재고 제한 없음(상시 판매), 값이 있으면 그 수량만큼만 판매되고 0이면 품절. `visible=false`면 고객 화면 그리드/이벤트상세/홈에서 숨김(삭제 아님, 직접 링크 접근은 계속 됨) — RLS도 `visible or is_admin()`으로 비노출 상품을 비관리자에게 숨김. `image_url`은 미사용 |
+| `products` | id, name, emoji, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, eat, description | **카탈로그 상품** — 이벤트와 무관하게 상품당 한 행만 존재하는 "내용물"(사진/설명/원산지 등). 같은 상품이 여러 회차에 걸려도 여기엔 한 번만 있고, 아래 `event_products`가 이 id를 재사용함. 삭제하려는 상품이 `event_products`에서 쓰이고 있으면 FK가 막음(에러코드 `23503`) |
+| `event_products` | id, event_id, product_id(→products), price, delivery_type, stock, visible | **이벤트별 상품 리스팅** — 옛 `products` 테이블이 하던 역할(이벤트에 속한 판매 정보)을 그대로 가져오되 내용은 `product_id`로 카탈로그를 참조. `price`/`delivery_type`/`stock`/`visible`은 리스팅마다 독립적이라, 같은 카탈로그 상품도 회차별로 다른 가격·재고·노출 여부를 가질 수 있음. `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `stock`이 null이면 재고 제한 없음, 값이 있으면 그 수량만큼만 판매되고 0이면 품절. `visible=false`면 고객 화면에서 이 리스팅만 숨김(카탈로그 상품 자체나 다른 회차 리스팅엔 영향 없음) — RLS도 `visible or is_admin()`으로 비노출 리스팅을 비관리자에게 숨김. 화면(`Product` 타입)에는 `products`와 조인한 평평한 모양으로 합쳐져서 전달됨(`catalogProductId`로 원본 카탈로그 id를 알 수 있음) |
 | `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, cancel_requested, cancel_reason, total | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용). `status`는 `wait`→`paid`→`confirmed`(발주확인)→`ship`→`done` 순서로 진행하고, `done` 이후 `refund_requested`/`refunded`가 곁가지로 붙을 수 있으며 `wait`/`paid` 단계에서는 고객이 직접 `cancelled`로 바꿀 수 있음(RLS/RPC로 서버에서도 강제). `cancel_requested`는 발주확인 이후 고객이 취소를 "요청"했는지 나타내는 플래그 — status는 그대로 두고(배송 준비 계속 진행) 관리자가 승인(cancelled로 전환)하거나 거절(플래그만 해제)할 때까지 대기. `cancel_reason`은 고객이 남긴 취소 사유(선택) |
-| `order_items` | id, order_id, product_id, product_name, price_snapshot, quantity | 주문 상품 스냅샷 |
+| `order_items` | id, order_id, event_product_id(→event_products), product_name, price_snapshot, quantity | 주문 상품 스냅샷. `event_product_id`는 카탈로그 분리 이전엔 `product_id`였던 컬럼 — 가리키는 대상(리스팅 id)은 동일해서 주문/재고/취소 로직은 변경 없음. TS 쪽 `OrderItem.productId` 필드명은 그대로 유지(DB 컬럼명만 바뀜) |
 | `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
 | `store_settings` | id(boolean, 항상 true — 싱글턴 강제), bank_name, account_number, account_holder, updated_at | 무통장입금 안내용 계좌 정보. 매장 전체에 한 행만 존재. 조회는 게스트 포함 전체 공개, 수정은 관리자만 |
 
@@ -214,16 +224,17 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 - `lookup_guest_orders(name, pin)` — 비회원 주문 조회용 RPC (RLS 우회, 인증 불필요), 이름+확인번호 일치하는 주문 전부 반환
 - `cancel_guest_order(order_id, name, pin)` — 비회원 셀프취소용 RPC. 이름+확인번호가 맞고 아직 발주확인 전(wait/paid)일 때만 취소로 전환, 실제로 취소됐을 때만 재고를 복구
 - `request_guest_cancel(order_id, name, pin, reason)` — 비회원의 발주확인 이후 취소 "요청"용 RPC. status는 안 건드리고 confirmed/ship일 때만 cancel_requested를 true로 세움
-- `decrement_stock(product_id, qty)` / `increment_stock(product_id, qty)` — 재고 차감/복구 RPC. `stock`이 null(재고 제한 없음)인 상품은 건드리지 않고, 차감은 0 밑으로 안 내려감
+- `decrement_stock(event_product_id, qty)` / `increment_stock(event_product_id, qty)` — 재고 차감/복구 RPC. 카탈로그 분리 이후 `event_products` 행을 대상으로 동작(파라미터명만 변경, 가리키는 대상은 그대로). `stock`이 null(재고 제한 없음)인 리스팅은 건드리지 않고, 차감은 0 밑으로 안 내려감
 - 시드 데이터는 고정 UUID(`00000000-...`) 사용, `ON CONFLICT DO NOTHING`이라 재실행해도 안전
 
 # 관리자 기능 계획
 
 **완료**
-- 이벤트 CRUD (`/admin/events`, `/admin/events/new`, `/admin/events/[id]`) + 이벤트 복제(인라인 폼, 상품 그대로 복사) + 조기 종료
-- 상품 CRUD (이벤트 상세 화면 내) + 노출 여부 토글, 품절 처리 버튼, 상품 복사
+- 이벤트 CRUD (`/admin/events`, `/admin/events/new`, `/admin/events/[id]`) + 이벤트 복제(인라인 폼, 리스팅만 복사·카탈로그 상품은 재사용) + 조기 종료
+- **상품 관리(`/admin/products`)**: 카탈로그 상품 검색/등록/수정/삭제 — 사진/설명 등 내용은 여기서만 고치고, 이 상품을 쓰는 모든 이벤트에 즉시 반영됨. 사용 중인 상품은 삭제 차단(친절한 에러 메시지)
+- 이벤트 상세(`/admin/events/[id]`)에서는 상품을 새로 만들지 않고 카탈로그 검색 후 추가(`AddExistingProductForm`) — 가격/재고/노출 여부만 회차별로 정함. 노출 토글, 품절 처리, "제거"(리스팅만 빠짐, 카탈로그 상품은 안 지워짐)는 상품 목록에서 바로 처리
 - 운영 메인(`/admin`)에서 대시보드 타일 + 주문 목록 + 배송 관리를 한 화면에서 처리: 상태 변경(입금확인→발주확인→배송시작→배송완료), 취소 요청 승인/거절, 환불완료 처리, 배송방식→종속 필터, 조회기간 필터
-- 상품 등록/수정 통합 폼(사진+배송방식+기본정보+상세설명을 한 번에 작성·저장), 이미지 드래그드롭/붙여넣기/다중선택 업로드
+- 카탈로그 상품 등록/수정 폼(사진+기본정보+상세설명을 한 번에 작성·저장, `/admin/products`), 이미지 드래그드롭/붙여넣기/다중선택 업로드
 - 개발 모드 전용: 회원가입 시 "관리자 계정으로 만들기" 체크박스 (Supabase 미연결 시에만 노출)
 - 알림 발송(`/admin/notifications`): 제목/내용/아이콘/연결화면(상품·이벤트·주문)을 선택해서 전체 고객에게 알림 발송. 배송 시작/완료 알림은 주문 상태 변경 시 자동 발송(수동 발송 불필요)
 - 아파트별 필터(`/admin/customers`) + 운영 메인의 "배송 관리" 패널에서 이벤트→아파트로 자동 그룹핑해 아파트 단위 "배송완료 처리 + 알림 발송" 원클릭 처리

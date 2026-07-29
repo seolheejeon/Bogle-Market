@@ -4,12 +4,13 @@
 // Lets the app (including the admin panel) run end-to-end during development
 // before a real backend is wired up.
 
-import { MOCK_EVENTS, MOCK_NOTIFICATIONS } from "@/lib/mock-data";
-import type { MarketEvent, NotificationItem, Order, Profile, Address, StoreSettings } from "@/types";
+import { MOCK_CATALOG_PRODUCTS, MOCK_EVENTS, MOCK_NOTIFICATIONS } from "@/lib/mock-data";
+import type { CatalogProduct, MarketEventSeed, NotificationItem, Order, Profile, Address, StoreSettings } from "@/types";
 import { EMPTY_STORE_SETTINGS } from "@/types";
 
 const KEYS = {
   events: "bogle_events",
+  catalogProducts: "bogle_catalog_products",
   orders: "bogle_orders",
   notifications: "bogle_notifications",
   authProfile: "bogle_auth_profile",
@@ -39,14 +40,24 @@ function write<T>(key: string, value: T) {
   window.localStorage.setItem(key, JSON.stringify(value));
 }
 
-export function loadEvents(): MarketEvent[] {
-  const existing = read<MarketEvent[] | null>(KEYS.events, null);
+export function loadEvents(): MarketEventSeed[] {
+  const existing = read<MarketEventSeed[] | null>(KEYS.events, null);
   if (existing) return existing;
   write(KEYS.events, MOCK_EVENTS);
   return MOCK_EVENTS;
 }
-export function saveEvents(events: MarketEvent[]) {
+export function saveEvents(events: MarketEventSeed[]) {
   write(KEYS.events, events);
+}
+
+export function loadCatalogProducts(): CatalogProduct[] {
+  const existing = read<CatalogProduct[] | null>(KEYS.catalogProducts, null);
+  if (existing) return existing;
+  write(KEYS.catalogProducts, MOCK_CATALOG_PRODUCTS);
+  return MOCK_CATALOG_PRODUCTS;
+}
+export function saveCatalogProducts(products: CatalogProduct[]) {
+  write(KEYS.catalogProducts, products);
 }
 
 export function loadOrders(): Order[] {

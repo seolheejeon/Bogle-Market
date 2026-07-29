@@ -6,9 +6,62 @@
 // including the admin panel, is testable before a real backend exists.
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { loadEvents, saveEvents, loadOrders, saveOrders, loadNotifications, saveNotifications, loadAccounts, loadStoreSettings, saveStoreSettings, genId } from "@/lib/local-store";
-import type { Address, MarketEvent, NotificationItem, Order, OrderItem, OrderStatus, PaymentMethod, Product, Profile, StoreSettings } from "@/types";
+import {
+  loadEvents,
+  saveEvents,
+  loadCatalogProducts,
+  saveCatalogProducts,
+  loadOrders,
+  saveOrders,
+  loadNotifications,
+  saveNotifications,
+  loadAccounts,
+  loadStoreSettings,
+  saveStoreSettings,
+  genId,
+} from "@/lib/local-store";
+import type {
+  Address,
+  CatalogProduct,
+  EventProductSeed,
+  EventType,
+  MarketEvent,
+  MarketEventSeed,
+  NotificationItem,
+  Order,
+  OrderItem,
+  OrderStatus,
+  PaymentMethod,
+  Product,
+  Profile,
+  StoreSettings,
+} from "@/types";
 import { EMPTY_STORE_SETTINGS } from "@/types";
+
+// 이벤트 리스팅(EventProductSeed/event_products 행)과 카탈로그 상품을 합쳐서
+// 화면이 쓰는 평평한 Product로 만든다. mock/Supabase 두 모드 모두 최종적으로
+// 이 모양으로 맞춰서 내려주므로, 화면 쪽 컴포넌트는 지금까지와 똑같이 상품을
+// 하나의 평평한 객체로 다루면 된다.
+function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undefined): Product {
+  return {
+    id: listing.id,
+    eventId: listing.eventId,
+    catalogProductId: listing.catalogProductId,
+    name: catalog?.name ?? "(삭제된 상품)",
+    price: listing.price,
+    emoji: catalog?.emoji ?? "📦",
+    photos: catalog?.photos,
+    deliveryType: listing.deliveryType,
+    origin: catalog?.origin,
+    weight: catalog?.weight,
+    storage: catalog?.storage,
+    eat: catalog?.eat,
+    description: catalog?.description,
+    detailBlocks: catalog?.detailBlocks,
+    stock: listing.stock,
+    visible: listing.visible,
+  };
+}
 
 function orderNumber(): string {
   const now = new Date();
@@ -24,11 +77,15 @@ function orderNumber(): string {
 export async function listEvents(): Promise<MarketEvent[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { data, error } = await supabase.from("events").select("*, products(*)").order("deadline_at", { ascending: true });
+    const { data, error } = await supabase.from("events").select("*, event_products(*, products(*))").order("deadline_at", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(mapSupabaseEvent);
   }
-  return loadEvents();
+  const catalogMap = new Map(loadCatalogProducts().map((c) => [c.id, c]));
+  return loadEvents().map((e) => ({
+    ...e,
+    products: e.products.map((listing) => mergeListing(listing, catalogMap.get(listing.catalogProductId))),
+  }));
 }
 
 export async function getEvent(id: string): Promise<MarketEvent | null> {
@@ -54,12 +111,12 @@ export async function createEvent(input: Omit<MarketEvent, "id" | "products">): 
       .select()
       .single();
     if (error) throw error;
-    return { ...mapSupabaseEvent({ ...data, products: [] }) };
+    return { ...mapSupabaseEvent({ ...data, event_products: [] }) };
   }
   const events = loadEvents();
-  const newEvent: MarketEvent = { ...input, id: genId("event"), products: [] };
+  const newEvent: MarketEventSeed = { ...input, id: genId("event"), products: [] };
   saveEvents([newEvent, ...events]);
-  return newEvent;
+  return { ...newEvent, products: [] };
 }
 
 export async function updateEvent(id: string, patch: Partial<Omit<MarketEvent, "id" | "products">>): Promise<void> {
@@ -80,10 +137,11 @@ export async function updateEvent(id: string, patch: Partial<Omit<MarketEvent, "
   saveEvents(events.map((e) => (e.id === id ? { ...e, ...patch } : e)));
 }
 
-// 같은 이벤트를 다음 회차로 복제 — 상품 구성/가격/사진/상세설명은 원본을 그대로
-// 복사하고, 회차마다 바뀌는 제목/마감/배송일만 새로 받는다("이벤트 복제" UX의
-// 핵심은 이 세 값만 입력하면 끝나는 것). 재고는 원본 값을 그대로 복사하므로
-// 새 회차의 실제 재고에 맞게 admin이 따로 조정해야 한다.
+// 같은 이벤트를 다음 회차로 복제 — 카탈로그 상품은 그대로 재사용하고(새로
+// 안 늘어남), 리스팅(가격/재고/노출/배송방식)만 복사한다. 회차마다 바뀌는
+// 제목/마감/배송일만 새로 받는다("이벤트 복제" UX의 핵심은 이 세 값만
+// 입력하면 끝나는 것). 재고는 원본 값을 그대로 복사하므로 새 회차의 실제
+// 재고에 맞게 admin이 따로 조정해야 한다.
 export async function duplicateEvent(eventId: string, overrides: { title: string; deadlineAt: string; deliveryAt: string }): Promise<MarketEvent> {
   const source = await getEvent(eventId);
   if (!source) throw new Error("이벤트를 찾을 수 없어요.");
@@ -96,18 +154,10 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
     notice: source.notice,
   });
   for (const p of source.products) {
-    await addProduct(created.id, {
-      name: p.name,
+    await addEventProduct(created.id, {
+      catalogProductId: p.catalogProductId,
       price: p.price,
-      emoji: p.emoji,
-      photos: p.photos,
       deliveryType: p.deliveryType,
-      origin: p.origin,
-      weight: p.weight,
-      storage: p.storage,
-      eat: p.eat,
-      description: p.description,
-      detailBlocks: p.detailBlocks,
       stock: p.stock,
       visible: p.visible,
     });
@@ -126,98 +176,165 @@ export async function deleteEvent(id: string): Promise<void> {
   saveEvents(loadEvents().filter((e) => e.id !== id));
 }
 
-export async function addProduct(eventId: string, input: Omit<Product, "id" | "eventId">): Promise<Product> {
+// ---------- 카탈로그 상품 (상품 관리 화면 전용) ----------
+// 사진/설명/원산지 등 "내용물"만 다루고 이벤트와 무관 — 여러 이벤트가 같은
+// 카탈로그 상품을 리스팅으로 재사용한다.
+
+export async function listCatalogProducts(): Promise<CatalogProduct[]> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.from("products").select("*").order("name", { ascending: true });
+    if (error) throw error;
+    return (data ?? []).map(mapSupabaseCatalogProduct);
+  }
+  return loadCatalogProducts()
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): Promise<CatalogProduct> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase
       .from("products")
       .insert({
-        event_id: eventId,
         name: input.name,
-        price: input.price,
         emoji: input.emoji,
         photos: input.photos ?? [],
         detail_blocks: input.detailBlocks ?? [],
-        delivery_type: input.deliveryType ?? null,
         origin: input.origin,
         weight: input.weight,
         storage: input.storage,
+        eat: input.eat,
         description: input.description,
-        stock: input.stock ?? null,
-        visible: input.visible ?? true,
       })
       .select()
       .single();
     if (error) throw error;
-    return mapSupabaseProduct(data);
+    return mapSupabaseCatalogProduct(data);
   }
-  const events = loadEvents();
-  const product: Product = { ...input, id: genId("prod"), eventId };
-  saveEvents(events.map((e) => (e.id === eventId ? { ...e, products: [...e.products, product] } : e)));
+  const product: CatalogProduct = { ...input, id: genId("cat") };
+  saveCatalogProducts([product, ...loadCatalogProducts()]);
   return product;
 }
 
-export async function updateProduct(productId: string, patch: Partial<Product>): Promise<void> {
+export async function updateCatalogProduct(catalogProductId: string, patch: Partial<Omit<CatalogProduct, "id">>): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     const row: Record<string, unknown> = {};
     if (patch.name !== undefined) row.name = patch.name;
-    if (patch.price !== undefined) row.price = patch.price;
     if (patch.emoji !== undefined) row.emoji = patch.emoji;
     if (patch.photos !== undefined) row.photos = patch.photos;
     if (patch.detailBlocks !== undefined) row.detail_blocks = patch.detailBlocks;
-    if (patch.deliveryType !== undefined) row.delivery_type = patch.deliveryType ?? null;
     if (patch.origin !== undefined) row.origin = patch.origin;
     if (patch.weight !== undefined) row.weight = patch.weight;
     if (patch.storage !== undefined) row.storage = patch.storage;
+    if (patch.eat !== undefined) row.eat = patch.eat;
     if (patch.description !== undefined) row.description = patch.description;
+    const { error } = await supabase.from("products").update(row).eq("id", catalogProductId);
+    if (error) throw error;
+    return;
+  }
+  saveCatalogProducts(loadCatalogProducts().map((c) => (c.id === catalogProductId ? { ...c, ...patch } : c)));
+}
+
+// 사용 중인(어느 이벤트에라도 리스팅된) 카탈로그 상품은 삭제할 수 없다 —
+// Supabase는 FK 제약(event_products.product_id, on delete 기본 NO ACTION)이
+// 막아주고, mock 모드는 여기서 직접 확인해 같은 사용자 경험을 준다.
+export async function deleteCatalogProduct(catalogProductId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("products").delete().eq("id", catalogProductId);
+    if (error) {
+      if (error.code === "23503") throw new Error("이 상품은 이벤트에서 사용 중이라 삭제할 수 없어요. 먼저 이벤트에서 제거해 주세요.");
+      throw error;
+    }
+    return;
+  }
+  const inUse = loadEvents().some((e) => e.products.some((p) => p.catalogProductId === catalogProductId));
+  if (inUse) throw new Error("이 상품은 이벤트에서 사용 중이라 삭제할 수 없어요. 먼저 이벤트에서 제거해 주세요.");
+  saveCatalogProducts(loadCatalogProducts().filter((c) => c.id !== catalogProductId));
+}
+
+// ---------- 이벤트별 상품 등록(리스팅) ----------
+// 카탈로그 상품 하나를 이번 이벤트에 어떤 가격/재고/노출로 팔지 나타낸다.
+
+export interface NewEventProductInput {
+  catalogProductId: string;
+  price: number;
+  deliveryType?: EventType;
+  stock?: number;
+  visible?: boolean;
+}
+
+export async function addEventProduct(eventId: string, input: NewEventProductInput): Promise<Product> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase
+      .from("event_products")
+      .insert({
+        event_id: eventId,
+        product_id: input.catalogProductId,
+        price: input.price,
+        delivery_type: input.deliveryType ?? null,
+        stock: input.stock ?? null,
+        visible: input.visible ?? true,
+      })
+      .select("*, products(*)")
+      .single();
+    if (error) throw error;
+    return mapSupabaseEventProduct(data);
+  }
+  const catalog = loadCatalogProducts().find((c) => c.id === input.catalogProductId);
+  if (!catalog) throw new Error("상품을 찾을 수 없어요.");
+  const listing: EventProductSeed = {
+    id: genId("lst"),
+    eventId,
+    catalogProductId: input.catalogProductId,
+    price: input.price,
+    deliveryType: input.deliveryType,
+    stock: input.stock,
+    visible: input.visible ?? true,
+  };
+  saveEvents(loadEvents().map((e) => (e.id === eventId ? { ...e, products: [...e.products, listing] } : e)));
+  return mergeListing(listing, catalog);
+}
+
+export interface EventProductPatch {
+  price?: number;
+  deliveryType?: EventType;
+  stock?: number;
+  visible?: boolean;
+}
+
+export async function updateEventProduct(eventProductId: string, patch: EventProductPatch): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const row: Record<string, unknown> = {};
+    if (patch.price !== undefined) row.price = patch.price;
+    if (patch.deliveryType !== undefined) row.delivery_type = patch.deliveryType ?? null;
     // "stock" in patch (아닌 !== undefined)로 확인 — 재고 한도를 다시 "무제한"으로
     // 비우는 것도 유효한 값 변경이라, patch.stock이 undefined인 채로 명시적으로
     // 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
     if ("stock" in patch) row.stock = patch.stock ?? null;
     if (patch.visible !== undefined) row.visible = patch.visible;
-    const { error } = await supabase.from("products").update(row).eq("id", productId);
+    const { error } = await supabase.from("event_products").update(row).eq("id", eventProductId);
     if (error) throw error;
     return;
   }
   const events = loadEvents();
-  saveEvents(events.map((e) => ({ ...e, products: e.products.map((p) => (p.id === productId ? { ...p, ...patch } : p)) })));
+  saveEvents(events.map((e) => ({ ...e, products: e.products.map((p) => (p.id === eventProductId ? { ...p, ...patch } : p)) })));
 }
 
-// 같은 이벤트 안에 상품을 하나 더 복사 — 비슷한 상품(용량/구성만 다른 변형 등)을
-// 빠르게 추가하고 싶을 때, 처음부터 새로 입력하지 않고 기존 상품을 베이스로
-// 시작할 수 있게 한다. 재고는 복사하지 않고 항상 무제한(undefined)으로 시작
-// — 원본 재고 수량을 그대로 복사하면 실제로는 없는 재고가 두 배로 잡히는
-// 착시가 생기기 때문에, 새 상품의 재고는 admin이 직접 다시 정하게 한다.
-export async function duplicateProduct(productId: string): Promise<Product> {
-  const found = await findProductWithEvent(productId);
-  if (!found) throw new Error("상품을 찾을 수 없어요.");
-  const { product: p, event } = found;
-  return addProduct(event.id, {
-    name: `${p.name} (사본)`,
-    price: p.price,
-    emoji: p.emoji,
-    photos: p.photos,
-    deliveryType: p.deliveryType,
-    origin: p.origin,
-    weight: p.weight,
-    storage: p.storage,
-    eat: p.eat,
-    description: p.description,
-    detailBlocks: p.detailBlocks,
-    visible: p.visible,
-  });
-}
-
-export async function deleteProduct(productId: string): Promise<void> {
+export async function removeEventProduct(eventProductId: string): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { error } = await supabase.from("products").delete().eq("id", productId);
+    const { error } = await supabase.from("event_products").delete().eq("id", eventProductId);
     if (error) throw error;
     return;
   }
   const events = loadEvents();
-  saveEvents(events.map((e) => ({ ...e, products: e.products.filter((p) => p.id !== productId) })));
+  saveEvents(events.map((e) => ({ ...e, products: e.products.filter((p) => p.id !== eventProductId) })));
 }
 
 // ---------- Notifications ----------
@@ -317,7 +434,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     if (error) throw error;
     const itemRows = input.items.map((item) => ({
       order_id: orderRow.id,
-      product_id: item.productId,
+      event_product_id: item.productId,
       product_name: item.productName,
       price_snapshot: item.price,
       quantity: item.quantity,
@@ -325,7 +442,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     const { error: itemError } = await supabase.from("order_items").insert(itemRows);
     if (itemError) throw itemError;
     for (const item of input.items) {
-      await supabase.rpc("decrement_stock", { p_product_id: item.productId, p_qty: item.quantity });
+      await supabase.rpc("decrement_stock", { p_event_product_id: item.productId, p_qty: item.quantity });
     }
     return mapSupabaseOrder(orderRow, input.items);
   }
@@ -355,9 +472,9 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
   return order;
 }
 
-// 재고가 있는 상품(stock이 정해진 상품)만 골라 주문 수량만큼 차감한다(0 밑으로는
-// 안 내려감). stock이 undefined인 상품(재고 제한 없음)은 그대로 둔다.
-function decrementProductStock(events: MarketEvent[], items: OrderItem[]): MarketEvent[] {
+// 재고가 있는 리스팅(stock이 정해진 리스팅)만 골라 주문 수량만큼 차감한다(0
+// 밑으로는 안 내려감). stock이 undefined인 리스팅(재고 제한 없음)은 그대로 둔다.
+function decrementProductStock(events: MarketEventSeed[], items: OrderItem[]): MarketEventSeed[] {
   const deltaByProduct = new Map(items.map((i) => [i.productId, i.quantity]));
   return events.map((e) => ({
     ...e,
@@ -369,7 +486,7 @@ function decrementProductStock(events: MarketEvent[], items: OrderItem[]): Marke
   }));
 }
 
-function restoreProductStock(events: MarketEvent[], items: OrderItem[]): MarketEvent[] {
+function restoreProductStock(events: MarketEventSeed[], items: OrderItem[]): MarketEventSeed[] {
   const deltaByProduct = new Map(items.map((i) => [i.productId, i.quantity]));
   return events.map((e) => ({
     ...e,
@@ -434,9 +551,9 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     if (isRestockingStatus(status)) {
-      const { data: itemRows } = await supabase.from("order_items").select("product_id, quantity").eq("order_id", orderId);
+      const { data: itemRows } = await supabase.from("order_items").select("event_product_id, quantity").eq("order_id", orderId);
       for (const item of itemRows ?? []) {
-        if (item.product_id) await supabase.rpc("increment_stock", { p_product_id: item.product_id, p_qty: item.quantity });
+        if (item.event_product_id) await supabase.rpc("increment_stock", { p_event_product_id: item.event_product_id, p_qty: item.quantity });
       }
     }
     const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
@@ -692,20 +809,40 @@ function mapSupabaseAddress(row: Record<string, any>): Address {
   };
 }
 
-function mapSupabaseProduct(row: Record<string, any>): Product {
+function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
   return {
     id: row.id,
-    eventId: row.event_id,
     name: row.name,
-    price: row.price,
     emoji: row.emoji ?? "📦",
     photos: row.photos && row.photos.length > 0 ? row.photos : undefined,
-    deliveryType: row.delivery_type ?? undefined,
     origin: row.origin ?? undefined,
     weight: row.weight ?? undefined,
     storage: row.storage ?? undefined,
+    eat: row.eat ?? undefined,
     description: row.description ?? undefined,
     detailBlocks: row.detail_blocks && row.detail_blocks.length > 0 ? row.detail_blocks : undefined,
+  };
+}
+
+// event_products 행(+ 중첩된 products(*) 카탈로그 조인)을 화면이 쓰는 평평한
+// Product로 합친다. mock 모드의 mergeListing과 같은 역할.
+function mapSupabaseEventProduct(row: Record<string, any>): Product {
+  const catalog = row.products ?? {};
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    catalogProductId: row.product_id,
+    name: catalog.name ?? "(삭제된 상품)",
+    price: row.price,
+    emoji: catalog.emoji ?? "📦",
+    photos: catalog.photos && catalog.photos.length > 0 ? catalog.photos : undefined,
+    deliveryType: row.delivery_type ?? undefined,
+    origin: catalog.origin ?? undefined,
+    weight: catalog.weight ?? undefined,
+    storage: catalog.storage ?? undefined,
+    eat: catalog.eat ?? undefined,
+    description: catalog.description ?? undefined,
+    detailBlocks: catalog.detail_blocks && catalog.detail_blocks.length > 0 ? catalog.detail_blocks : undefined,
     stock: row.stock ?? undefined,
     visible: row.visible ?? true,
   };
@@ -720,12 +857,12 @@ function mapSupabaseEvent(row: Record<string, any>): MarketEvent {
     deadlineAt: row.deadline_at,
     deliveryAt: row.delivery_at,
     notice: row.notice ?? "",
-    products: (row.products ?? []).map(mapSupabaseProduct),
+    products: (row.event_products ?? []).map(mapSupabaseEventProduct),
   };
 }
 
 function mapSupabaseOrderItem(row: Record<string, any>): OrderItem {
-  return { productId: row.product_id, productName: row.product_name, productEmoji: "📦", price: row.price_snapshot, quantity: row.quantity };
+  return { productId: row.event_product_id, productName: row.product_name, productEmoji: "📦", price: row.price_snapshot, quantity: row.quantity };
 }
 
 function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {

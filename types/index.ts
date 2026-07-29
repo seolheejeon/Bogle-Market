@@ -14,9 +14,34 @@ export type ProductDetailBlock =
   | { type: "text"; text: string }
   | { type: "image"; url: string; alt?: string };
 
+// 카탈로그 상품 — 사진/설명/원산지 등 "내용물"만 담고 있고 이벤트와 무관하게
+// 하나만 존재한다. "상품 관리"(`/admin/products`) 화면에서 검색·수정하는
+// 대상이며, 여러 이벤트에서 그대로 재사용된다(복제해도 새로 안 늘어남).
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  emoji: string;
+  photos?: string[];
+  origin?: string;
+  weight?: string;
+  storage?: string;
+  eat?: string;
+  description?: string;
+  detailBlocks?: ProductDetailBlock[];
+}
+
+// 이벤트에 실제로 노출되는 상품(리스팅) — 카탈로그 상품 하나를 이번 회차에
+// 어떤 가격/재고/노출 여부로 팔지 나타낸다. 장바구니/주문/재고 차감은 전부
+// 이 리스팅의 id 기준으로 돈다(카탈로그 원본이 아니라) — 같은 카탈로그
+// 상품이 여러 이벤트에 동시에 걸려도 이벤트별로 독립된 재고를 가져야 하기
+// 때문. 화면 코드가 지금까지처럼 "상품 하나"를 평평하게 다룰 수 있도록
+// 카탈로그 내용(name/photos/description 등)과 리스팅 정보(price/stock 등)를
+// 합쳐서 내려준다 — 필드 구성 자체는 기존 Product와 거의 동일하다.
 export interface Product {
   id: string;
   eventId: string;
+  // 이 리스팅이 참조하는 카탈로그 상품의 id — "상품 관리"에서 수정하는 대상.
+  catalogProductId: string;
   name: string;
   price: number;
   emoji: string;
@@ -47,6 +72,33 @@ export interface MarketEvent {
   deliveryAt: string; // ISO
   notice: string;
   products: Product[];
+}
+
+// mock 모드 로컬스토리지에 이벤트와 함께 내장되는 "리스팅 원본" — 카탈로그
+// 내용(name/photos/description 등)은 없고 이 이벤트에서의 가격/재고/노출/
+// 배송방식 오버라이드만 담는다. lib/data.ts가 이 원본을 카탈로그 상품과
+// 조인해서 화면이 쓰는 평평한 Product로 합쳐준다 — Supabase 모드에서
+// event_products·products 테이블을 조인한 것과 같은 결과를 mock에서도
+// 내기 위함(두 모드가 항상 같은 방식으로 동작하도록).
+export interface EventProductSeed {
+  id: string;
+  eventId: string;
+  catalogProductId: string;
+  price: number;
+  deliveryType?: EventType;
+  stock?: number;
+  visible?: boolean;
+}
+
+export interface MarketEventSeed {
+  id: string;
+  type: EventType;
+  title: string;
+  isFlash?: boolean;
+  deadlineAt: string;
+  deliveryAt: string;
+  notice: string;
+  products: EventProductSeed[];
 }
 
 export interface Address {
