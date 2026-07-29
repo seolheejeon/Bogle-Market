@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { listAllOrders, updateOrderStatus, createNotification } from "@/lib/data";
-import type { Order, OrderStatus } from "@/types";
+import { listAllOrders, listEvents, updateOrderStatus, createNotification } from "@/lib/data";
+import type { MarketEvent, Order, OrderStatus } from "@/types";
 import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
@@ -11,12 +11,14 @@ const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", p
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = { wait: "입금확인", paid: "배송시작", ship: "배송완료 처리" };
 
 // 배송중/배송완료로 바뀔 때 해당 주문 고객에게만(비회원 제외) 알림을 보낸다 —
-// 개별 처리와 아파트 단위 일괄 처리 양쪽에서 재사용.
-async function notifyStatusChange(order: Order, next: OrderStatus) {
+// 개별 처리와 아파트 단위 일괄 처리 양쪽에서 재사용. eventTitle이 있으면
+// 어느 이벤트 배송인지 알림 문구에 같이 넣어준다.
+async function notifyStatusChange(order: Order, next: OrderStatus, eventTitle?: string) {
   if (!order.profileId || (next !== "ship" && next !== "done")) return;
+  const prefix = eventTitle ? `[${eventTitle}] ` : "";
   await createNotification({
     title: next === "ship" ? "배송이 시작됐어요" : "배송이 완료됐어요",
-    message: `주문번호 ${order.orderNumber} ${next === "ship" ? "배송이 시작됐어요." : "배송이 완료됐어요. 확인해보세요!"}`,
+    message: `${prefix}주문번호 ${order.orderNumber} ${next === "ship" ? "배송이 시작됐어요." : "배송이 완료됐어요. 확인해보세요!"}`,
     icon: "🚚",
     linkType: "ORDER",
     linkId: order.id,
@@ -26,9 +28,11 @@ async function notifyStatusChange(order: Order, next: OrderStatus) {
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [events, setEvents] = useState<MarketEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<OrderStatus | "all">("all");
   const [apartmentFilter, setApartmentFilter] = useState("all");
+  const [eventFilter, setEventFilter] = useState("all");
   const [bulkCompleting, setBulkCompleting] = useState(false);
 
   function refresh() {
@@ -38,12 +42,17 @@ export default function AdminOrdersPage() {
     });
   }
   useEffect(refresh, []);
+  useEffect(() => {
+    listEvents().then(setEvents);
+  }, []);
+
+  const eventTitleById = useMemo(() => new Map(events.map((e) => [e.id, e.title])), [events]);
 
   async function advance(order: Order) {
     const next = NEXT_STATUS[order.status];
     if (!next) return;
     await updateOrderStatus(order.id, next);
-    await notifyStatusChange(order, next);
+    await notifyStatusChange(order, next, eventTitleById.get(order.eventId));
     refresh();
   }
   async function cancel(order: Order) {
@@ -54,8 +63,16 @@ export default function AdminOrdersPage() {
 
   // 검색 결과가 공동주택이 아닌 주문(아파트명이 빈 값)은 필터 목록에서 제외.
   const apartments = useMemo(() => Array.from(new Set(orders.map((o) => o.apartmentName).filter((v): v is string => !!v))).sort(), [orders]);
+  // 주문이 실제로 있는 이벤트만 필터 목록에 노출.
+  const orderedEventIds = useMemo(() => Array.from(new Set(orders.map((o) => o.eventId))), [orders]);
+  const filterableEvents = useMemo(() => events.filter((e) => orderedEventIds.includes(e.id)), [events, orderedEventIds]);
 
-  const filtered = orders.filter((o) => (filter === "all" || o.status === filter) && (apartmentFilter === "all" || o.apartmentName === apartmentFilter));
+  const filtered = orders.filter(
+    (o) =>
+      (filter === "all" || o.status === filter) &&
+      (apartmentFilter === "all" || o.apartmentName === apartmentFilter) &&
+      (eventFilter === "all" || o.eventId === eventFilter),
+  );
 
   const shippingInApartment = apartmentFilter === "all" ? [] : orders.filter((o) => o.apartmentName === apartmentFilter && o.status === "ship");
 
@@ -65,7 +82,7 @@ export default function AdminOrdersPage() {
     setBulkCompleting(true);
     for (const order of shippingInApartment) {
       await updateOrderStatus(order.id, "done");
-      await notifyStatusChange(order, "done");
+      await notifyStatusChange(order, "done", eventTitleById.get(order.eventId));
     }
     setBulkCompleting(false);
     refresh();
@@ -85,6 +102,22 @@ export default function AdminOrdersPage() {
           </button>
         ))}
       </div>
+      {filterableEvents.length > 0 && (
+        <div className="mb-3">
+          <select
+            className="rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
+            value={eventFilter}
+            onChange={(e) => setEventFilter(e.target.value)}
+          >
+            <option value="all">전체 이벤트</option>
+            {filterableEvents.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.title}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {apartments.length > 0 && (
         <div className="mb-4 flex items-center gap-2">
           <select
@@ -121,6 +154,7 @@ export default function AdminOrdersPage() {
               </span>
               <OrderStatusBadge status={o.status} />
             </div>
+            {eventTitleById.get(o.eventId) && <p className="mb-1 text-[12px] font-semibold text-accent-dark">{eventTitleById.get(o.eventId)}</p>}
             <p className="text-[13px]">
               {o.recipientName} ({o.recipientPhone}) · {PAYMENT_METHOD_LABEL[o.paymentMethod]}
             </p>

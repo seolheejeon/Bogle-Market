@@ -70,9 +70,21 @@ create table if not exists products (
   created_at timestamptz not null default now()
 );
 
+-- 주문은 정확히 하나의 이벤트에만 속한다 — 장바구니에 마감일/배송일이 다른
+-- 여러 이벤트 상품이 섞여 있으면, 체크아웃이 이벤트별로 주문을 나눠서 여러
+-- row를 만든다(lib/data.ts의 createOrder는 항상 단일 이벤트 기준으로 호출됨).
+-- event_id에 on delete 절을 일부러 안 줘서(기본 NO ACTION), 실제 주문이 걸린
+-- 이벤트는 삭제가 막힌다 — 예전엔 이벤트를 지우면 소속 상품이 cascade로
+-- 같이 지워지면서 과거 주문의 상품 연결이 조용히 끊겼는데, 이제는 DB가 막아준다.
 create table if not exists orders (
   id uuid primary key default gen_random_uuid(),
   order_number text not null unique,
+  event_id uuid not null references events(id),
+  -- 체크아웃 한 번에 여러 이벤트로 나뉘어 생성된 주문들을 묶는 키. 별도
+  -- 테이블이 아니라 그냥 같은 값을 공유하는 uuid — "한 번에 결제된 묶음"이라는
+  -- 뜻일 뿐, FK 참조 대상이 없다. 이벤트가 하나뿐인 보통의 체크아웃도 자기
+  -- 자신만 담긴 배치로 취급되도록 기본값을 둔다.
+  batch_id uuid not null default gen_random_uuid(),
   profile_id uuid references profiles(id) on delete set null,
   guest_name text,
   guest_phone text,

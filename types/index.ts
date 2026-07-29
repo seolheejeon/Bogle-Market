@@ -87,6 +87,12 @@ export interface OrderItem {
 export interface Order {
   id: string;
   orderNumber: string;
+  // 주문은 정확히 하나의 이벤트에만 속한다 — 장바구니에 여러 이벤트 상품이
+  // 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠서 만든다.
+  eventId: string;
+  // 한 번의 체크아웃(결제)에서 함께 생성된 주문들을 묶는 키. 이벤트가 하나뿐인
+  // 보통의 체크아웃도 자기 자신만 담긴 배치로 취급된다.
+  batchId: string;
   profileId: string | null;
   guestName: string | null;
   guestPhone: string | null;

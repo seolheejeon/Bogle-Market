@@ -9,6 +9,7 @@ import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/c
 import { loadEvents, saveEvents, loadOrders, saveOrders, loadNotifications, saveNotifications, loadAccounts, loadStoreSettings, saveStoreSettings, genId } from "@/lib/local-store";
 import type { Address, MarketEvent, NotificationItem, Order, OrderItem, OrderStatus, PaymentMethod, Product, Profile, StoreSettings } from "@/types";
 import { EMPTY_STORE_SETTINGS } from "@/types";
+import { isEventClosed } from "@/lib/format";
 
 function orderNumber(): string {
   const now = new Date();
@@ -207,6 +208,8 @@ export async function createNotification(input: NewNotificationInput): Promise<v
 // ---------- Orders ----------
 
 export interface NewOrderInput {
+  eventId: string;
+  batchId: string;
   profileId: string | null;
   guestName?: string;
   guestPhone?: string;
@@ -220,7 +223,17 @@ export interface NewOrderInput {
   total: number;
 }
 
+// 이 이벤트가 마감됐는지 여기서 한 번만 확인한다 — mock/Supabase 어느 쪽으로
+// 호출되든, 그리고 이 함수를 부르는 화면이 체크아웃이든 나중에 생길 다른
+// 진입점이든 상관없이 항상 같은 기준으로 막히도록 데이터 계층에 둔 것.
+async function assertEventIsOpen(eventId: string): Promise<void> {
+  const event = await getEvent(eventId);
+  if (!event) throw new Error("이벤트를 찾을 수 없어요.");
+  if (isEventClosed(event.deadlineAt)) throw new Error(`"${event.title}"은(는) 마감되어 주문할 수 없어요.`);
+}
+
 export async function createOrder(input: NewOrderInput): Promise<Order> {
+  await assertEventIsOpen(input.eventId);
   const number = orderNumber();
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
@@ -228,6 +241,8 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       .from("orders")
       .insert({
         order_number: number,
+        event_id: input.eventId,
+        batch_id: input.batchId,
         profile_id: input.profileId,
         guest_name: input.guestName ?? null,
         guest_phone: input.guestPhone ?? null,
@@ -257,6 +272,8 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
   const order: Order = {
     id: genId("order"),
     orderNumber: number,
+    eventId: input.eventId,
+    batchId: input.batchId,
     profileId: input.profileId,
     guestName: input.guestName ?? null,
     guestPhone: input.guestPhone ?? null,
@@ -520,6 +537,8 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
   return {
     id: row.id,
     orderNumber: row.order_number,
+    eventId: row.event_id,
+    batchId: row.batch_id,
     profileId: row.profile_id,
     guestName: row.guest_name,
     guestPhone: row.guest_phone,

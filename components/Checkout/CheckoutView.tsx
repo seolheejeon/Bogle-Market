@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { listEvents, createOrder, getDefaultAddress, updateAddress } from "@/lib/data";
-import { formatAddress, type MarketEvent, type PaymentMethod } from "@/types";
-import { formatPrice } from "@/lib/format";
+import { formatAddress, type MarketEvent, type Order, type PaymentMethod } from "@/types";
+import { formatPrice, isEventClosed, formatEventDateChip } from "@/lib/format";
 import { useCart } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { PAYMENT_METHODS } from "@/lib/payments";
@@ -52,14 +52,27 @@ export function CheckoutView() {
 
   const items = useMemo(() => {
     if (!events) return [];
-    return events.flatMap((e) => e.products.filter((p) => cart[p.id]).map((p) => ({ product: p, qty: cart[p.id], eventType: e.type })));
+    return events.flatMap((e) => e.products.filter((p) => cart[p.id]).map((p) => ({ product: p, qty: cart[p.id], event: e })));
   }, [events, cart]);
 
   const total = items.reduce((sum, i) => sum + i.product.price * i.qty, 0);
 
   // 택배로만 이루어진 주문은 공동현관 출입방법이 필요 없음. 장바구니가 아직
   // 안 불러와졌을 때는 우선 보여주는 쪽으로 기본값을 둔다.
-  const needsEntranceMethod = items.length === 0 || items.some((i) => (i.product.deliveryType ?? i.eventType) !== "PARCEL");
+  const needsEntranceMethod = items.length === 0 || items.some((i) => (i.product.deliveryType ?? i.event.type) !== "PARCEL");
+
+  // 마감일/배송일이 다른 이벤트 상품이 장바구니에 같이 담겨 있을 수 있어서,
+  // 이벤트별로 묶어 각각 별도의 주문으로 만든다 — 한 이벤트를 배송완료 처리해도
+  // 다른 이벤트가 같이 딸려가지 않도록. (components/Cart/CartView.tsx도 같은
+  // 방식으로 이벤트별로 묶어서 보여준다)
+  const groups = useMemo(() => {
+    const byEvent = new Map<string, { event: MarketEvent; items: typeof items }>();
+    for (const item of items) {
+      if (!byEvent.has(item.event.id)) byEvent.set(item.event.id, { event: item.event, items: [] });
+      byEvent.get(item.event.id)!.items.push(item);
+    }
+    return Array.from(byEvent.values());
+  }, [items]);
 
   async function placeOrder() {
     setError(null);
@@ -88,6 +101,11 @@ export function CheckoutView() {
       setError("장바구니가 비어있어요.");
       return;
     }
+    const expired = groups.filter((g) => isEventClosed(g.event.deadlineAt));
+    if (expired.length > 0) {
+      setError(`마감된 이벤트가 있어 주문할 수 없어요: ${expired.map((g) => g.event.title).join(", ")}. 장바구니에서 빼고 다시 시도해 주세요.`);
+      return;
+    }
     setSubmitting(true);
     try {
       if (profile && saveAsDefault && defaultAddressId) {
@@ -100,29 +118,41 @@ export function CheckoutView() {
           memo: address.memo.trim() || undefined,
         });
       }
-      const order = await createOrder({
-        profileId: profile?.id ?? null,
-        guestName: profile ? undefined : name,
-        guestPhone: profile ? undefined : phone,
-        guestPin: profile ? undefined : pin,
-        recipientName: name,
-        recipientPhone: phone,
-        addressSnapshot: formatAddress({
-          roadAddress: address.roadAddress,
-          detailAddress: address.detailAddress.trim(),
-          entranceMethod: needsEntranceMethod ? address.entranceMethod.trim() || undefined : undefined,
-          memo: address.memo.trim() || undefined,
-        }),
-        apartmentName: address.apartmentName || undefined,
-        paymentMethod: method,
-        items: items.map((i) => ({ productId: i.product.id, productName: i.product.name, productEmoji: i.product.emoji, price: i.product.price, quantity: i.qty })),
-        total,
-      });
+      // 여러 이벤트가 섞여 있으면 이벤트 수만큼 주문이 생기지만, 결제는 한
+      // 번만 하는 것처럼 보이도록 같은 batchId로 묶는다.
+      const batchId = crypto.randomUUID();
+      const createdOrders: Order[] = [];
+      for (const group of groups) {
+        const groupTotal = group.items.reduce((sum, i) => sum + i.product.price * i.qty, 0);
+        const groupNeedsEntranceMethod = group.items.some((i) => (i.product.deliveryType ?? group.event.type) !== "PARCEL");
+        const order = await createOrder({
+          eventId: group.event.id,
+          batchId,
+          profileId: profile?.id ?? null,
+          guestName: profile ? undefined : name,
+          guestPhone: profile ? undefined : phone,
+          guestPin: profile ? undefined : pin,
+          recipientName: name,
+          recipientPhone: phone,
+          addressSnapshot: formatAddress({
+            roadAddress: address.roadAddress,
+            detailAddress: address.detailAddress.trim(),
+            entranceMethod: groupNeedsEntranceMethod ? address.entranceMethod.trim() || undefined : undefined,
+            memo: address.memo.trim() || undefined,
+          }),
+          apartmentName: address.apartmentName || undefined,
+          paymentMethod: method,
+          items: group.items.map((i) => ({ productId: i.product.id, productName: i.product.name, productEmoji: i.product.emoji, price: i.product.price, quantity: i.qty })),
+          total: groupTotal,
+        });
+        createdOrders.push(order);
+      }
       clear();
+      const first = createdOrders[0];
       if (profile) {
-        router.push(`/orders/${order.id}`);
+        router.push(`/orders/${first.id}`);
       } else {
-        router.push(`/orders/${order.id}?gn=${encodeURIComponent(name)}&pin=${pin}`);
+        router.push(`/orders/${first.id}?gn=${encodeURIComponent(name)}&pin=${pin}`);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "주문 중 오류가 발생했어요.");
@@ -191,15 +221,42 @@ export function CheckoutView() {
         )}
 
         <p className="mb-2 text-[12.5px] font-bold text-text-muted">주문 상품</p>
-        <div className="flex flex-col gap-1.5 text-[13px] text-text-muted">
-          {items.map((i) => (
-            <div key={i.product.id} className="flex justify-between">
-              <span>
-                {i.product.name} x{i.qty}
-              </span>
-              <span>{formatPrice(i.product.price * i.qty)}</span>
-            </div>
-          ))}
+        {groups.length > 1 && (
+          <p className="mb-3 text-[11.5px] text-text-muted">이벤트마다 마감일/배송일이 달라서 주문이 {groups.length}건으로 나뉘어 접수돼요. 결제는 한 번만 하시면 돼요.</p>
+        )}
+        <div className="flex flex-col gap-4">
+          {groups.map((g) => {
+            const closed = isEventClosed(g.event.deadlineAt);
+            const groupTotal = g.items.reduce((sum, i) => sum + i.product.price * i.qty, 0);
+            return (
+              <div key={g.event.id}>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[12.5px] font-bold text-accent-dark">{g.event.title}</span>
+                  {closed ? (
+                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-600">마감됨</span>
+                  ) : (
+                    <span className="text-[11px] text-text-muted">배송예정 {formatEventDateChip(g.event.deliveryAt)}</span>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5 text-[13px] text-text-muted">
+                  {g.items.map((i) => (
+                    <div key={i.product.id} className="flex justify-between">
+                      <span>
+                        {i.product.name} x{i.qty}
+                      </span>
+                      <span>{formatPrice(i.product.price * i.qty)}</span>
+                    </div>
+                  ))}
+                </div>
+                {groups.length > 1 && (
+                  <div className="mt-1 flex justify-between text-[12.5px] font-semibold">
+                    <span>소계</span>
+                    <span>{formatPrice(groupTotal)}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
         <div className="mt-3.5 flex justify-between border-t border-border pt-3.5 text-base font-extrabold">
           <span>총 주문 금액</span>
@@ -210,7 +267,7 @@ export function CheckoutView() {
 
         <button
           className="mt-4 w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-50"
-          disabled={submitting || items.length === 0}
+          disabled={submitting || items.length === 0 || groups.some((g) => isEventClosed(g.event.deadlineAt))}
           onClick={placeOrder}
         >
           {submitting ? "주문 처리 중..." : "주문하기"}
