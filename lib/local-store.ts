@@ -5,7 +5,8 @@
 // before a real backend is wired up.
 
 import { MOCK_EVENTS, MOCK_NOTIFICATIONS } from "@/lib/mock-data";
-import type { MarketEvent, NotificationItem, Order, Profile, Address } from "@/types";
+import type { MarketEvent, NotificationItem, Order, Profile, Address, StoreSettings } from "@/types";
+import { EMPTY_STORE_SETTINGS } from "@/types";
 
 const KEYS = {
   events: "bogle_events",
@@ -14,6 +15,7 @@ const KEYS = {
   authProfile: "bogle_auth_profile",
   addresses: "bogle_addresses",
   accounts: "bogle_accounts",
+  storeSettings: "bogle_store_settings",
 } as const;
 
 interface MockAccount {
@@ -87,4 +89,11 @@ export function loadAccounts(): Record<string, MockAccount> {
 }
 export function saveAccounts(accounts: Record<string, MockAccount>) {
   write(KEYS.accounts, accounts);
+}
+
+export function loadStoreSettings(): StoreSettings {
+  return read<StoreSettings>(KEYS.storeSettings, EMPTY_STORE_SETTINGS);
+}
+export function saveStoreSettings(settings: StoreSettings) {
+  write(KEYS.storeSettings, settings);
 }

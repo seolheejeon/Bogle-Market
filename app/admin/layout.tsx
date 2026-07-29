@@ -11,6 +11,7 @@ const NAV = [
   { href: "/admin/orders", label: "주문 관리" },
   { href: "/admin/customers", label: "고객 관리" },
   { href: "/admin/notifications", label: "알림 발송" },
+  { href: "/admin/settings", label: "설정" },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

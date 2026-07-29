@@ -9,6 +9,7 @@ import { useCart } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
+import { BankAccountInfo } from "@/components/BankAccountInfo";
 
 export function CheckoutView() {
   const router = useRouter();
@@ -182,7 +183,12 @@ export function CheckoutView() {
             </button>
           ))}
         </div>
-        <p className="-mt-2 mb-4 text-[11.5px] text-text-muted">{PAYMENT_METHODS.find((m) => m.value === method)?.help}</p>
+        <p className="-mt-2 mb-3 text-[11.5px] text-text-muted">{PAYMENT_METHODS.find((m) => m.value === method)?.help}</p>
+        {method === "bank_transfer" && (
+          <div className="mb-4">
+            <BankAccountInfo />
+          </div>
+        )}
 
         <p className="mb-2 text-[12.5px] font-bold text-text-muted">주문 상품</p>
         <div className="flex flex-col gap-1.5 text-[13px] text-text-muted">
