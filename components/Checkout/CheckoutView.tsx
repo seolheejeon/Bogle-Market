@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { listEvents, createOrder, getDefaultAddress, updateAddress } from "@/lib/data";
 import { formatAddress, type MarketEvent, type Order, type PaymentMethod } from "@/types";
-import { formatPrice, isEventClosed, formatEventDateChip } from "@/lib/format";
+import { formatPrice, formatEventDateChip } from "@/lib/format";
 import { useCart } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { PAYMENT_METHODS } from "@/lib/payments";
@@ -99,11 +99,6 @@ export function CheckoutView() {
     }
     if (items.length === 0) {
       setError("장바구니가 비어있어요.");
-      return;
-    }
-    const expired = groups.filter((g) => isEventClosed(g.event.deadlineAt));
-    if (expired.length > 0) {
-      setError(`마감된 이벤트가 있어 주문할 수 없어요: ${expired.map((g) => g.event.title).join(", ")}. 장바구니에서 빼고 다시 시도해 주세요.`);
       return;
     }
     setSubmitting(true);
@@ -226,17 +221,12 @@ export function CheckoutView() {
         )}
         <div className="flex flex-col gap-4">
           {groups.map((g) => {
-            const closed = isEventClosed(g.event.deadlineAt);
             const groupTotal = g.items.reduce((sum, i) => sum + i.product.price * i.qty, 0);
             return (
               <div key={g.event.id}>
                 <div className="mb-1.5 flex items-center justify-between">
                   <span className="text-[12.5px] font-bold text-accent-dark">{g.event.title}</span>
-                  {closed ? (
-                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-600">마감됨</span>
-                  ) : (
-                    <span className="text-[11px] text-text-muted">배송예정 {formatEventDateChip(g.event.deliveryAt)}</span>
-                  )}
+                  <span className="text-[11px] text-text-muted">배송예정 {formatEventDateChip(g.event.deliveryAt)}</span>
                 </div>
                 <div className="flex flex-col gap-1.5 text-[13px] text-text-muted">
                   {g.items.map((i) => (
@@ -267,7 +257,7 @@ export function CheckoutView() {
 
         <button
           className="mt-4 w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-50"
-          disabled={submitting || items.length === 0 || groups.some((g) => isEventClosed(g.event.deadlineAt))}
+          disabled={submitting || items.length === 0}
           onClick={placeOrder}
         >
           {submitting ? "주문 처리 중..." : "주문하기"}

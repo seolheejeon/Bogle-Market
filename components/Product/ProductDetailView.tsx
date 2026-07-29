@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { findProductWithEvent } from "@/lib/data";
 import type { MarketEvent, Product } from "@/types";
-import { formatPrice, formatDeadlineLabel, formatEventDateChip, isEventClosed } from "@/lib/format";
+import { formatPrice, formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
 import { useCart } from "@/lib/cart-context";
 import { ProductDetailContent } from "@/components/Product/ProductDetailContent";
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
@@ -88,7 +88,6 @@ export function ProductDetailView({ productId }: { productId: string }) {
 
   const { product, event } = data;
   const photos = product.photos && product.photos.length > 0 ? product.photos : [product.emoji];
-  const closed = isEventClosed(event.deadlineAt);
 
   function addToCart() {
     changeQty(product.id, qty);
@@ -135,13 +134,9 @@ export function ProductDetailView({ productId }: { productId: string }) {
           <EventTypeBadge type={product.deliveryType ?? event.type} flash={event.isFlash} />
           <span className="text-[12px] font-semibold text-text-muted">{event.title}</span>
         </button>
-        {closed ? (
-          <p className="mt-1 text-[12px] font-bold text-red-600">마감됨</p>
-        ) : (
-          <p className="mt-1 text-[12px] text-text-muted">
-            {formatDeadlineLabel(event.deadlineAt)} · 배송예정 {formatEventDateChip(event.deliveryAt)}
-          </p>
-        )}
+        <p className="mt-1 text-[12px] text-text-muted">
+          {formatDeadlineLabel(event.deadlineAt)} · 배송예정 {formatEventDateChip(event.deliveryAt)}
+        </p>
 
         <p className="mt-2 text-[17px] font-extrabold">{product.name}</p>
         <p className="my-1.5 text-xl font-extrabold">{formatPrice(product.price)}</p>
@@ -179,34 +174,29 @@ export function ProductDetailView({ productId }: { productId: string }) {
               장바구니에 담겼습니다
             </div>
           )}
-          {closed ? (
-            <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">마감된 상품이에요. 다음 회차를 기다려 주세요.</p>
-          ) : (
-            <div className="mb-2.5 flex items-center justify-center gap-4">
-              <button
-                className="h-[30px] w-[30px] rounded-full border border-border bg-bg-card text-[15px] text-text disabled:opacity-40"
-                disabled={qty <= 1}
-                onClick={() => setQty((q) => Math.max(1, q - 1))}
-              >
-                −
-              </button>
-              <span className="w-5 text-center font-bold">{qty}</span>
-              <button
-                className="h-[30px] w-[30px] rounded-full border border-border bg-bg-card text-[15px] text-text"
-                onClick={() => setQty((q) => q + 1)}
-              >
-                +
-              </button>
-              <span className="ml-auto text-[13px] font-bold text-text-muted">{formatPrice(qty * product.price)}</span>
-            </div>
-          )}
+          <div className="mb-2.5 flex items-center justify-center gap-4">
+            <button
+              className="h-[30px] w-[30px] rounded-full border border-border bg-bg-card text-[15px] text-text disabled:opacity-40"
+              disabled={qty <= 1}
+              onClick={() => setQty((q) => Math.max(1, q - 1))}
+            >
+              −
+            </button>
+            <span className="w-5 text-center font-bold">{qty}</span>
+            <button
+              className="h-[30px] w-[30px] rounded-full border border-border bg-bg-card text-[15px] text-text"
+              onClick={() => setQty((q) => q + 1)}
+            >
+              +
+            </button>
+            <span className="ml-auto text-[13px] font-bold text-text-muted">{formatPrice(qty * product.price)}</span>
+          </div>
           <button
             ref={addButtonRef}
             className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40"
-            disabled={closed}
             onClick={addToCart}
           >
-            {closed ? "마감됨" : "장바구니 담기"}
+            장바구니 담기
           </button>
         </div>
       </div>
