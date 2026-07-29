@@ -149,3 +149,17 @@ export const EVENT_TYPE_LABEL: Record<EventType, string> = {
   GROUP_BUY: "사다드림",
   PARCEL: "택배",
 };
+
+// 무통장입금 안내용 계좌 정보. 매장 전체에 하나만 존재하는 설정값(싱글턴)이라
+// 관리자만 수정할 수 있고, 체크아웃/주문상세에서 손님에게 그대로 노출된다.
+export interface StoreSettings {
+  bankName: string;
+  accountNumber: string;
+  accountHolder: string;
+}
+
+export const EMPTY_STORE_SETTINGS: StoreSettings = { bankName: "", accountNumber: "", accountHolder: "" };
+
+export function hasBankAccountInfo(settings: StoreSettings): boolean {
+  return Boolean(settings.bankName.trim() && settings.accountNumber.trim() && settings.accountHolder.trim());
+}

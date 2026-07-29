@@ -6,8 +6,9 @@
 // including the admin panel, is testable before a real backend exists.
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { loadEvents, saveEvents, loadOrders, saveOrders, loadNotifications, saveNotifications, loadAccounts, genId } from "@/lib/local-store";
-import type { Address, MarketEvent, NotificationItem, Order, OrderItem, OrderStatus, PaymentMethod, Product, Profile } from "@/types";
+import { loadEvents, saveEvents, loadOrders, saveOrders, loadNotifications, saveNotifications, loadAccounts, loadStoreSettings, saveStoreSettings, genId } from "@/lib/local-store";
+import type { Address, MarketEvent, NotificationItem, Order, OrderItem, OrderStatus, PaymentMethod, Product, Profile, StoreSettings } from "@/types";
+import { EMPTY_STORE_SETTINGS } from "@/types";
 
 function orderNumber(): string {
   const now = new Date();
@@ -416,7 +417,41 @@ export async function updateAddress(addressId: string, profileId: string, patch:
   window.localStorage.setItem(`bogle_addresses_${profileId}`, JSON.stringify(next));
 }
 
+// ---------- Store settings (입금 계좌 정보) ----------
+// 매장 전체에 하나뿐인 설정값 — 체크아웃/주문상세에서 게스트도 읽어야 해서
+// 조회는 공개, 수정은 관리자만 가능하도록 RLS로 분리돼 있다 (schema.sql 참고).
+
+export async function getStoreSettings(): Promise<StoreSettings> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.from("store_settings").select("*").eq("id", true).maybeSingle();
+    if (error) throw error;
+    return data ? mapSupabaseStoreSettings(data) : EMPTY_STORE_SETTINGS;
+  }
+  return loadStoreSettings();
+}
+
+export async function updateStoreSettings(input: StoreSettings): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("store_settings").upsert({
+      id: true,
+      bank_name: input.bankName,
+      account_number: input.accountNumber,
+      account_holder: input.accountHolder,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw error;
+    return;
+  }
+  saveStoreSettings(input);
+}
+
 // ---------- Supabase row mappers ----------
+
+function mapSupabaseStoreSettings(row: Record<string, any>): StoreSettings {
+  return { bankName: row.bank_name ?? "", accountNumber: row.account_number ?? "", accountHolder: row.account_holder ?? "" };
+}
 
 function mapSupabaseNotification(row: Record<string, any>): NotificationItem {
   return {

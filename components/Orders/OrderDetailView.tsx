@@ -8,6 +8,7 @@ import type { Order, OrderStatus } from "@/types";
 import { PAYMENT_METHOD_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
+import { BankAccountInfo } from "@/components/BankAccountInfo";
 
 const STEPS: { value: OrderStatus; label: string }[] = [
   { value: "wait", label: "입금대기" },
@@ -80,6 +81,12 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
                 <span className="text-text-muted">결제 방법</span> {PAYMENT_METHOD_LABEL[order.paymentMethod]}
               </p>
             </div>
+
+            {order.paymentMethod === "bank_transfer" && order.status === "wait" && (
+              <div className="mb-4">
+                <BankAccountInfo />
+              </div>
+            )}
 
             <p className="mb-2 text-[12.5px] font-bold text-text-muted">주문 상품</p>
             <div className="flex flex-col gap-2">

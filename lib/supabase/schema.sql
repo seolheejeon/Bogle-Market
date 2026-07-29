@@ -114,6 +114,17 @@ create table if not exists notifications (
   created_at timestamptz not null default now()
 );
 
+-- 무통장입금 안내용 계좌 정보. 매장 전체에 하나뿐인 설정값이라 진짜 싱글턴으로
+-- 강제한다 — boolean PK는 값이 true 하나뿐이라 두 번째 행을 만들 수 없다.
+-- 최초 값은 관리자가 설정 화면에서 저장할 때 upsert로 생성된다.
+create table if not exists store_settings (
+  id boolean primary key default true check (id),
+  bank_name text not null default '',
+  account_number text not null default '',
+  account_holder text not null default '',
+  updated_at timestamptz not null default now()
+);
+
 -- Row Level Security --------------------------------------------------
 
 alter table profiles enable row level security;
@@ -123,6 +134,7 @@ alter table products enable row level security;
 alter table orders enable row level security;
 alter table order_items enable row level security;
 alter table notifications enable row level security;
+alter table store_settings enable row level security;
 
 -- SECURITY DEFINER helper: checks admin status while bypassing RLS itself.
 -- Policies must call this instead of subquerying `profiles` directly — a
@@ -205,6 +217,15 @@ create policy "read broadcast or own notifications" on notifications for select
   using (profile_id is null or profile_id = auth.uid());
 drop policy if exists "admins send notifications" on notifications;
 create policy "admins send notifications" on notifications for insert
+  with check (is_admin());
+
+-- Store settings (입금 계좌 정보): everyone needs to read it at checkout,
+-- including guests, so select is public; only admins can write it.
+drop policy if exists "store settings are publicly readable" on store_settings;
+create policy "store settings are publicly readable" on store_settings for select using (true);
+drop policy if exists "admins manage store settings" on store_settings;
+create policy "admins manage store settings" on store_settings for all
+  using (is_admin())
   with check (is_admin());
 
 -- Username/phone availability checks for the signup form's 중복확인 — plain
