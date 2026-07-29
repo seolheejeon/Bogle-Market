@@ -2,6 +2,10 @@ export function formatPrice(value: number): string {
   return `${value.toLocaleString("ko-KR")}원`;
 }
 
+export function isEventClosed(deadlineIso: string): boolean {
+  return new Date(deadlineIso).getTime() <= Date.now();
+}
+
 export function formatCountdown(targetIso: string): string {
   const ms = new Date(targetIso).getTime() - Date.now();
   if (ms <= 0) return "마감되었어요";

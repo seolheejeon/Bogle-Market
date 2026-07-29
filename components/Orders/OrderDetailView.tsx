@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
-import { listOrdersForProfile, lookupGuestOrders } from "@/lib/data";
-import type { Order, OrderStatus } from "@/types";
-import { PAYMENT_METHOD_LABEL } from "@/types";
-import { formatDateTime, formatPrice } from "@/lib/format";
+import { listOrdersForProfile, lookupGuestOrders, getEvent } from "@/lib/data";
+import type { MarketEvent, Order, OrderStatus } from "@/types";
+import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL } from "@/types";
+import { formatDateTime, formatPrice, formatEventDateChip } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
 
@@ -21,19 +22,34 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
   const router = useRouter();
   const { profile, loading } = useAuth();
   const [order, setOrder] = useState<Order | null | undefined>(undefined);
+  // 한 번의 체크아웃(batchId)에서 같이 만들어진 다른 이벤트의 주문들 — 이벤트가
+  // 하나뿐인 보통의 주문에서는 항상 빈 배열.
+  const [batchSiblings, setBatchSiblings] = useState<Order[]>([]);
+  const [event, setEvent] = useState<MarketEvent | null>(null);
 
   useEffect(() => {
     if (loading) return;
+    function apply(all: Order[]) {
+      const found = all.find((o) => o.id === orderId) ?? null;
+      setOrder(found);
+      setBatchSiblings(found ? all.filter((o) => o.batchId === found.batchId && o.id !== found.id) : []);
+    }
     if (profile) {
-      listOrdersForProfile(profile.id).then((orders) => setOrder(orders.find((o) => o.id === orderId) ?? null));
+      listOrdersForProfile(profile.id).then(apply);
     } else if (guestName && guestPin) {
-      lookupGuestOrders(guestName, guestPin).then((orders) => setOrder(orders.find((o) => o.id === orderId) ?? null));
+      lookupGuestOrders(guestName, guestPin).then(apply);
     } else {
       setOrder(null);
     }
   }, [profile, loading, orderId, guestName, guestPin]);
 
+  useEffect(() => {
+    if (!order) return;
+    getEvent(order.eventId).then(setEvent);
+  }, [order]);
+
   const stepIndex = order ? STEPS.findIndex((s) => s.value === order.status) : -1;
+  const siblingHref = (id: string) => (guestName && guestPin ? `/orders/${id}?gn=${encodeURIComponent(guestName)}&pin=${guestPin}` : `/orders/${id}`);
 
   return (
     <div>
@@ -71,6 +87,11 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
             )}
 
             <div className="mb-4 rounded-[10px] border border-border p-3 text-[13px]">
+              {event && (
+                <p className="mb-1">
+                  <span className="text-text-muted">이벤트</span> {event.title} · 배송예정 {formatEventDateChip(event.deliveryAt)}
+                </p>
+              )}
               <p className="mb-1">
                 <span className="text-text-muted">받는 분</span> {order.recipientName} ({order.recipientPhone})
               </p>
@@ -81,6 +102,23 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
                 <span className="text-text-muted">결제 방법</span> {PAYMENT_METHOD_LABEL[order.paymentMethod]}
               </p>
             </div>
+
+            {batchSiblings.length > 0 && (
+              <div className="mb-4 rounded-[10px] border border-border p-3">
+                <p className="mb-2 text-[12px] font-bold text-text-muted">이번에 함께 결제한 다른 주문</p>
+                <div className="flex flex-col gap-2">
+                  {batchSiblings.map((sibling) => (
+                    <Link key={sibling.id} href={siblingHref(sibling.id)} className="flex items-center justify-between text-[12.5px]">
+                      <span className="text-text-muted">{sibling.orderNumber}</span>
+                      <span className="flex items-center gap-2">
+                        <span>{ORDER_STATUS_LABEL[sibling.status]}</span>
+                        <span className="font-semibold">{formatPrice(sibling.total)}</span>
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {order.paymentMethod === "bank_transfer" && order.status === "wait" && (
               <div className="mb-4">

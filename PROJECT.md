@@ -3,7 +3,7 @@
 보글마켓 개발 진행상황과 주요 기획 결정을 기록하는 문서입니다.
 **기능이 완료되거나 기획이 바뀔 때마다 이 문서도 함께 업데이트합니다.**
 
-마지막 업데이트: 2026-07-29 (전체 주문 플로우 점검 + 입금 계좌 안내 기능 추가)
+마지막 업데이트: 2026-07-29 (주문-이벤트 구조 개선 + 마감시간 차단 추가)
 
 ---
 
@@ -126,6 +126,15 @@
 - 주문 상세 페이지에서도 결제수단이 무통장입금이고 상태가 "입금대기"인 동안에는 같은 계좌 정보를 다시 보여줌 — 입금확인이 끝나면(상태가 바뀌면) 더 이상 보이지 않음
 - 조회는 게스트도 해야 해서 공개(RLS `for select using (true)`), 수정은 관리자만(`is_admin()`)
 
+**주문을 이벤트에 묶기 + 마감시간 차단** (`feature/event-order-structure`)
+- 이전엔 `orders`/`order_items`가 이벤트를 전혀 몰라서, 마감일·배송일이 다른 이벤트 상품을 장바구니에 같이 담으면 주문 1건·상태 1개로 뭉개졌음. `orders.event_id`를 추가해 **주문 1건은 반드시 이벤트 1개에만 속하도록** 강제 — 체크아웃이 장바구니를 이벤트별로 묶어 이벤트 수만큼 `createOrder()`를 호출함(`components/Checkout/CheckoutView.tsx`)
+- 여러 이벤트가 섞여 있어도 고객 입장에선 결제를 한 번만 하므로, 같이 생성된 주문들을 묶는 `orders.batch_id`(uuid, FK 아님, 그냥 같은 값을 공유하는 그룹 키)를 도입. 이벤트가 하나뿐인 보통의 주문도 자기 자신만 담긴 배치로 취급됨(컬럼 기본값 `gen_random_uuid()`)
+- **마감시간 차단**: `lib/data.ts`의 `createOrder()`가 주문을 만들기 전에 항상 `assertEventIsOpen()`으로 해당 이벤트의 마감 여부를 확인하고, 마감이면 예외를 던짐(mock/Supabase 공통, 호출 경로와 무관하게 항상 적용됨). 체크아웃에서도 같은 기준(`isEventClosed()`, `lib/format.ts`)으로 미리 걸러서 마감된 이벤트가 있으면 "주문하기" 버튼 자체를 비활성화
+- 마감 정보를 상품 상세(`ProductDetailView`)·이벤트 상세(`EventDetailView`)·장바구니(`CartView`)에서도 보이게 해서, 마감된 상품은 담기 버튼이 비활성화되고 "마감됨" 표시가 뜸
+- **부수 효과로 해결된 문제들**: (1) 주문 상세/체크아웃에 이벤트 제목·배송예정일이 표시됨(`orders.event_id`로 이벤트를 다시 조회할 수 있게 됐으므로), (2) 관리자 주문 관리(`/admin/orders`)에 이벤트 필터와 각 주문의 이벤트명이 추가됨("이벤트별 주문 조회" 요구사항 충족), (3) 아파트 단위 일괄 배송완료가 이제 항상 단일 이벤트 주문만 다루므로 "일부만 배송된 주문을 통째로 완료 처리"하던 잠재 버그가 구조적으로 사라짐
+- 주문 상세 페이지에 "이번에 함께 결제한 다른 주문"(batch_id가 같은 형제 주문) 목록을 추가 — 배송시작/완료 알림 문구에도 이벤트명을 넣어 어떤 주문인지 바로 알 수 있게 함
+- **Product/Event 구조는 그대로 유지(안 A 채택)** — Product가 Event에 1:1로 종속된 현재 구조를 유지하고, Product를 카탈로그(내용)와 이벤트별 등록(EventProduct, 가격/배송방식)으로 분리하는 정규화는 지금 하지 않기로 결정. 재진행(같은 상품을 다른 회차에 다시 파는 것) 시 상품을 복제하는 기능도 이번엔 만들지 않음 — 나중에 실제로 "같은 상품을 여러 회차에 반복 재사용"하는 운영 패턴이 확인되면 그때 검토. 복제 기능을 나중에 만들 때 `origin_product_id`(복제 출처를 가리키는 자기참조 컬럼) 같은 이력 필드를 같이 넣어두면, 훨씬 나중에 EventProduct로 넘어가야 할 때도 "어떤 상품 row들이 같은 카탈로그 상품의 반복 판매인지" 자동으로 알 수 있어 마이그레이션이 쉬워짐 — 지금은 그 컬럼도 보류
+
 **인프라**
 - Supabase 스키마(`lib/supabase/schema.sql`) + seed 데이터(`lib/supabase/seed.sql`)
 - RLS 정책 — `is_admin()` SECURITY DEFINER 함수로 profiles 자기참조 무한재귀 버그 수정
@@ -139,18 +148,14 @@
 
 # 다음 작업 (TODO)
 
-2026-07-29에 실제 주문 플로우를 고객·관리자 양쪽에서 처음부터 끝까지 진행하며 전체 점검을 했다. 발견한 항목을 공동구매 운영 효율 기준으로 우선순위를 매겨 정리한다 (계좌 안내 항목은 완료해서 위 "완료된 기능"으로 이동함).
+2026-07-29에 실제 주문 플로우를 고객·관리자 양쪽에서 처음부터 끝까지 진행하며 전체 점검을 했다. 발견한 항목을 공동구매 운영 효율 기준으로 우선순위를 매겨 정리한다 (계좌 안내, 마감시간 차단, 이벤트-주문 구조 개선 항목은 완료해서 위 "완료된 기능"으로 이동함).
 
 **치명적 — 실운영을 막거나 데이터 오류를 만들 수 있음**
-- [ ] 마감 시각이 지나도 장바구니 담기/주문하기가 그대로 동작함 — 상품 상세/체크아웃 어디에도 이벤트 마감 여부를 확인하는 로직이 없어서, 마감 후 주문이 들어와 발주 수량에 오차가 생길 수 있음
 - [ ] 재고/수량 제한이 아예 없음 — `Product`에 재고 필드가 없어서 "1시간 특가" 같은 한정 수량 상품도 무제한 주문 가능
 - [ ] 고객 셀프 주문취소 기능이 실제로는 없음 — PROJECT.md엔 완료로 기록돼 있었지만 `OrderDetailView.tsx`/`OrdersView.tsx`에 취소 버튼이 없고, Supabase RLS에도 고객이 자기 주문을 수정할 수 있는 정책이 없음 (UI+RLS+데이터 함수 전부 새로 필요)
-- [ ] 장바구니/체크아웃이 서로 다른 이벤트 상품을 하나의 주문으로 묶어버림 — `OrderItem`에 이벤트/배송정보가 저장되지 않아서, 마감일도 배송일도 다른 상품을 같이 주문하면 한쪽만 배송된 상태를 표현할 방법이 없음 (아파트 단위 일괄 배송완료 기능도 이 케이스에서 오작동 가능) — 구조적으로 손이 큰 작업이라 별도 설계 필요
 
 **주요 — 매일 체감되는 UX/운영 마찰**
-- [ ] 상품 상세페이지에 이벤트 정보(마감시각/배송예정일/배송방식 뱃지)가 전혀 없음 — 알림 딥링크나 공유 링크로 바로 들어오면 마감 임박 여부를 전혀 알 수 없음
 - [ ] 입금확인(입금대기→입금완료) 전환 시 고객 알림이 안 감 — 배송시작/완료만 알림이 감. 무통장입금 특성상 "입금했는데 확인되셨나요?" 문의가 반복될 수밖에 없는 구조
-- [ ] 주문 상세/내역에 배송 예정일이 어디에도 안 보임 (위 "이벤트별 주문 분리" 항목과 같은 원인)
 
 **보통 — 정확도/신뢰성 개선**
 - [ ] 대시보드 "진행 중 이벤트" 수치가 마감된 이벤트까지 포함해서 부정확
@@ -185,7 +190,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `addresses` | id, profile_id, name, phone, zonecode, road_address, apartment_name, detail_address, entrance_method, memo, is_default | 회원 배송지. Daum 주소검색으로만 입력받음 — `road_address`/`zonecode`는 검색 결과 그대로, `apartment_name`은 검색 결과가 공동주택일 때만 채워지는 값(사용자가 입력하는 항목 아님, 관리자 아파트별 필터용), `detail_address`(동/호 등)만 사용자가 직접 입력. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, is_flash, deadline_at, delivery_at, notice | 공동구매 회차 |
 | `products` | id, event_id, name, price, emoji, image_url, photos(jsonb), detail_blocks(jsonb), delivery_type, origin, weight, storage, description | 이벤트별 상품. `photos`가 실제 업로드 사진 배열(Storage URL), 없으면 `emoji`를 대표 이미지로 사용. `detail_blocks`는 관리자가 작성한 상세설명(제목/본문/사진 블록). `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `image_url`은 미사용 |
-| `orders` | id, order_number, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, total | 주문. 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용) |
+| `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, total | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용) |
 | `order_items` | id, order_id, product_id, product_name, price_snapshot, quantity | 주문 상품 스냅샷 |
 | `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
 | `store_settings` | id(boolean, 항상 true — 싱글턴 강제), bank_name, account_number, account_holder, updated_at | 무통장입금 안내용 계좌 정보. 매장 전체에 한 행만 존재. 조회는 게스트 포함 전체 공개, 수정은 관리자만 |
@@ -206,6 +211,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 - 알림 발송(`/admin/notifications`): 제목/내용/아이콘/연결화면(상품·이벤트·주문)을 선택해서 전체 고객에게 알림 발송. 배송 시작/완료 알림은 주문 상태 변경 시 자동 발송(수동 발송 불필요)
 - 아파트별 필터(`/admin/customers`, `/admin/orders`) + 주문 관리에서 아파트 단위 "배송중 전체 배송완료" 일괄 처리(처리된 주문마다 고객에게 배송완료 알림 자동 발송)
 - 설정(`/admin/settings`): 무통장입금 계좌 정보(은행명/계좌번호/예금주) 등록 — 체크아웃/주문상세에 그대로 노출됨
+- 이벤트 필터(`/admin/orders`): 주문 목록을 이벤트별로 조회 가능, 각 주문 카드에도 소속 이벤트명 표시
 
 **계획**
 - 매출/정산 리포트 (현재 대시보드는 오늘 매출만 단순 합산)

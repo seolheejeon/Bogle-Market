@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { listEvents } from "@/lib/data";
 import type { MarketEvent } from "@/types";
-import { formatPrice } from "@/lib/format";
+import { formatPrice, formatDeadlineLabel, isEventClosed } from "@/lib/format";
 import { useCart } from "@/lib/cart-context";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
@@ -54,9 +54,18 @@ export function CartView() {
         <strong className="text-[15px]">장바구니</strong>
       </div>
       <div className="p-4">
-        {grouped.map(({ event, items }) => (
+        {grouped.map(({ event, items }) => {
+          const closed = isEventClosed(event.deadlineAt);
+          return (
           <div key={event.id} className="mb-4">
-            <p className="mb-2 text-xs font-bold text-accent-dark">{event.title}</p>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-xs font-bold text-accent-dark">{event.title}</p>
+              {closed ? (
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-600">마감됨 · 주문 시 제외돼요</span>
+              ) : (
+                <span className="text-[11px] text-text-muted">{formatDeadlineLabel(event.deadlineAt)}</span>
+              )}
+            </div>
             {items.map(({ product, qty }) => (
               <div key={product.id} className="flex items-center gap-3 py-2">
                 <ProductPhoto
@@ -71,7 +80,8 @@ export function CartView() {
               </div>
             ))}
           </div>
-        ))}
+          );
+        })}
       </div>
       {/* fixed, not sticky-in-flow: see ProductDetailView for why — a sticky
           footer nested in <main> gets hidden behind BottomNav's own sticky
