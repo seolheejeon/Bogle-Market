@@ -9,12 +9,13 @@ export type OrderStatus = "wait" | "paid" | "confirmed" | "ship" | "done" | "ref
 // (and a future `products.detail_blocks` jsonb column would store), so
 // swapping the dummy data for real admin-authored content later only means
 // changing where this array comes from, not how it's rendered.
-// images 블록은 urls 배열 길이(1~3)만큼 가로로 나란히 표시된다 — 스마트스토어
-// 상세페이지처럼 1열/2열/3열 레이아웃을 블록 단위로 자유롭게 섞어 쓸 수 있게.
+// images 블록은 사진 목록(urls, 몇 장이든)과 레이아웃(columns)이 서로 독립이다 —
+// 사진을 자유롭게 추가/삭제/순서변경 해두고, 그 목록을 1/2/3열 중 원하는
+// 레이아웃으로만 렌더링한다(장수와 열 수가 안 맞으면 마지막 줄만 덜 채워짐).
 export type ProductDetailBlock =
   | { type: "heading"; text: string }
   | { type: "text"; text: string }
-  | { type: "images"; urls: string[] };
+  | { type: "images"; urls: string[]; columns: 1 | 2 | 3 };
 
 // 카탈로그 상품 — 사진/설명/원산지 등 "내용물"만 담고 있고 이벤트와 무관하게
 // 하나만 존재한다. "상품 관리"(`/admin/products`) 화면에서 검색·수정하는
@@ -264,4 +265,28 @@ export const EMPTY_STORE_SETTINGS: StoreSettings = { bankName: "", accountNumber
 
 export function hasBankAccountInfo(settings: StoreSettings): boolean {
   return Boolean(settings.bankName.trim() && settings.accountNumber.trim() && settings.accountHolder.trim());
+}
+
+export type BannerLinkType = "PRODUCT" | "EVENT" | "URL" | "NONE";
+
+export const BANNER_LINK_LABEL: Record<BannerLinkType, string> = {
+  PRODUCT: "상품",
+  EVENT: "이벤트",
+  URL: "외부 URL",
+  NONE: "없음",
+};
+
+// 메인 홈 상단 슬라이드 배너. linkType이 PRODUCT면 linkId는 카탈로그 상품 id를
+// 담는다(리스팅 id 아님) — 배너는 노출 기간이 길어서 클릭 시점에 그 상품이
+// 걸린 리스팅 중 가장 적합한 걸로 그때그때 해석한다(lib/banner-link.ts).
+export interface Banner {
+  id: string;
+  imageUrl: string;
+  linkType: BannerLinkType;
+  linkId: string | null;
+  linkUrl: string | null;
+  active: boolean;
+  startsAt: string | null; // ISO
+  endsAt: string | null; // ISO
+  sortOrder: number;
 }

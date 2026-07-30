@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { listEvents } from "@/lib/data";
-import type { EventType, MarketEvent } from "@/types";
+import { listEvents, listBanners, isBannerLive } from "@/lib/data";
+import { resolveBannerHref } from "@/lib/banner-link";
+import type { Banner, EventType, MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatCountdownShort, formatDeadlineShort, formatPrice } from "@/lib/format";
 import { Countdown } from "@/components/Countdown";
@@ -19,19 +20,27 @@ function nearestOfType(events: MarketEvent[], type: EventType) {
 
 export function HomeView() {
   const [events, setEvents] = useState<MarketEvent[] | null>(null);
+  const [banners, setBanners] = useState<Banner[] | null>(null);
   const [heroIndex, setHeroIndex] = useState(0);
 
   useEffect(() => {
     // 노출 꺼둔 상품은 홈 화면 어디에도(히어로/마감임박/인기상품) 나오지 않게
     // 이벤트를 불러온 시점에 한 번만 걸러둔다.
     listEvents().then((all) => setEvents(all.map((e) => ({ ...e, products: e.products.filter((p) => p.visible !== false) }))));
+    listBanners().then(setBanners);
   }, []);
 
   const flash = events?.find((e) => e.isFlash);
   const door = events ? nearestOfType(events, "DOOR") : undefined;
   const group = events ? nearestOfType(events, "GROUP_BUY") : undefined;
 
-  const heroSlides = useMemo(() => {
+  // 관리자가 등록한 배너 중 지금 노출 중인 것만 순서대로 — 하나라도 있으면
+  // 배너 슬라이드를 쓰고, 없으면(등록 전이거나 전부 비활성/기간 밖) 기존처럼
+  // 이벤트에서 자동으로 뽑은 슬라이드로 대체한다.
+  const liveBanners = useMemo(() => (banners ?? []).filter((b) => isBannerLive(b)), [banners]);
+  const useRealBanners = liveBanners.length > 0;
+
+  const autoHeroSlides = useMemo(() => {
     const slides: { key: string; eyebrow: string; badge: string; eventId: string; product: MarketEvent["products"][number] }[] = [];
     if (flash?.products[0]) slides.push({ key: "flash", eyebrow: "지금 특가로 만나보세요", badge: "🔥 1시간 특가", eventId: flash.id, product: flash.products[0] });
     if (door?.products[0]) slides.push({ key: "door", eyebrow: "집에서 즐기는 신선한 한 끼", badge: "이번 회차 PICK", eventId: door.id, product: door.products[0] });
@@ -39,15 +48,24 @@ export function HomeView() {
     return slides;
   }, [flash, door, group]);
 
+  const bannerHrefs = useMemo(() => (events ? liveBanners.map((b) => resolveBannerHref(b, events)) : liveBanners.map(() => null)), [liveBanners, events]);
+
+  const heroLength = useRealBanners ? liveBanners.length : autoHeroSlides.length;
+  // heroIndex is a plain running counter (dot clicks/interval bump it directly);
+  // heroLength can change out from under it the moment banners load or the
+  // live/auto source switches, so every array read goes through this modulo
+  // instead of clamping heroIndex itself with an extra effect.
+  const activeIndex = heroLength > 0 ? heroIndex % heroLength : 0;
+
   useEffect(() => {
-    if (heroSlides.length <= 1) return;
-    // Depending on heroIndex (not just heroSlides.length) restarts this timer
+    if (heroLength <= 1) return;
+    // Depending on heroIndex (not just heroLength) restarts this timer
     // whenever the slide changes for any reason — auto tick, dot click, or a
     // manual swipe/drag — so the next auto-advance always waits a full
     // interval from the last change instead of firing early.
-    const id = setInterval(() => setHeroIndex((i) => (i + 1) % heroSlides.length), 4500);
+    const id = setInterval(() => setHeroIndex((i) => (i + 1) % heroLength), 4500);
     return () => clearInterval(id);
-  }, [heroSlides.length, heroIndex]);
+  }, [heroLength, heroIndex]);
 
   const deadlineItems = useMemo(() => {
     const items: { badgeType: EventType; eventId: string; product: MarketEvent["products"][number]; deadlineAt: string }[] = [];
@@ -68,7 +86,7 @@ export function HomeView() {
   const heroDrag = useRef({ startX: 0, startY: 0, dragging: false, moved: false });
 
   function goToHero(next: number) {
-    const len = heroSlides.length;
+    const len = heroLength;
     setHeroIndex(((next % len) + len) % len);
   }
 
@@ -105,48 +123,74 @@ export function HomeView() {
     return <div className="p-4 text-sm text-text-muted">불러오는 중...</div>;
   }
 
+  const heroDots = heroLength > 1 && (
+    <div className="mt-3.5 flex gap-1.5">
+      {Array.from({ length: heroLength }, (_, i) => (
+        <button
+          key={i}
+          onClick={(e) => {
+            e.preventDefault();
+            setHeroIndex(i);
+          }}
+          className={`h-1.5 rounded-full transition-all ${i === activeIndex ? "w-4 bg-accent" : "w-1.5 bg-[var(--badge-parcel-bg)]"}`}
+        />
+      ))}
+    </div>
+  );
+
+  const heroPointerProps = {
+    onClick: handleHeroClick,
+    onPointerDown: handleHeroPointerDown,
+    onPointerMove: handleHeroPointerMove,
+    onPointerUp: handleHeroPointerUp,
+    onPointerCancel: handleHeroPointerUp,
+  };
+
   return (
     <div className="p-4">
-      {heroSlides.length > 0 && (
+      {useRealBanners &&
+        (bannerHrefs[activeIndex] ? (
+          <Link
+            href={bannerHrefs[activeIndex]!}
+            {...heroPointerProps}
+            className="relative block touch-pan-y overflow-hidden rounded-2xl select-none active:cursor-grabbing sm:cursor-grab"
+          >
+            <ProductPhoto photo={liveBanners[activeIndex].imageUrl} fit="cover" className="h-40 w-full sm:h-48" />
+            {heroLength > 1 && <div className="absolute inset-x-0 bottom-2.5 flex justify-center">{heroDots}</div>}
+          </Link>
+        ) : (
+          <div
+            {...heroPointerProps}
+            className="relative touch-pan-y overflow-hidden rounded-2xl select-none active:cursor-grabbing sm:cursor-grab"
+          >
+            <ProductPhoto photo={liveBanners[activeIndex].imageUrl} fit="cover" className="h-40 w-full sm:h-48" />
+            {heroLength > 1 && <div className="absolute inset-x-0 bottom-2.5 flex justify-center">{heroDots}</div>}
+          </div>
+        ))}
+
+      {!useRealBanners && autoHeroSlides.length > 0 && (
         <Link
-          href={`/product/${heroSlides[heroIndex].product.id}`}
-          onClick={handleHeroClick}
-          onPointerDown={handleHeroPointerDown}
-          onPointerMove={handleHeroPointerMove}
-          onPointerUp={handleHeroPointerUp}
-          onPointerCancel={handleHeroPointerUp}
+          href={`/product/${autoHeroSlides[activeIndex].product.id}`}
+          {...heroPointerProps}
           className="flex touch-pan-y items-stretch gap-3 overflow-hidden rounded-2xl p-4 select-none active:cursor-grabbing sm:cursor-grab"
           style={{ background: "linear-gradient(135deg, var(--accent-soft), #d7f3e3)" }}
         >
           <div className="flex min-w-0 flex-1 flex-col justify-center py-1">
-            <p className="text-[13px] font-semibold text-accent-dark">{heroSlides[heroIndex].eyebrow}</p>
+            <p className="text-[13px] font-semibold text-accent-dark">{autoHeroSlides[activeIndex].eyebrow}</p>
             <span className="mt-2 inline-block w-fit rounded-full bg-bg-card px-2.5 py-1 text-[11px] font-extrabold text-accent-dark">
-              {heroSlides[heroIndex].badge}
+              {autoHeroSlides[activeIndex].badge}
             </span>
-            <p className="mt-2.5 line-clamp-2 text-[18px] font-extrabold text-text">{heroSlides[heroIndex].product.name}</p>
-            <p className="mt-1.5 text-[18px] font-extrabold text-accent-dark">{formatPrice(heroSlides[heroIndex].product.price)}</p>
+            <p className="mt-2.5 line-clamp-2 text-[18px] font-extrabold text-text">{autoHeroSlides[activeIndex].product.name}</p>
+            <p className="mt-1.5 text-[18px] font-extrabold text-accent-dark">{formatPrice(autoHeroSlides[activeIndex].product.price)}</p>
             <span className="mt-2.5 inline-flex w-fit rounded-lg bg-accent px-3 py-2 text-[13px] font-bold text-white">지금 주문하기 ›</span>
-            {heroSlides.length > 1 && (
-              <div className="mt-3.5 flex gap-1.5">
-                {heroSlides.map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setHeroIndex(i);
-                    }}
-                    className={`h-1.5 rounded-full transition-all ${i === heroIndex ? "w-4 bg-accent" : "w-1.5 bg-[var(--badge-parcel-bg)]"}`}
-                  />
-                ))}
-              </div>
-            )}
+            {heroDots}
           </div>
           <div
             className="relative flex w-[45%] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/50"
             onDragStart={(e) => e.preventDefault()}
           >
             <ProductPhoto
-              photo={heroSlides[heroIndex].product.photos?.[0] ?? heroSlides[heroIndex].product.emoji}
+              photo={autoHeroSlides[activeIndex].product.photos?.[0] ?? autoHeroSlides[activeIndex].product.emoji}
               fit="contain"
               className="flex h-full w-full items-center justify-center text-[104px] leading-none drop-shadow-sm"
             />

@@ -2,14 +2,14 @@
 
 import { useRef, useState } from "react";
 import type { ProductDetailBlock } from "@/types";
-import { uploadProductPhoto, uploadProductPhotos } from "@/lib/supabase/storage";
+import { uploadProductPhotos } from "@/lib/supabase/storage";
 import { imageFilesFromDataTransfer, imageFilesFromClipboard } from "@/lib/file-drop";
+import { ProductPhoto } from "@/components/ProductPhoto";
 
-const IMAGE_LAYOUT_LABEL: Record<number, string> = { 1: "사진 1열", 2: "사진 2열", 3: "사진 3열" };
+const LAYOUT_LABEL: Record<1 | 2 | 3, string> = { 1: "1열", 2: "2열", 3: "3열" };
 
 export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailBlock[]; onChange: (blocks: ProductDetailBlock[]) => void }) {
-  const columnImageInputRef = useRef<HTMLInputElement>(null);
-  const [pendingColumns, setPendingColumns] = useState(1);
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -32,34 +32,15 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
     onChange(next);
   }
 
-  // Dropping/pasting N photos anywhere in the editor still creates N separate
-  // 1-column image blocks in upload order (throw a batch of photos in, get a
-  // block per photo) — the explicit "+ 사진 2장/3장" buttons below are the only
-  // way to create a multi-column block.
-  async function addBulkImageBlocks(files: File[]) {
+  // 몇 장을 고르든 항상 사진 블록 하나로 묶는다 — 레이아웃(1/2/3열)은 블록
+  // 안에서 따로 고르는 값이라 장수와 무관하며, 나중에 사진을 더 추가해도
+  // 같은 블록 안에서 관리된다.
+  async function addPhotoBlock(files: File[]) {
     if (files.length === 0) return;
     setUploading(true);
     try {
       const urls = await uploadProductPhotos(files);
-      onChange([...blocks, ...urls.map((url): ProductDetailBlock => ({ type: "images", urls: [url] }))]);
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "사진 업로드에 실패했어요.");
-    }
-    setUploading(false);
-  }
-
-  function openColumnPicker(columns: number) {
-    setPendingColumns(columns);
-    columnImageInputRef.current?.click();
-  }
-
-  async function addColumnImageBlock(files: File[], columns: number) {
-    const chosen = files.slice(0, columns);
-    setUploading(true);
-    try {
-      const urls = chosen.length > 0 ? await uploadProductPhotos(chosen) : [];
-      while (urls.length < columns) urls.push("");
-      onChange([...blocks, { type: "images", urls }]);
+      onChange([...blocks, { type: "images", urls, columns: 1 }]);
     } catch (e) {
       alert(e instanceof Error ? e.message : "사진 업로드에 실패했어요.");
     }
@@ -78,9 +59,9 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
         onDrop={(e) => {
           e.preventDefault();
           setDragOver(false);
-          addBulkImageBlocks(imageFilesFromDataTransfer(e.dataTransfer));
+          addPhotoBlock(imageFilesFromDataTransfer(e.dataTransfer));
         }}
-        onPaste={(e) => addBulkImageBlocks(imageFilesFromClipboard(e.clipboardData))}
+        onPaste={(e) => addPhotoBlock(imageFilesFromClipboard(e.clipboardData))}
         className={`flex flex-col gap-2 rounded-lg p-1 outline-none ${dragOver ? "bg-accent-soft ring-2 ring-accent" : ""}`}
       >
         {blocks.map((block, i) => (
@@ -148,32 +129,31 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
           >
             + 본문
           </button>
-          {[1, 2, 3].map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => openColumnPicker(n)}
-              disabled={uploading}
-              className="rounded-[7px] border border-dashed border-border px-2.5 py-1.5 text-[12px] font-semibold text-text-muted disabled:opacity-50"
-            >
-              {uploading ? "업로드 중..." : `+ 사진 ${n}장`}
-            </button>
-          ))}
+          <button
+            type="button"
+            onClick={() => photoInputRef.current?.click()}
+            disabled={uploading}
+            className="rounded-[7px] border border-dashed border-border px-2.5 py-1.5 text-[12px] font-semibold text-text-muted disabled:opacity-50"
+          >
+            {uploading ? "업로드 중..." : "+ 사진"}
+          </button>
           <input
-            ref={columnImageInputRef}
+            ref={photoInputRef}
             type="file"
             accept="image/*"
-            multiple={pendingColumns > 1}
+            multiple
             className="hidden"
             onChange={(e) => {
-              addColumnImageBlock(Array.from(e.target.files ?? []), pendingColumns);
+              addPhotoBlock(Array.from(e.target.files ?? []));
               e.target.value = "";
             }}
           />
         </div>
       </div>
       <p className="mt-1 text-[10.5px] text-text-muted">
-        “+ 사진 N장”은 가로 N열로 나란히 보이는 블록을 만들어요. 편집기 안에 사진을 드래그하거나 Ctrl+V로 붙여넣으면 장수만큼 1열 블록이 만들어져요. 블록은 ⠿를 드래그하거나 ▲▼로 순서를 바꿀 수 있어요.
+        “+ 사진”으로 여러 장을 한 번에 올리면 사진 블록 하나가 만들어져요. 블록 안에서 1/2/3열 레이아웃을 고르고 사진을 자유롭게 추가·삭제·순서
+        변경할 수 있어요. 편집기 안에 사진을 드래그하거나 Ctrl+V로 붙여넣어도 새 사진 블록이 만들어져요. 블록 순서는 ⠿를 드래그하거나 ▲▼로 바꿀 수
+        있어요.
       </p>
     </div>
   );
@@ -186,57 +166,95 @@ function ImagesBlockEditor({
   block: Extract<ProductDetailBlock, { type: "images" }>;
   onChange: (block: ProductDetailBlock) => void;
 }) {
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const [uploadingIdx, setUploadingIdx] = useState<number | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
 
-  async function handleFile(idx: number, files: FileList | null) {
-    const file = files?.[0];
-    if (!file) return;
-    setUploadingIdx(idx);
+  async function addMore(files: File[]) {
+    if (files.length === 0) return;
+    setUploading(true);
     try {
-      const url = await uploadProductPhoto(file);
-      const urls = block.urls.slice();
-      urls[idx] = url;
-      onChange({ type: "images", urls });
+      const uploaded = await uploadProductPhotos(files);
+      onChange({ ...block, urls: [...block.urls, ...uploaded] });
     } catch (e) {
       alert(e instanceof Error ? e.message : "사진 업로드에 실패했어요.");
     }
-    setUploadingIdx(null);
-    const input = inputRefs.current[idx];
-    if (input) input.value = "";
+    setUploading(false);
+  }
+
+  function removeAt(idx: number) {
+    onChange({ ...block, urls: block.urls.filter((_, i) => i !== idx) });
+  }
+
+  function reorderPhoto(from: number, to: number) {
+    const next = block.urls.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    onChange({ ...block, urls: next });
   }
 
   return (
     <div>
-      <p className="mb-1.5 text-[10.5px] font-semibold text-text-muted">{IMAGE_LAYOUT_LABEL[block.urls.length] ?? `사진 ${block.urls.length}열`}</p>
-      <div className="flex gap-2">
+      <div className="mb-1.5 flex gap-1">
+        {([1, 2, 3] as const).map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onChange({ ...block, columns: n })}
+            className={`rounded-full border px-2 py-0.5 text-[10.5px] font-semibold ${
+              block.columns === n ? "border-accent bg-accent-soft text-accent" : "border-border text-text-muted"
+            }`}
+          >
+            {LAYOUT_LABEL[n]}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
         {block.urls.map((url, idx) => (
-          <div key={idx} className="flex min-w-0 flex-1 flex-col items-stretch gap-1.5">
-            {url ? (
-              // eslint-disable-next-line @next/next/no-img-element -- source is Supabase Storage or a mock-mode data URI
-              <img src={url} alt="" className="aspect-square w-full rounded-md object-cover" />
-            ) : (
-              <div className="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-border text-[10px] text-text-muted">없음</div>
-            )}
+          <div
+            key={idx}
+            draggable
+            onDragStart={() => setDragIndex(idx)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragIndex !== null && dragIndex !== idx) reorderPhoto(dragIndex, idx);
+              setDragIndex(null);
+            }}
+            onDragEnd={() => setDragIndex(null)}
+            className={`group relative h-16 w-16 cursor-grab overflow-hidden rounded-lg border transition-opacity active:cursor-grabbing ${
+              dragIndex === idx ? "border-accent opacity-40" : "border-border"
+            }`}
+          >
+            <ProductPhoto photo={url} className="flex h-full w-full items-center justify-center bg-accent-soft text-2xl" />
             <button
               type="button"
-              onClick={() => inputRefs.current[idx]?.click()}
-              disabled={uploadingIdx === idx}
-              className="w-full truncate rounded-[7px] border border-border px-2 py-1 text-[11px] font-semibold disabled:opacity-50"
+              onClick={() => removeAt(idx)}
+              className="absolute top-0.5 right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-[10px] leading-none text-white"
             >
-              {uploadingIdx === idx ? "업로드 중" : url ? "변경" : "선택"}
+              ×
             </button>
-            <input
-              ref={(el) => {
-                inputRefs.current[idx] = el;
-              }}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => handleFile(idx, e.target.files)}
-            />
           </div>
         ))}
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className="flex h-16 w-16 flex-col items-center justify-center rounded-lg border border-dashed border-border text-[10px] text-text-muted disabled:opacity-50"
+        >
+          {uploading ? "업로드 중" : "+ 추가"}
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            addMore(Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
       </div>
     </div>
   );

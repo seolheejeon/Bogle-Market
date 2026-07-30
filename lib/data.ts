@@ -18,10 +18,13 @@ import {
   loadAccounts,
   loadStoreSettings,
   saveStoreSettings,
+  loadBanners,
+  saveBanners,
   genId,
 } from "@/lib/local-store";
 import type {
   Address,
+  Banner,
   CatalogProduct,
   EventProductSeed,
   EventType,
@@ -815,10 +818,116 @@ export async function updateStoreSettings(input: StoreSettings): Promise<void> {
   saveStoreSettings(input);
 }
 
+// ---------- Banners (메인 홈 상단 배너) ----------
+// 노출 여부(active)와 기간(startsAt/endsAt)은 서버가 아니라 화면 쪽에서
+// isBannerLive로 판단한다 — RLS는 active만 걸러줄 뿐 날짜 범위는 모르고,
+// 관리자 화면에서는 비활성/예약 배너도 그대로 다 보여줘야 하기 때문.
+
+export async function listBanners(): Promise<Banner[]> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.from("banners").select("*").order("sort_order", { ascending: true });
+    if (error) throw error;
+    return (data ?? []).map(mapSupabaseBanner);
+  }
+  return loadBanners()
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+export function isBannerLive(banner: Banner, now: Date = new Date()): boolean {
+  if (!banner.active) return false;
+  if (banner.startsAt && new Date(banner.startsAt).getTime() > now.getTime()) return false;
+  if (banner.endsAt && new Date(banner.endsAt).getTime() < now.getTime()) return false;
+  return true;
+}
+
+export async function createBanner(input: Omit<Banner, "id" | "sortOrder">): Promise<Banner> {
+  const banners = await listBanners();
+  const sortOrder = banners.length > 0 ? Math.max(...banners.map((b) => b.sortOrder)) + 1 : 0;
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase
+      .from("banners")
+      .insert({
+        image_url: input.imageUrl,
+        link_type: input.linkType,
+        link_id: input.linkId,
+        link_url: input.linkUrl,
+        active: input.active,
+        starts_at: input.startsAt,
+        ends_at: input.endsAt,
+        sort_order: sortOrder,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return mapSupabaseBanner(data);
+  }
+  const banner: Banner = { ...input, id: genId("banner"), sortOrder };
+  saveBanners([...banners, banner]);
+  return banner;
+}
+
+export async function updateBanner(id: string, patch: Partial<Omit<Banner, "id">>): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const row: Record<string, unknown> = {};
+    if (patch.imageUrl !== undefined) row.image_url = patch.imageUrl;
+    if (patch.linkType !== undefined) row.link_type = patch.linkType;
+    if ("linkId" in patch) row.link_id = patch.linkId ?? null;
+    if ("linkUrl" in patch) row.link_url = patch.linkUrl ?? null;
+    if (patch.active !== undefined) row.active = patch.active;
+    if ("startsAt" in patch) row.starts_at = patch.startsAt ?? null;
+    if ("endsAt" in patch) row.ends_at = patch.endsAt ?? null;
+    if (patch.sortOrder !== undefined) row.sort_order = patch.sortOrder;
+    const { error } = await supabase.from("banners").update(row).eq("id", id);
+    if (error) throw error;
+    return;
+  }
+  saveBanners(loadBanners().map((b) => (b.id === id ? { ...b, ...patch } : b)));
+}
+
+export async function deleteBanner(id: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("banners").delete().eq("id", id);
+    if (error) throw error;
+    return;
+  }
+  saveBanners(loadBanners().filter((b) => b.id !== id));
+}
+
+// 드래그로 바꾼 순서를 그대로 sort_order(0, 1, 2, ...)로 저장한다.
+export async function reorderBanners(orderedIds: string[]): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    await Promise.all(orderedIds.map((id, index) => supabase.from("banners").update({ sort_order: index }).eq("id", id)));
+    return;
+  }
+  const banners = loadBanners();
+  const byId = new Map(banners.map((b) => [b.id, b]));
+  saveBanners(orderedIds.map((id, index) => ({ ...byId.get(id)!, sortOrder: index })));
+}
+
 // ---------- Supabase row mappers ----------
 
 function mapSupabaseStoreSettings(row: Record<string, any>): StoreSettings {
   return { bankName: row.bank_name ?? "", accountNumber: row.account_number ?? "", accountHolder: row.account_holder ?? "" };
+}
+
+function mapSupabaseBanner(row: Record<string, any>): Banner {
+  return {
+    id: row.id,
+    imageUrl: row.image_url,
+    linkType: row.link_type,
+    linkId: row.link_id ?? null,
+    linkUrl: row.link_url ?? null,
+    active: row.active,
+    startsAt: row.starts_at ?? null,
+    endsAt: row.ends_at ?? null,
+    sortOrder: row.sort_order,
+  };
 }
 
 function mapSupabaseNotification(row: Record<string, any>): NotificationItem {

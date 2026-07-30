@@ -173,6 +173,24 @@ create table if not exists store_settings (
   updated_at timestamptz not null default now()
 );
 
+-- 메인 홈 상단 배너. link_type=PRODUCT일 때 link_id는 카탈로그 상품(products) id를
+-- 담아둔다(리스팅 id가 아님) — 배너는 알림과 달리 며칠~몇 주씩 노출되는데, 그 사이
+-- 걸려 있던 이벤트가 끝나버리면 저장 시점에 고정한 리스팅 링크는 죽어버리기
+-- 때문에, 클릭 시점에 그 상품이 걸린 리스팅 중 가장 적합한 것으로 그때그때
+-- 해석한다(lib/banner-link.ts, notifications의 상품 연결과 같은 방식).
+create table if not exists banners (
+  id uuid primary key default gen_random_uuid(),
+  image_url text not null,
+  link_type text not null default 'NONE' check (link_type in ('PRODUCT', 'EVENT', 'URL', 'NONE')),
+  link_id uuid,
+  link_url text,
+  active boolean not null default true,
+  starts_at timestamptz,
+  ends_at timestamptz,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
 -- Row Level Security --------------------------------------------------
 
 alter table profiles enable row level security;
@@ -184,6 +202,7 @@ alter table orders enable row level security;
 alter table order_items enable row level security;
 alter table notifications enable row level security;
 alter table store_settings enable row level security;
+alter table banners enable row level security;
 
 -- SECURITY DEFINER helper: checks admin status while bypassing RLS itself.
 -- Policies must call this instead of subquerying `profiles` directly — a
@@ -310,6 +329,15 @@ drop policy if exists "store settings are publicly readable" on store_settings;
 create policy "store settings are publicly readable" on store_settings for select using (true);
 drop policy if exists "admins manage store settings" on store_settings;
 create policy "admins manage store settings" on store_settings for all
+  using (is_admin())
+  with check (is_admin());
+
+-- Banners: 활성 배너는 누구나 읽을 수 있고(홈 화면), 비활성/예약 배너는 관리자만
+-- 미리 볼 수 있다. 노출 기간(starts_at/ends_at) 필터링은 앱 코드에서 처리.
+drop policy if exists "active banners are publicly readable" on banners;
+create policy "active banners are publicly readable" on banners for select using (active or is_admin());
+drop policy if exists "admins manage banners" on banners;
+create policy "admins manage banners" on banners for all
   using (is_admin())
   with check (is_admin());
 

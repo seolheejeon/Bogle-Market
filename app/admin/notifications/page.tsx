@@ -1,20 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listEvents, createNotification } from "@/lib/data";
-import type { MarketEvent, NotificationLinkType } from "@/types";
+import { listEvents, listCatalogProducts, createNotification } from "@/lib/data";
+import { resolveListingId } from "@/lib/banner-link";
+import type { CatalogProduct, MarketEvent, NotificationLinkType } from "@/types";
 import { NOTIFICATION_LINK_LABEL } from "@/types";
+import { SearchPicker } from "@/components/admin/SearchPicker";
+import { ProductPhoto } from "@/components/ProductPhoto";
 
 const LINK_TYPES: NotificationLinkType[] = ["NONE", "PRODUCT", "EVENT", "ORDER"];
 
 export default function AdminNotificationsPage() {
   const [events, setEvents] = useState<MarketEvent[]>([]);
+  const [catalog, setCatalog] = useState<CatalogProduct[] | null>(null);
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
   const [icon, setIcon] = useState("📢");
   const [linkType, setLinkType] = useState<NotificationLinkType>("NONE");
-  const [productId, setProductId] = useState("");
-  const [eventId, setEventId] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState<CatalogProduct | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<MarketEvent | null>(null);
   const [orderId, setOrderId] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -22,9 +26,8 @@ export default function AdminNotificationsPage() {
 
   useEffect(() => {
     listEvents().then(setEvents);
+    listCatalogProducts().then(setCatalog);
   }, []);
-
-  const products = events.flatMap((e) => e.products.map((p) => ({ id: p.id, label: `${p.name} (${e.title})` })));
 
   async function send() {
     setError(null);
@@ -32,10 +35,29 @@ export default function AdminNotificationsPage() {
       setError("제목과 내용을 입력해 주세요.");
       return;
     }
-    const linkId = linkType === "PRODUCT" ? productId : linkType === "EVENT" ? eventId : linkType === "ORDER" ? orderId.trim() : undefined;
-    if (linkType !== "NONE" && !linkId) {
-      setError("연결할 대상을 선택해 주세요.");
-      return;
+    let linkId: string | undefined;
+    if (linkType === "PRODUCT") {
+      if (!selectedProduct) {
+        setError("연결할 상품을 선택해 주세요.");
+        return;
+      }
+      linkId = resolveListingId(selectedProduct.id, events) ?? undefined;
+      if (!linkId) {
+        setError("이 상품은 현재 판매 중인 이벤트가 없어서 연결할 수 없어요.");
+        return;
+      }
+    } else if (linkType === "EVENT") {
+      if (!selectedEvent) {
+        setError("연결할 이벤트를 선택해 주세요.");
+        return;
+      }
+      linkId = selectedEvent.id;
+    } else if (linkType === "ORDER") {
+      linkId = orderId.trim();
+      if (!linkId) {
+        setError("주문 ID를 입력해 주세요.");
+        return;
+      }
     }
     setSending(true);
     await createNotification({ title: title.trim(), message: message.trim(), icon: icon || "📢", linkType, linkId, profileId: null });
@@ -44,8 +66,8 @@ export default function AdminNotificationsPage() {
     setTitle("");
     setMessage("");
     setLinkType("NONE");
-    setProductId("");
-    setEventId("");
+    setSelectedProduct(null);
+    setSelectedEvent(null);
     setOrderId("");
     setTimeout(() => setSent(false), 1800);
   }
@@ -90,24 +112,27 @@ export default function AdminNotificationsPage() {
         </div>
 
         {linkType === "PRODUCT" && (
-          <select className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" value={productId} onChange={(e) => setProductId(e.target.value)}>
-            <option value="">상품 선택</option>
-            {products.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+          <SearchPicker
+            items={catalog}
+            value={selectedProduct}
+            onChange={setSelectedProduct}
+            getId={(p) => p.id}
+            getLabel={(p) => p.name}
+            renderIcon={(p) => <ProductPhoto photo={p.photos?.[0] ?? p.emoji} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent-soft text-lg" />}
+            placeholder="상품명 검색 (예: 유정란)"
+            emptyText="일치하는 상품이 없어요."
+          />
         )}
         {linkType === "EVENT" && (
-          <select className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" value={eventId} onChange={(e) => setEventId(e.target.value)}>
-            <option value="">이벤트 선택</option>
-            {events.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.title}
-              </option>
-            ))}
-          </select>
+          <SearchPicker
+            items={events}
+            value={selectedEvent}
+            onChange={setSelectedEvent}
+            getId={(e) => e.id}
+            getLabel={(e) => e.title}
+            placeholder="이벤트명 검색 (예: 7/30 문고리)"
+            emptyText="일치하는 이벤트가 없어요."
+          />
         )}
         {linkType === "ORDER" && (
           <input

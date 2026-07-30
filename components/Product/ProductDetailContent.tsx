@@ -30,12 +30,13 @@ export function ProductDetailContent({ blocks }: { blocks: ProductDetailBlock[] 
               </p>
             );
           }
-          // A single photo keeps its natural height (full-width, uncropped) like
-          // before; 2~3 photos side by side get a shared square aspect so the row
-          // lines up evenly.
-          const multiColumn = block.urls.length > 1;
+          // A 1열 block keeps its natural height (full-width, uncropped) like
+          // before; 2~3열 get a shared square aspect so the row lines up evenly.
+          // columns is independent of how many photos are in the block — a
+          // ragged last row (e.g. 5 photos at 2열) is expected and fine.
+          const multiColumn = block.columns > 1;
           return (
-            <div key={i} className={`grid gap-1.5 ${GRID_COLS_CLASS[block.urls.length] ?? "grid-cols-1"}`}>
+            <div key={i} className={`grid gap-1.5 ${GRID_COLS_CLASS[block.columns] ?? "grid-cols-1"}`}>
               {block.urls.map((url, j) =>
                 url ? (
                   // eslint-disable-next-line @next/next/no-img-element -- source domain isn't known ahead of time (admin uploads later)

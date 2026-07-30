@@ -5,7 +5,7 @@
 // before a real backend is wired up.
 
 import { MOCK_CATALOG_PRODUCTS, MOCK_EVENTS, MOCK_NOTIFICATIONS } from "@/lib/mock-data";
-import type { CatalogProduct, MarketEventSeed, NotificationItem, Order, Profile, Address, StoreSettings } from "@/types";
+import type { Banner, CatalogProduct, MarketEventSeed, NotificationItem, Order, Profile, Address, StoreSettings } from "@/types";
 import { EMPTY_STORE_SETTINGS } from "@/types";
 
 const KEYS = {
@@ -17,6 +17,7 @@ const KEYS = {
   addresses: "bogle_addresses",
   accounts: "bogle_accounts",
   storeSettings: "bogle_store_settings",
+  banners: "bogle_banners",
 } as const;
 
 interface MockAccount {
@@ -129,4 +130,11 @@ export function loadStoreSettings(): StoreSettings {
 }
 export function saveStoreSettings(settings: StoreSettings) {
   write(KEYS.storeSettings, settings);
+}
+
+export function loadBanners(): Banner[] {
+  return read<Banner[]>(KEYS.banners, []);
+}
+export function saveBanners(banners: Banner[]) {
+  write(KEYS.banners, banners);
 }
