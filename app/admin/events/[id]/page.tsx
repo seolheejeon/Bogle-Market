@@ -20,6 +20,7 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
   const { id } = use(params);
   const [event, setEvent] = useState<MarketEvent | null | undefined>(undefined);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function refresh() {
     getEvent(id).then(setEvent);
@@ -31,9 +32,15 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
 
   async function saveEventFields(patch: Partial<MarketEvent>) {
     setSaving(true);
-    await updateEvent(id, patch);
-    refresh();
-    setSaving(false);
+    setError(null);
+    try {
+      await updateEvent(id, patch);
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -77,6 +84,7 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
           />
         </label>
         {saving && <p className="text-[11.5px] text-text-muted">저장 중...</p>}
+        {error && <p className="text-[11.5px] font-semibold text-red-600">{error}</p>}
       </div>
 
       <p className="mb-2 text-[13.5px] font-bold">상품 목록</p>
@@ -107,37 +115,58 @@ function EventProductRow({ product, eventType, onSaved }: { product: Product; ev
   const [visible, setVisible] = useState(product.visible !== false);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function save() {
     if (!price) return;
     setSaving(true);
-    await updateEventProduct(product.id, {
-      price: Number(price) || 0,
-      deliveryType,
-      stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
-      visible,
-    });
-    setSaving(false);
-    setEditing(false);
-    onSaved();
+    setError(null);
+    try {
+      await updateEventProduct(product.id, {
+        price: Number(price) || 0,
+        deliveryType,
+        stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
+        visible,
+      });
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+    } finally {
+      setSaving(false);
+    }
   }
   async function remove() {
     if (!confirm(`"${product.name}"을(를) 이 이벤트에서 뺄까요? (상품 자체는 삭제되지 않아요)`)) return;
-    await removeEventProduct(product.id);
-    onSaved();
+    try {
+      await removeEventProduct(product.id);
+      onSaved();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "제거 중 오류가 발생했어요.");
+    }
   }
   // 노출 스위치/품절 처리는 편집 화면을 열지 않고 목록에서 바로 한 번에 끝낸다.
   async function toggleVisible() {
     setBusy(true);
-    await updateEventProduct(product.id, { visible: !(product.visible !== false) });
-    setBusy(false);
-    onSaved();
+    try {
+      await updateEventProduct(product.id, { visible: !(product.visible !== false) });
+      onSaved();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+    } finally {
+      setBusy(false);
+    }
   }
   async function toggleSoldout() {
     setBusy(true);
-    await updateEventProduct(product.id, { stock: product.stock === 0 ? undefined : 0 });
-    setBusy(false);
-    onSaved();
+    try {
+      await updateEventProduct(product.id, { stock: product.stock === 0 ? undefined : 0 });
+      onSaved();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const isSoldout = product.stock === 0;
@@ -223,9 +252,10 @@ function EventProductRow({ product, eventType, onSaved }: { product: Product; ev
         <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
         고객 화면에 노출
       </label>
+      {error && <p className="text-[11.5px] font-semibold text-red-600">{error}</p>}
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} className="rounded-[7px] bg-accent px-2.5 py-1.5 text-[12px] font-bold text-white">
-          저장
+          {saving ? "저장 중..." : "저장"}
         </button>
         <button onClick={() => setEditing(false)} className="rounded-[7px] border border-border px-2.5 py-1.5 text-[12px]">
           취소
@@ -256,6 +286,7 @@ function AddExistingProductForm({
   const [stock, setStock] = useState("");
   const [visible, setVisible] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     listCatalogProducts().then(setCatalog);
@@ -277,17 +308,23 @@ function AddExistingProductForm({
   async function submit() {
     if (!selected || !price) return;
     setSubmitting(true);
-    await addEventProduct(eventId, {
-      catalogProductId: selected.id,
-      price: Number(price) || 0,
-      deliveryType: eventType,
-      stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
-      visible,
-    });
-    setSelected(null);
-    setQuery("");
-    setSubmitting(false);
-    onAdded();
+    setError(null);
+    try {
+      await addEventProduct(eventId, {
+        catalogProductId: selected.id,
+        price: Number(price) || 0,
+        deliveryType: eventType,
+        stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
+        visible,
+      });
+      setSelected(null);
+      setQuery("");
+      onAdded();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "추가 중 오류가 발생했어요.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -354,6 +391,7 @@ function AddExistingProductForm({
             <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
             고객 화면에 노출
           </label>
+          {error && <p className="text-[12px] font-semibold text-red-600">{error}</p>}
           <div className="flex gap-2">
             <button onClick={submit} disabled={submitting || !price} className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50">
               {submitting ? "추가 중..." : "이 이벤트에 추가"}

@@ -131,22 +131,38 @@ function CatalogProductForm({
   const [photos, setPhotos] = useState<string[]>(initial?.photos ?? []);
   const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>(initial?.detailBlocks ?? []);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  // onSubmit(createCatalogProduct/updateCatalogProduct)이 실패하면(예: mock 모드
+  // localStorage 용량 초과) 반드시 catch에서 잡아 submitting을 풀어줘야 한다 —
+  // 그러지 않으면 버튼이 "저장 중..."에 영원히 멈춰버린다(사진 여러 장으로 재현된
+  // 버그의 직접 원인). 단계별 로그는 어디서 멈추는지 콘솔에서 바로 보이게 한다.
   async function submit() {
     if (!name.trim()) return;
+    console.log("[상품 저장] 시작", { name: name.trim(), photoCount: photos.length });
     setSubmitting(true);
-    await onSubmit({
-      name: name.trim(),
-      emoji: emoji || "📦",
-      origin: origin || undefined,
-      weight: weight || undefined,
-      storage: storage || undefined,
-      eat: eat || undefined,
-      description: description || undefined,
-      photos,
-      detailBlocks,
-    });
-    setSubmitting(false);
+    setError(null);
+    try {
+      console.log("[상품 저장] DB 저장 시작");
+      await onSubmit({
+        name: name.trim(),
+        emoji: emoji || "📦",
+        origin: origin || undefined,
+        weight: weight || undefined,
+        storage: storage || undefined,
+        eat: eat || undefined,
+        description: description || undefined,
+        photos,
+        detailBlocks,
+      });
+      console.log("[상품 저장] DB 저장 완료");
+    } catch (e) {
+      console.error("[상품 저장] 실패", e);
+      setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+    } finally {
+      setSubmitting(false);
+      console.log("[상품 저장] 종료(응답 반환)");
+    }
   }
 
   return (
@@ -176,6 +192,7 @@ function CatalogProductForm({
         <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
         <DetailBlockEditor blocks={detailBlocks} onChange={setDetailBlocks} />
       </div>
+      {error && <p className="text-[12.5px] font-semibold text-red-600">{error}</p>}
       <div className="flex gap-2">
         <button onClick={submit} disabled={submitting || !name.trim()} className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50">
           {submitting ? "저장 중..." : submitLabel}

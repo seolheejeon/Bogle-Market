@@ -35,9 +35,31 @@ function read<T>(key: string, fallback: T): T {
   }
 }
 
+// mock 모드는 실제 DB 대신 브라우저 localStorage에 그대로 저장하는데, 이 저장소는
+// (브라우저마다 다르지만) 보통 5~50MB 정도의 하드 쿼터가 있다. 상품 사진을 data URL
+// (base64) 그대로 담다 보니 사진을 여러 장 올리면 이 쿼터를 넘기기 쉽고, 그때
+// localStorage.setItem은 **동기적으로 예외를 던진다** — 이걸 그냥 던지게 두면 호출부
+// (lib/data.ts의 createXxx/updateXxx)가 reject된 Promise를 돌려주고, 그걸 try/catch
+// 없이 기다리는 화면은 로딩 상태에 영원히 멈춰버린다(실제로 보고된 "저장 중..."이
+// 끝나지 않는 버그의 근본 원인). 여기서 원인을 명확한 메시지로 바꿔 던져서, 호출부가
+// 무엇이 잘못됐는지 알고 사용자에게 보여줄 수 있게 한다.
 function write<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
+  const serialized = JSON.stringify(value);
+  console.log(`[local-store] DB 저장 시작 (key=${key}, size=${(serialized.length / 1024 / 1024).toFixed(2)}MB)`);
+  try {
+    window.localStorage.setItem(key, serialized);
+  } catch (e) {
+    const isQuotaError = e instanceof DOMException && (e.name === "QuotaExceededError" || e.name === "NS_ERROR_DOM_QUOTA_REACHED");
+    console.error(`[local-store] DB 저장 실패 (key=${key})`, e);
+    if (isQuotaError) {
+      throw new Error(
+        "사진 용량이 너무 커서 저장하지 못했어요. 지금은 개발용 임시 저장소(브라우저 localStorage)를 쓰고 있어서 총 용량에 한계가 있어요 — 사진 개수나 용량을 줄이거나, 실제 서비스에서는 Supabase 연결로 이 한계가 사라져요.",
+      );
+    }
+    throw e;
+  }
+  console.log(`[local-store] DB 저장 완료 (key=${key})`);
 }
 
 export function loadEvents(): MarketEventSeed[] {

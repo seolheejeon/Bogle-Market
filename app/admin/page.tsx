@@ -258,12 +258,21 @@ export default function AdminHomePage() {
   async function completeApartmentGroup(eventId: string, apt: string, groupOrders: Order[]) {
     if (!confirm(`"${apt}"의 배송중 주문 ${groupOrders.length}건을 전부 배송완료 처리하고, 그 아파트 고객에게만 배송완료 알림을 보낼까요?`)) return;
     setBulkCompleting(true);
-    for (const o of groupOrders) {
-      await updateOrderStatus(o.id, "done");
-      await notifyStatusChange(o, "done", eventById.get(o.eventId)?.title);
+    let done = 0;
+    try {
+      for (const o of groupOrders) {
+        await updateOrderStatus(o.id, "done");
+        await notifyStatusChange(o, "done", eventById.get(o.eventId)?.title);
+        done++;
+      }
+    } catch (e) {
+      alert(
+        `${done}/${groupOrders.length}건 처리 후 오류가 발생했어요: ${e instanceof Error ? e.message : "알 수 없는 오류"}. 나머지 주문은 다시 시도해 주세요.`,
+      );
+    } finally {
+      setBulkCompleting(false);
+      refresh();
     }
-    setBulkCompleting(false);
-    refresh();
   }
 
   return (
@@ -471,43 +480,53 @@ function ShippingForm({ onSubmit, onCancel }: { onSubmit: (courierCode: string, 
   const [courierCode, setCourierCode] = useState<string>(COURIER_OPTIONS[0].code);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function submit() {
     if (!trackingNumber.trim()) return;
     setSubmitting(true);
-    await onSubmit(courierCode, trackingNumber.trim());
-    setSubmitting(false);
+    setError(null);
+    try {
+      await onSubmit(courierCode, trackingNumber.trim());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-bg-sunken p-2.5">
-      <select
-        value={courierCode}
-        onChange={(e) => setCourierCode(e.target.value)}
-        className="rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
-      >
-        {COURIER_OPTIONS.map((c) => (
-          <option key={c.code} value={c.code}>
-            {c.label}
-          </option>
-        ))}
-      </select>
-      <input
-        value={trackingNumber}
-        onChange={(e) => setTrackingNumber(e.target.value)}
-        placeholder="송장번호"
-        className="min-w-[140px] flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
-      />
-      <button
-        onClick={submit}
-        disabled={submitting || !trackingNumber.trim()}
-        className="rounded-[7px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-50"
-      >
-        {submitting ? "저장 중..." : "배송시작"}
-      </button>
-      <button onClick={onCancel} className="rounded-[7px] border border-border px-3 py-1.5 text-[12px] font-semibold">
-        취소
-      </button>
+    <div className="mt-2 rounded-lg bg-bg-sunken p-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={courierCode}
+          onChange={(e) => setCourierCode(e.target.value)}
+          className="rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
+        >
+          {COURIER_OPTIONS.map((c) => (
+            <option key={c.code} value={c.code}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+        <input
+          value={trackingNumber}
+          onChange={(e) => setTrackingNumber(e.target.value)}
+          placeholder="송장번호"
+          className="min-w-[140px] flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
+        />
+        <button
+          onClick={submit}
+          disabled={submitting || !trackingNumber.trim()}
+          className="rounded-[7px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-50"
+        >
+          {submitting ? "저장 중..." : "배송시작"}
+        </button>
+        <button onClick={onCancel} className="rounded-[7px] border border-border px-3 py-1.5 text-[12px] font-semibold">
+          취소
+        </button>
+      </div>
+      {error && <p className="mt-1.5 text-[11.5px] font-semibold text-red-600">{error}</p>}
     </div>
   );
 }

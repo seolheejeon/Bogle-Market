@@ -38,8 +38,13 @@ export function MyPageView() {
     const value = suUsername.trim();
     if (!value) return;
     setUsernameStatus("checking");
-    const taken = await checkUsernameTaken(value);
-    setUsernameStatus(taken ? "taken" : "available");
+    try {
+      const taken = await checkUsernameTaken(value);
+      setUsernameStatus(taken ? "taken" : "available");
+    } catch {
+      setUsernameStatus("unchecked");
+      setError("중복확인 중 오류가 발생했어요. 다시 시도해 주세요.");
+    }
   }
 
   async function submitSignIn() {
@@ -49,9 +54,14 @@ export function MyPageView() {
       return;
     }
     setSubmitting(true);
-    const result = await signIn(username.trim(), password);
-    setSubmitting(false);
-    if (result.error) setError(result.error);
+    try {
+      const result = await signIn(username.trim(), password);
+      if (result.error) setError(result.error);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "로그인 중 오류가 발생했어요.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function submitSignUp() {
@@ -94,29 +104,33 @@ export function MyPageView() {
       return;
     }
     setSubmitting(true);
-    const phoneTaken = await checkPhoneTaken(phoneDigits);
-    if (phoneTaken) {
+    try {
+      const phoneTaken = await checkPhoneTaken(phoneDigits);
+      if (phoneTaken) {
+        setError("이미 가입된 휴대폰번호예요.");
+        return;
+      }
+      const result = await signUp({
+        username: suUsername.trim(),
+        password: suPassword,
+        nickname: nickname.trim(),
+        phone: phoneDigits,
+        address: {
+          zonecode: address.zonecode,
+          roadAddress: address.roadAddress,
+          apartmentName: address.apartmentName,
+          detailAddress: address.detailAddress.trim(),
+          entranceMethod: address.entranceMethod.trim() || undefined,
+          memo: address.memo.trim() || undefined,
+        },
+        asAdmin,
+      });
+      if (result.error) setError(result.error);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "회원가입 중 오류가 발생했어요.");
+    } finally {
       setSubmitting(false);
-      setError("이미 가입된 휴대폰번호예요.");
-      return;
     }
-    const result = await signUp({
-      username: suUsername.trim(),
-      password: suPassword,
-      nickname: nickname.trim(),
-      phone: phoneDigits,
-      address: {
-        zonecode: address.zonecode,
-        roadAddress: address.roadAddress,
-        apartmentName: address.apartmentName,
-        detailAddress: address.detailAddress.trim(),
-        entranceMethod: address.entranceMethod.trim() || undefined,
-        memo: address.memo.trim() || undefined,
-      },
-      asAdmin,
-    });
-    setSubmitting(false);
-    if (result.error) setError(result.error);
   }
 
   return (
@@ -264,39 +278,48 @@ function ProfilePanel({
   async function saveInfo() {
     setError(null);
     setSaving(true);
-    const result = await updateProfile({ nickname, phone });
-    if (result.error) {
-      setSaving(false);
-      setError(result.error);
-      return;
-    }
-    if (newPassword.trim()) {
-      const pwResult = await changePassword(newPassword.trim());
-      if (pwResult.error) {
-        setSaving(false);
-        setError(pwResult.error);
+    try {
+      const result = await updateProfile({ nickname, phone });
+      if (result.error) {
+        setError(result.error);
         return;
       }
+      if (newPassword.trim()) {
+        const pwResult = await changePassword(newPassword.trim());
+        if (pwResult.error) {
+          setError(pwResult.error);
+          return;
+        }
+      }
+      setNewPassword("");
+      setEditing(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setNewPassword("");
-    setEditing(false);
   }
 
   async function saveAddressInfo() {
     if (!savedAddress || !address.roadAddress.trim() || !address.detailAddress.trim() || !address.entranceMethod.trim()) return;
     setSavingAddress(true);
-    await updateAddress(savedAddress.id, profile.id, {
-      zonecode: address.zonecode,
-      roadAddress: address.roadAddress,
-      apartmentName: address.apartmentName,
-      detailAddress: address.detailAddress.trim(),
-      entranceMethod: address.entranceMethod.trim(),
-      memo: address.memo.trim() || undefined,
-    });
-    setSavingAddress(false);
-    setAddressSaved(true);
-    setTimeout(() => setAddressSaved(false), 1800);
+    setError(null);
+    try {
+      await updateAddress(savedAddress.id, profile.id, {
+        zonecode: address.zonecode,
+        roadAddress: address.roadAddress,
+        apartmentName: address.apartmentName,
+        detailAddress: address.detailAddress.trim(),
+        entranceMethod: address.entranceMethod.trim(),
+        memo: address.memo.trim() || undefined,
+      });
+      setAddressSaved(true);
+      setTimeout(() => setAddressSaved(false), 1800);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "배송지 저장 중 오류가 발생했어요.");
+    } finally {
+      setSavingAddress(false);
+    }
   }
 
   return (
