@@ -155,7 +155,8 @@ export function HomeView() {
             {...heroPointerProps}
             className="relative block touch-pan-y overflow-hidden rounded-2xl select-none active:cursor-grabbing sm:cursor-grab"
           >
-            <ProductPhoto photo={liveBanners[activeIndex].imageUrl} fit="cover" className="h-40 w-full sm:h-48" />
+            {/* eslint-disable-next-line @next/next/no-img-element -- source is Supabase Storage or a mock-mode data URI */}
+            <img src={liveBanners[activeIndex].imageUrl} alt="" className="block h-auto w-full" />
             {heroLength > 1 && <div className="absolute inset-x-0 bottom-2.5 flex justify-center">{heroDots}</div>}
           </Link>
         ) : (
@@ -163,7 +164,8 @@ export function HomeView() {
             {...heroPointerProps}
             className="relative touch-pan-y overflow-hidden rounded-2xl select-none active:cursor-grabbing sm:cursor-grab"
           >
-            <ProductPhoto photo={liveBanners[activeIndex].imageUrl} fit="cover" className="h-40 w-full sm:h-48" />
+            {/* eslint-disable-next-line @next/next/no-img-element -- source is Supabase Storage or a mock-mode data URI */}
+            <img src={liveBanners[activeIndex].imageUrl} alt="" className="block h-auto w-full" />
             {heroLength > 1 && <div className="absolute inset-x-0 bottom-2.5 flex justify-center">{heroDots}</div>}
           </div>
         ))}
