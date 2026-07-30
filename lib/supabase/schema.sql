@@ -116,6 +116,48 @@ create table if not exists event_product_costs (
   cost_price integer not null default 0 check (cost_price >= 0)
 );
 
+-- 상품 옵션 그룹(색상/사이즈/중량/추가옵션 등) — 카탈로그 상품에 속하며, 이
+-- 상품을 파는 모든 이벤트가 그대로 공유한다. required/multi/순서 같은 "구조"는
+-- origin/weight/storage와 동일하게 카탈로그 전용 값이라 이벤트별로 달라지지
+-- 않는다(재고만 이벤트별로 달라짐 — event_option_stock 참고).
+create table if not exists product_option_groups (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null references products(id) on delete cascade,
+  name text not null,
+  required boolean not null default true,
+  multi boolean not null default false,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+-- 옵션 그룹에 속한 각 선택지(예: 색상 그룹의 "빨강"/"파랑"). price_delta는 이
+-- 값을 고를 때 기준 판매가에 더해지는 금액(음수 가능). has_stock=false면 이
+-- 옵션값은 재고 제한이 없다는 뜻 — 이 경우 event_option_stock에는 행을 아예
+-- 만들지 않는다. default_stock은 새 이벤트에 리스팅을 추가할 때
+-- event_option_stock의 초기값으로 복사되는 기본 재고 수량.
+create table if not exists product_option_values (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references product_option_groups(id) on delete cascade,
+  name text not null,
+  price_delta integer not null default 0,
+  has_stock boolean not null default false,
+  default_stock integer check (default_stock is null or default_stock >= 0),
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+-- 이벤트 리스팅별 옵션 재고 스냅샷 — event_products.stock과 같은 이유로 분리한다:
+-- 같은 카탈로그 옵션값이라도 이벤트마다 독립된 재고를 가져야 하기 때문. 리스팅을
+-- 이벤트에 추가하는 시점에 product_option_values.default_stock을 복사해
+-- 초기화하고, 이후로는 이 값만 주문 시 차감/취소·환불 시 복구된다(has_stock=false인
+-- 옵션값은 애초에 행이 없음 = 재고 제한 없음).
+create table if not exists event_option_stock (
+  event_product_id uuid not null references event_products(id) on delete cascade,
+  option_value_id uuid not null references product_option_values(id) on delete cascade,
+  stock integer not null check (stock >= 0),
+  primary key (event_product_id, option_value_id)
+);
+
 -- 주문은 정확히 하나의 이벤트에만 속한다 — 장바구니에 마감일/배송일이 다른
 -- 여러 이벤트 상품이 섞여 있으면, 체크아웃이 이벤트별로 주문을 나눠서 여러
 -- row를 만든다(lib/data.ts의 createOrder는 항상 단일 이벤트 기준으로 호출됨).
@@ -170,7 +212,12 @@ create table if not exists order_items (
   event_product_id uuid references event_products(id) on delete set null,
   product_name text not null,
   price_snapshot integer not null,
-  quantity integer not null check (quantity > 0)
+  quantity integer not null check (quantity > 0),
+  -- 주문 시점에 고른 옵션의 스냅샷(그룹명/선택값/가격조정) — 카탈로그의
+  -- product_option_groups/values가 나중에 바뀌거나 삭제돼도 과거 주문 내역
+  -- 표시는 영향받지 않도록 값 자체를 복사해 저장한다. 예:
+  -- [{"groupName":"색상","valueName":"빨강","priceDelta":0}, ...]
+  options jsonb not null default '[]'::jsonb
 );
 
 -- profile_id null = broadcast to everyone (admin announcements, flash sales,
@@ -232,6 +279,9 @@ alter table store_settings enable row level security;
 alter table banners enable row level security;
 alter table product_costs enable row level security;
 alter table event_product_costs enable row level security;
+alter table product_option_groups enable row level security;
+alter table product_option_values enable row level security;
+alter table event_option_stock enable row level security;
 
 -- SECURITY DEFINER helper: checks admin status while bypassing RLS itself.
 -- Policies must call this instead of subquerying `profiles` directly — a
@@ -262,6 +312,14 @@ drop policy if exists "products are publicly readable" on products;
 create policy "products are publicly readable" on products for select using (true);
 drop policy if exists "event_products are publicly readable" on event_products;
 create policy "event_products are publicly readable" on event_products for select using (visible or is_admin());
+-- 옵션 그룹/값도 상품 내용물의 일부라 products와 동일하게 공개 조회.
+-- event_option_stock은 실제 판매 재고라 event_products와 같은 공개 조회.
+drop policy if exists "product_option_groups are publicly readable" on product_option_groups;
+create policy "product_option_groups are publicly readable" on product_option_groups for select using (true);
+drop policy if exists "product_option_values are publicly readable" on product_option_values;
+create policy "product_option_values are publicly readable" on product_option_values for select using (true);
+drop policy if exists "event_option_stock are publicly readable" on event_option_stock;
+create policy "event_option_stock are publicly readable" on event_option_stock for select using (true);
 
 -- Only admins can write the catalog
 drop policy if exists "admins manage events" on events;
@@ -274,6 +332,21 @@ create policy "admins manage products" on products for all
   with check (is_admin());
 drop policy if exists "admins manage event_products" on event_products;
 create policy "admins manage event_products" on event_products for all
+  using (is_admin())
+  with check (is_admin());
+drop policy if exists "admins manage product option groups" on product_option_groups;
+create policy "admins manage product option groups" on product_option_groups for all
+  using (is_admin())
+  with check (is_admin());
+drop policy if exists "admins manage product option values" on product_option_values;
+create policy "admins manage product option values" on product_option_values for all
+  using (is_admin())
+  with check (is_admin());
+-- event_option_stock은 관리자 외에 decrement_option_stock/increment_option_stock
+-- SECURITY DEFINER 함수를 통해서도 갱신된다(주문 생성/취소 시 일반 고객 요청으로
+-- 호출됨) — 함수가 RLS를 우회하므로 이 정책은 관리자 직접 수정 UI만 커버한다.
+drop policy if exists "admins manage event option stock" on event_option_stock;
+create policy "admins manage event option stock" on event_option_stock for all
   using (is_admin())
   with check (is_admin());
 
@@ -495,6 +568,33 @@ set search_path = public
 as $$
 begin
   update event_products set stock = stock + p_qty where id = p_event_product_id and stock is not null;
+end;
+$$;
+
+-- 옵션값별 재고 차감/복구 — has_stock=false인 옵션값은 애초에 event_option_stock에
+-- 행이 없으므로 update가 그냥 0 rows에 적용되고 조용히 아무 일도 안 한다(재고
+-- 제한 없음과 동일한 동작).
+create or replace function decrement_option_stock(p_event_product_id uuid, p_option_value_id uuid, p_qty integer)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update event_option_stock set stock = greatest(stock - p_qty, 0)
+  where event_product_id = p_event_product_id and option_value_id = p_option_value_id;
+end;
+$$;
+
+create or replace function increment_option_stock(p_event_product_id uuid, p_option_value_id uuid, p_qty integer)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update event_option_stock set stock = stock + p_qty
+  where event_product_id = p_event_product_id and option_value_id = p_option_value_id;
 end;
 $$;
 

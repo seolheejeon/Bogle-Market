@@ -12,6 +12,8 @@ import { ProductDetailContent } from "@/components/Product/ProductDetailContent"
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
 import { ProductPhoto, isPhotoUrl } from "@/components/ProductPhoto";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
+import { unitPrice, maxQtyForSelection, validateOptionSelection } from "@/lib/product-options";
+import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 
 // A small clone of the product photo flies from the "담기" button to the
 // header's cart icon as lightweight visual confirmation that something was
@@ -68,17 +70,23 @@ function flyToCart(fromEl: HTMLElement, photo: string) {
 
 export function ProductDetailView({ productId }: { productId: string }) {
   const router = useRouter();
-  const { cart, changeQty } = useCart();
+  const { getQty, changeQty } = useCart();
   const [data, setData] = useState<{ product: Product; event: MarketEvent } | null | undefined>(undefined);
   const [photoIndex, setPhotoIndex] = useState(0);
   // How many to add next — independent of the actual cart until "담기" is pressed.
   const [qty, setQty] = useState(1);
+  // 그룹id -> 선택된 옵션값id 목록(single-select 그룹은 항상 길이 0/1).
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
+  const [optionError, setOptionError] = useState<string | null>(null);
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     findProductWithEvent(productId).then(setData);
+    setSelected({});
+    setOptionError(null);
+    setQty(1);
   }, [productId]);
 
   useEffect(() => () => {
@@ -104,14 +112,35 @@ export function ProductDetailView({ productId }: { productId: string }) {
   }
 
   const photos = product.photos && product.photos.length > 0 ? product.photos : [product.emoji];
-  // 이미 장바구니에 담은 수량까지 합쳐서 재고를 넘지 않게 한다.
-  const inCart = cart[product.id] || 0;
+  const selectedOptionValueIds = Object.values(selected).flat();
+  const unitPriceWithOptions = unitPrice(product, selectedOptionValueIds);
+  // 이미 장바구니에 담은 수량까지 합쳐서 재고를 넘지 않게 한다(같은 옵션
+  // 조합끼리만 — 다른 조합은 별개 재고 취급).
+  const inCart = getQty(product.id, selectedOptionValueIds);
   const soldOut = product.stock === 0;
   const closed = !isEventOrderable(event);
-  const remaining = product.stock !== undefined ? Math.max(0, product.stock - inCart) : undefined;
+  const maxQty = maxQtyForSelection(product, selectedOptionValueIds);
+  const remaining = maxQty !== undefined ? Math.max(0, maxQty - inCart) : undefined;
+
+  function selectOption(group: ProductOptionGroup, value: ProductOptionValue) {
+    setOptionError(null);
+    setSelected((prev) => {
+      const current = prev[group.id] ?? [];
+      if (group.multi) {
+        const next = current.includes(value.id) ? current.filter((id) => id !== value.id) : [...current, value.id];
+        return { ...prev, [group.id]: next };
+      }
+      return { ...prev, [group.id]: [value.id] };
+    });
+  }
 
   function addToCart() {
-    changeQty(product.id, qty);
+    const error = validateOptionSelection(product, selectedOptionValueIds);
+    if (error) {
+      setOptionError(error);
+      return;
+    }
+    changeQty(product.id, qty, selectedOptionValueIds);
     if (addButtonRef.current) flyToCart(addButtonRef.current, photos[photoIndex]);
     setQty(1);
     setToastVisible(true);
@@ -167,7 +196,41 @@ export function ProductDetailView({ productId }: { productId: string }) {
         </p>
 
         <p className="mt-2 text-[17px] font-extrabold">{product.name}</p>
-        <p className="my-1.5 text-xl font-extrabold">{formatPrice(product.price)}</p>
+        <p className="my-1.5 text-xl font-extrabold">{formatPrice(unitPriceWithOptions)}</p>
+
+        {(product.optionGroups ?? []).length > 0 && (
+          <div className="mb-4 flex flex-col gap-3">
+            {product.optionGroups!.map((g) => (
+              <div key={g.id}>
+                <p className="mb-1.5 text-[12.5px] font-bold text-text-muted">
+                  {g.name}
+                  {g.required && <span className="ml-0.5 text-red-500">*</span>}
+                  {g.multi && <span className="ml-1.5 font-normal">(중복 선택 가능)</span>}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {g.values.map((v) => {
+                    const isSelected = (selected[g.id] ?? []).includes(v.id);
+                    const valueSoldOut = v.hasStock && (v.stock ?? 0) <= 0;
+                    return (
+                      <button
+                        key={v.id}
+                        disabled={valueSoldOut}
+                        onClick={() => selectOption(g, v)}
+                        className={`rounded-full border px-3 py-1.5 text-[12.5px] font-semibold disabled:opacity-40 ${
+                          isSelected ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text"
+                        }`}
+                      >
+                        {v.name}
+                        {v.priceDelta !== 0 && ` (${v.priceDelta > 0 ? "+" : ""}${formatPrice(v.priceDelta)})`}
+                        {valueSoldOut && " · 품절"}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="overflow-hidden rounded-[10px] border border-border">
           {[
@@ -223,9 +286,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
               >
                 +
               </button>
-              <span className="ml-auto text-[13px] font-bold text-text-muted">{formatPrice(qty * product.price)}</span>
+              <span className="ml-auto text-[13px] font-bold text-text-muted">{formatPrice(qty * unitPriceWithOptions)}</span>
             </div>
           )}
+          {optionError && <p className="mb-2.5 text-center text-[12.5px] font-semibold text-red-600">{optionError}</p>}
           <button
             ref={addButtonRef}
             className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40"

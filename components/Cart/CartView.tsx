@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { listEvents } from "@/lib/data";
-import type { MarketEvent } from "@/types";
+import type { MarketEvent, Product } from "@/types";
 import { formatPrice, formatDeadlineLabel } from "@/lib/format";
-import { useCart } from "@/lib/cart-context";
+import { useCart, type CartLine } from "@/lib/cart-context";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
+import { unitPrice, maxQtyForSelection, optionSelectionLabel } from "@/lib/product-options";
 
 export function CartView() {
-  const { cart } = useCart();
+  const { lines } = useCart();
   const [events, setEvents] = useState<MarketEvent[] | null>(null);
 
   useEffect(() => {
@@ -19,20 +20,21 @@ export function CartView() {
 
   const grouped = useMemo(() => {
     if (!events) return [];
-    const byEvent = new Map<string, { event: MarketEvent; items: { product: MarketEvent["products"][number]; qty: number }[] }>();
+    const byEvent = new Map<string, { event: MarketEvent; items: { product: Product; line: CartLine }[] }>();
     for (const event of events) {
       for (const product of event.products) {
-        const qty = cart[product.id];
-        if (!qty) continue;
-        if (!byEvent.has(event.id)) byEvent.set(event.id, { event, items: [] });
-        byEvent.get(event.id)!.items.push({ product, qty });
+        for (const line of lines) {
+          if (line.productId !== product.id) continue;
+          if (!byEvent.has(event.id)) byEvent.set(event.id, { event, items: [] });
+          byEvent.get(event.id)!.items.push({ product, line });
+        }
       }
     }
     return Array.from(byEvent.values());
-  }, [events, cart]);
+  }, [events, lines]);
 
-  const totalCount = Object.values(cart).reduce((sum, q) => sum + q, 0);
-  const totalPrice = grouped.reduce((sum, g) => sum + g.items.reduce((s, i) => s + i.product.price * i.qty, 0), 0);
+  const totalCount = lines.reduce((sum, l) => sum + l.qty, 0);
+  const totalPrice = grouped.reduce((sum, g) => sum + g.items.reduce((s, i) => s + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0), 0);
 
   if (events === null) return <p className="p-4 text-sm text-text-muted">불러오는 중...</p>;
 
@@ -60,17 +62,20 @@ export function CartView() {
               <p className="text-xs font-bold text-accent-dark">{event.title}</p>
               <span className="text-[11px] text-text-muted">{formatDeadlineLabel(event.deadlineAt)}</span>
             </div>
-            {items.map(({ product, qty }) => (
-              <div key={product.id} className="flex items-center gap-3 py-2">
+            {items.map(({ product, line }) => (
+              <div key={`${product.id}::${line.optionValueIds.join(",")}`} className="flex items-center gap-3 py-2">
                 <ProductPhoto
                   photo={product.photos?.[0] ?? product.emoji}
                   className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[10px] bg-accent-soft text-2xl"
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13.5px] font-semibold">{product.name}</p>
-                  <p className="text-[13.5px] font-bold">{formatPrice(product.price)}</p>
+                  {line.optionValueIds.length > 0 && (
+                    <p className="truncate text-[11.5px] text-text-muted">{optionSelectionLabel(product, line.optionValueIds)}</p>
+                  )}
+                  <p className="text-[13.5px] font-bold">{formatPrice(unitPrice(product, line.optionValueIds))}</p>
                 </div>
-                <QtyControl productId={product.id} max={product.stock} />
+                <QtyControl productId={product.id} optionValueIds={line.optionValueIds} max={maxQtyForSelection(product, line.optionValueIds)} />
               </div>
             ))}
           </div>

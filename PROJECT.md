@@ -3,7 +3,7 @@
 보글마켓 개발 진행상황과 주요 기획 결정을 기록하는 문서입니다.
 **기능이 완료되거나 기획이 바뀔 때마다 이 문서도 함께 업데이트합니다.**
 
-마지막 업데이트: 2026-07-30 (상품 마스터 원가/판매가 + 수익 계산 시스템 — 원가는 관리자만 조회 가능한 별도 테이블로 분리)
+마지막 업데이트: 2026-07-30 (유연한 상품 옵션 시스템 — 색상/사이즈/중량/추가옵션 등 다중 옵션 그룹 + 옵션값별 가격조정/재고, 장바구니를 옵션조합별 라인으로 재설계)
 
 ---
 
@@ -252,6 +252,19 @@
 - 브라우저로 검증(mock 모드): 카탈로그 상품에 기준가/원가 입력 → 그 상품을 새 이벤트에 추가하니 가격·원가 입력란에 정확히 자동으로 채워지는 것 확인. 기존에 이미 추가돼 있던 리스팅(마스터 원가 설정 이전에 추가됨)은 원가 0원 그대로 유지되는 것을 확인(스냅샷 동작 검증). 개당 예상수익·누적 예상수익 계산이 정확한 것, 고객 상품 상세 페이지 어디에도 "원가"라는 문자열 자체가 전혀 나타나지 않는 것을 확인
 - ⚠️ **배포 시 확인 필요**: 실제 Supabase 프로젝트에는 아직 `base_price`/`product_costs`/`event_product_costs`가 없음 — 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 먼저 실행해야 함(안 하면 상품 등록/이벤트 상품 추가가 에러로 실패함)
 
+**유연한 상품 옵션 시스템**
+- 배경: 단순 "추가옵션(add-on)" 하나만 지원하는 게 아니라, 신발(사이즈)/의류(색상·사이즈)/식품(중량)/과일/묶음상품까지 전부 표현할 수 있는 범용 옵션 구조가 필요하다는 요청. 상품마다 여러 옵션 그룹(색상/사이즈/중량/추가옵션 등)을 자유롭게 만들고, 그룹마다 필수/선택·단일/중복선택을 정하고, 각 옵션값마다 가격조정과 재고를 따로 둘 수 있어야 함
+- **스키마: `product_option_groups`/`product_option_values`(카탈로그 전용, 구조) + `event_option_stock`(이벤트 리스팅 전용, 재고 스냅샷)** — origin/weight/storage와 같은 이유로 그룹명·필수여부·단일/중복선택·정렬순서·옵션값 이름·가격조정은 카탈로그에만 있고 모든 회차가 공유하며, 재고만 `event_products.stock`과 동일한 스냅샷 패턴으로 리스팅별로 독립적으로 움직임(옵션값을 이 회차에 추가한 시점의 `default_stock`을 복사, 이후 서로 독립)
+- **재고 있는 옵션값만 `event_option_stock` 행을 만듦** — `has_stock=false`(예: 무제한인 추가옵션)는 아예 행이 없어 재고 제한 없이 항상 선택 가능. 이벤트 복제(`duplicateEvent`)는 원본 회차의 **실제 옵션 재고**를 그대로 이어받고(카탈로그 기본값 아님), 신규 리스팅 추가는 카탈로그 기본 재고로 초기화됨
+- **주문 스냅샷**: `order_items.options`(jsonb)에 그룹명/선택값명/가격조정/`optionValueId`를 그대로 복사 저장 — 화면 표시는 이름만 쓰지만 `optionValueId`는 취소/환불 시 어느 옵션값의 재고를 복구할지 찾는 키로 쓰임(카탈로그에서 그 값이 나중에 지워졌으면 복구 대상 행도 이미 cascade로 사라진 상태라 조용히 무시됨)
+- **재고 RPC**: `decrement_option_stock`/`increment_option_stock`(옵션값 단위)을 기존 `decrement_stock`/`increment_stock`(리스팅 단위)과 나란히 추가 — 주문 생성 시 리스팅 재고와 선택된 각 옵션값 재고를 함께 차감, 취소/환불 시 함께 복구
+- **장바구니를 (상품, 옵션조합) 쌍마다 하나씩인 라인 배열로 재설계**(`lib/cart-context.tsx`) — 예전엔 `Record<productId, qty>` 하나뿐이라 같은 상품을 다른 옵션으로 두 번 담으면 수량이 합쳐지는 문제가 있었음. 기존 저장 형식(flat map)으로 남아있는 사용자의 장바구니도 빈 옵션 라인으로 자동 변환해 그대로 이어받음
+- **필수 옵션이 있는 상품은 그리드/이벤트상세에서 바로 담기 대신 "옵션선택" 뱃지**로 상품 상세로 보냄(`lib/product-options.ts`의 `hasRequiredOptions`) — 추가옵션처럼 선택(optional) 그룹만 있는 상품은 그대로 빠른 담기 유지
+- **상품 상세**: 옵션 그룹별 버튼(단일선택은 라디오처럼 하나만, 중복선택은 토글), 선택에 따라 가격 실시간 반영, 품절된 옵션값은 비활성화, 필수 그룹 중 하나라도 안 고르고 담으면 인라인 안내 메시지로 막음(`lib/product-options.ts`의 `validateOptionSelection`)
+- **관리자**: 상품 관리(`/admin/products`)에 옵션 그룹/값 편집기(`ProductOptionEditor`) 추가 — 그룹·값 추가/삭제/순서변경(↑↓), 각 값의 가격조정·재고관리 여부·기본재고 설정. 이벤트 상세(`/admin/events/[id]`)의 "가격/원가/재고 수정" 안에 옵션값별 재고 입력란이 추가로 나타나 이 회차만 따로 조정 가능(다른 필드처럼 blur 시 바로 저장)
+- 브라우저로 검증(mock 모드): 유정란 20구에 "중량"(필수/단일) 그룹을 만들어 10구(-2,000원, 재고관리 5개)/20구(가격조정 없음, 재고 무제한) 두 값 등록 → 이미 그 상품이 걸려있던 기존 이벤트 리스팅도 카탈로그 기본재고(5개)로 자동 인식되는 것 확인. 리스팅 화면에서 옵션 재고를 3개로 직접 수정 → 저장됨 확인. 상품 상세에서 옵션 선택 없이 담기 시도 시 "중량을(를) 선택해 주세요." 메시지, "10구" 선택 시 가격이 7,900→5,900원으로 즉시 반영되는 것 확인. 10구 1개+20구 1개를 각각 장바구니에 담아 두 개의 별도 줄(수량이 안 합쳐짐)로 보이는 것, 체크아웃/주문상세/관리자 주문목록 전부 "유정란 20구(10구)"/"유정란 20구(20구)"로 구분 표시되는 것 확인. 주문 생성 후 10구 옵션재고가 3→2로 차감, 주문 취소 후 2→3으로 복구되는 것까지 확인
+- ⚠️ **배포 시 확인 필요**: 실제 Supabase 프로젝트에는 아직 `product_option_groups`/`product_option_values`/`event_option_stock` 테이블과 `order_items.options` 컬럼, `decrement_option_stock`/`increment_option_stock` 함수가 없음 — 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 먼저 실행해야 함(안 하면 옵션이 없는 기존 상품은 그대로 동작하지만, 옵션을 추가하려고 하면 에러로 실패함)
+
 # 진행 중인 기능
 
 - **카드/카카오페이 결제**: Toss Payments 키가 없어서 지금은 무통장입금과 동일하게 관리자가 수동으로 확인하는 방식으로 대체 중
@@ -268,6 +281,7 @@
 - [ ] 재고 차감(`decrement_stock`)이 부족분을 그냥 0으로 클램프할 뿐 거부하지 않음 — 동시에 여러 명이 마지막 재고를 주문하면 이론적으로 재고 이상으로 판매될 수 있음(이벤트별 판매 정책 작업 중 확인, 지금 규모에선 발생 확률 낮은 레이스 컨디션이라 별도 항목으로만 남김)
 
 **기존에 알려져 있던 항목**
+- [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 `product_option_groups`/`product_option_values`/`event_option_stock`/`order_items.options` 마이그레이션 미적용 — 적용 전까지는 옵션이 없는 기존 상품은 그대로 동작하지만, 옵션 그룹을 추가하려고 하면 에러로 실패함(존재하지 않는 테이블/컬럼에 쓰려고 시도). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 `products.base_price`/`product_costs`/`event_product_costs` 마이그레이션 미적용 — 적용 전까지는 상품 등록·수정, 이벤트에 상품 추가가 에러로 실패함(존재하지 않는 컬럼/테이블에 쓰려고 시도). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [ ] 스마트택배 API 키 발급 후 `SWEETTRACKER_API_KEY` 환경변수 설정 + `app/api/tracking/route.ts`의 응답 필드명/택배사 코드(`t_code`)를 실제 응답과 대조 확인 (지금은 키가 없어 항상 "준비 중" 폴백으로만 동작 확인함)
 - [ ] Toss Payments 실제 가맹점 키 연동 (카드/카카오페이 자동결제)
@@ -299,8 +313,11 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `product_costs` | product_id(PK, →products), cost_price, updated_at | 카탈로그 상품의 **기준 원가** — `products`와 분리된 admin-only 테이블(RLS가 `is_admin()`으로만 select까지 걸림). 고객 화면이 쓰는 공개 쿼리에는 이 값이 절대 섞여 들어올 수 없음(같은 select에 join하지 않는 한 노출될 방법 자체가 없음) |
 | `event_products` | id, event_id, product_id(→products), price, delivery_type, stock, visible | **이벤트별 상품 리스팅** — 옛 `products` 테이블이 하던 역할(이벤트에 속한 판매 정보)을 그대로 가져오되 내용은 `product_id`로 카탈로그를 참조. `price`/`delivery_type`/`stock`/`visible`은 리스팅마다 독립적이라, 같은 카탈로그 상품도 회차별로 다른 가격·재고·노출 여부를 가질 수 있음. `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `stock`이 null이면 재고 제한 없음, 값이 있으면 그 수량만큼만 판매되고 0이면 품절. `visible=false`면 고객 화면에서 이 리스팅만 숨김(카탈로그 상품 자체나 다른 회차 리스팅엔 영향 없음) — RLS도 `visible or is_admin()`으로 비노출 리스팅을 비관리자에게 숨김. 화면(`Product` 타입)에는 `products`와 조인한 평평한 모양으로 합쳐져서 전달됨(`catalogProductId`로 원본 카탈로그 id를 알 수 있음) |
 | `event_product_costs` | event_product_id(PK, →event_products), cost_price | 이벤트 리스팅의 **원가 스냅샷** — 상품을 이 이벤트에 추가한 시점의 `product_costs.cost_price`를 복사해두고, 이후 카탈로그 원가가 바뀌어도 유지됨(`event_products.price`가 이미 하는 스냅샷 방식과 동일). `product_costs`와 마찬가지로 admin-only RLS |
+| `product_option_groups` | id, product_id(→products), name, required, multi, sort_order | 카탈로그 상품의 **옵션 그룹**(색상/사이즈/중량/추가옵션 등) — origin/weight처럼 카탈로그 전용 값이라 이 상품을 파는 모든 이벤트가 그대로 공유하고 회차별로 달라지지 않음. `required`는 반드시 하나 이상 골라야 담을 수 있는지, `multi`는 여러 값 동시 선택 가능 여부. 공개 조회(고객도 옵션 목록 자체는 봐야 하니까) |
+| `product_option_values` | id, group_id(→product_option_groups), name, price_delta, has_stock, default_stock, sort_order | 그룹에 속한 선택지 하나(예: 색상 그룹의 "빨강"). `price_delta`는 이 값을 고르면 기준가에 더해지는 금액(음수 가능). `has_stock=false`면 재고 제한이 없다는 뜻이라 `event_option_stock`에 행을 아예 안 만듦. `default_stock`은 새 이벤트에 리스팅을 추가할 때 `event_option_stock`의 초기값으로만 쓰이고, 이후로는 서로 독립적으로 움직임 |
+| `event_option_stock` | event_product_id(→event_products), option_value_id(→product_option_values), stock | 이벤트 리스팅별 **옵션 재고 스냅샷** — `event_products.stock`과 같은 이유로 분리(같은 옵션값이라도 회차마다 독립된 재고). 리스팅에 옵션값을 추가하는 시점(리스팅 신규 생성 시 자동, 또는 관리자가 직접)에 `default_stock`을 복사해 초기화. `option_value_id`는 on delete cascade라 카탈로그에서 그 옵션값을 지우면 모든 회차의 재고 스냅샷도 함께 사라짐 |
 | `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, cancel_requested, cancel_reason, courier_code, tracking_number, total | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용). `status`는 `wait`→`paid`→`confirmed`(발주확인)→`ship`→`done` 순서로 진행하고, `done` 이후 `refund_requested`/`refunded`가 곁가지로 붙을 수 있으며 `wait`/`paid` 단계에서는 고객이 직접 `cancelled`로 바꿀 수 있음(RLS/RPC로 서버에서도 강제). `cancel_requested`는 발주확인 이후 고객이 취소를 "요청"했는지 나타내는 플래그 — status는 그대로 두고(배송 준비 계속 진행) 관리자가 승인(cancelled로 전환)하거나 거절(플래그만 해제)할 때까지 대기. `cancel_reason`은 고객이 남긴 취소 사유(선택). `courier_code`/`tracking_number`는 배송중(ship) 처리 시 관리자가 입력 — 스마트택배 API의 택배사 코드 기준(`types/index.ts`의 `COURIER_LABEL`), 문고리/사다드림 주문은 항상 null |
-| `order_items` | id, order_id, event_product_id(→event_products), product_name, price_snapshot, quantity | 주문 상품 스냅샷. `event_product_id`는 카탈로그 분리 이전엔 `product_id`였던 컬럼 — 가리키는 대상(리스팅 id)은 동일해서 주문/재고/취소 로직은 변경 없음. TS 쪽 `OrderItem.productId` 필드명은 그대로 유지(DB 컬럼명만 바뀜) |
+| `order_items` | id, order_id, event_product_id(→event_products), product_name, price_snapshot, quantity, options(jsonb) | 주문 상품 스냅샷. `event_product_id`는 카탈로그 분리 이전엔 `product_id`였던 컬럼 — 가리키는 대상(리스팅 id)은 동일해서 주문/재고/취소 로직은 변경 없음. TS 쪽 `OrderItem.productId` 필드명은 그대로 유지(DB 컬럼명만 바뀜). `options`는 주문 시점에 고른 옵션들의 스냅샷 배열(`[{optionValueId, groupName, valueName, priceDelta}, ...]`) — 이름/가격은 화면 표시용이고 `optionValueId`는 취소/환불 시 `event_option_stock` 복구 대상을 찾는 키 |
 | `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
 | `store_settings` | id(boolean, 항상 true — 싱글턴 강제), bank_name, account_number, account_holder, updated_at | 무통장입금 안내용 계좌 정보. 매장 전체에 한 행만 존재. 조회는 게스트 포함 전체 공개, 수정은 관리자만 |
 | `banners` | id, image_url, link_type(PRODUCT/EVENT/URL/NONE), link_id, link_url, active, starts_at, ends_at, sort_order | 메인 홈 상단 배너. `link_type=PRODUCT`일 때 `link_id`는 카탈로그 상품(`products`) id — 리스팅이 아니라 카탈로그를 가리켜두고 클릭 시점에 가장 적합한 리스팅으로 해석함(`lib/banner-link.ts`). `active`+`starts_at`/`ends_at`로 노출 여부를 판단(`isBannerLive`), RLS는 활성 배너만 공개 조회(`active or is_admin()`) — 노출 기간 자체는 앱 코드에서 걸러짐. ⚠️ 실제 Supabase 프로젝트에는 아직 이 테이블이 없어서, 이 기능을 쓰려면 `schema.sql`을 다시 실행해야 함 |
@@ -311,6 +328,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 - `cancel_guest_order(order_id, name, pin)` — 비회원 셀프취소용 RPC. 이름+확인번호가 맞고 아직 발주확인 전(wait/paid)일 때만 취소로 전환, 실제로 취소됐을 때만 재고를 복구
 - `request_guest_cancel(order_id, name, pin, reason)` — 비회원의 발주확인 이후 취소 "요청"용 RPC. status는 안 건드리고 confirmed/ship일 때만 cancel_requested를 true로 세움
 - `decrement_stock(event_product_id, qty)` / `increment_stock(event_product_id, qty)` — 재고 차감/복구 RPC. 카탈로그 분리 이후 `event_products` 행을 대상으로 동작(파라미터명만 변경, 가리키는 대상은 그대로). `stock`이 null(재고 제한 없음)인 리스팅은 건드리지 않고, 차감은 0 밑으로 안 내려감
+- `decrement_option_stock(event_product_id, option_value_id, qty)` / `increment_option_stock(event_product_id, option_value_id, qty)` — 위와 같은 패턴의 옵션값 단위 재고 차감/복구 RPC. `event_option_stock`에 행이 없는 조합(재고 제한 없는 옵션값)은 그냥 0 rows에 적용되고 조용히 아무 일도 안 함
 - 시드 데이터는 고정 UUID(`00000000-...`) 사용, `ON CONFLICT DO NOTHING`이라 재실행해도 안전
 
 # 관리자 기능 계획

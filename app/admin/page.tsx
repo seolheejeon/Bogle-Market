@@ -418,7 +418,11 @@ export default function AdminHomePage() {
               {o.recipientName} ({o.recipientPhone}) · {PAYMENT_METHOD_LABEL[o.paymentMethod]}
             </p>
             <p className="mt-1 text-[12.5px] text-text-muted">{o.addressSnapshot}</p>
-            <p className="mt-1 text-[12.5px] text-text-muted">{o.items.map((i) => `${i.productName} x${i.quantity}`).join(", ")}</p>
+            <p className="mt-1 text-[12.5px] text-text-muted">
+              {o.items
+                .map((i) => `${i.productName}${i.options && i.options.length > 0 ? `(${i.options.map((opt) => opt.valueName).join(",")})` : ""} x${i.quantity}`)
+                .join(", ")}
+            </p>
             {o.courierCode && o.trackingNumber && (
               <p className="mt-1 text-[12px] font-semibold text-accent-dark">
                 {COURIER_LABEL[o.courierCode] ?? "택배"} · {o.trackingNumber}

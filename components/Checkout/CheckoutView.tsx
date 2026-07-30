@@ -3,18 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { listEvents, createOrder, getDefaultAddress, updateAddress } from "@/lib/data";
-import { formatAddress, type MarketEvent, type Order, type PaymentMethod } from "@/types";
+import { formatAddress, type MarketEvent, type Order, type PaymentMethod, type Product } from "@/types";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
 import { isEventOrderable } from "@/lib/order-policy";
-import { useCart } from "@/lib/cart-context";
+import { useCart, type CartLine } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
+import { unitPrice, maxQtyForSelection, optionSelectionLabel, buildOptionSnapshot } from "@/lib/product-options";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
 
 export function CheckoutView() {
   const router = useRouter();
-  const { cart, clear } = useCart();
+  const { lines, clear } = useCart();
   const { profile } = useAuth();
 
   const [events, setEvents] = useState<MarketEvent[] | null>(null);
@@ -53,10 +54,18 @@ export function CheckoutView() {
 
   const items = useMemo(() => {
     if (!events) return [];
-    return events.flatMap((e) => e.products.filter((p) => cart[p.id]).map((p) => ({ product: p, qty: cart[p.id], event: e })));
-  }, [events, cart]);
+    const result: { product: Product; line: CartLine; event: MarketEvent }[] = [];
+    for (const e of events) {
+      for (const p of e.products) {
+        for (const line of lines) {
+          if (line.productId === p.id) result.push({ product: p, line, event: e });
+        }
+      }
+    }
+    return result;
+  }, [events, lines]);
 
-  const total = items.reduce((sum, i) => sum + i.product.price * i.qty, 0);
+  const total = items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
 
   // 택배로만 이루어진 주문은 공동현관 출입방법이 필요 없음. 장바구니가 아직
   // 안 불러와졌을 때는 우선 보여주는 쪽으로 기본값을 둔다.
@@ -102,9 +111,14 @@ export function CheckoutView() {
       setError("장바구니가 비어있어요.");
       return;
     }
-    const overStock = items.filter((i) => i.product.stock !== undefined && i.qty > i.product.stock);
+    const overStock = items.filter((i) => {
+      const max = maxQtyForSelection(i.product, i.line.optionValueIds);
+      return max !== undefined && i.line.qty > max;
+    });
     if (overStock.length > 0) {
-      setError(`재고가 부족한 상품이 있어요: ${overStock.map((i) => `${i.product.name}(재고 ${i.product.stock}개)`).join(", ")}. 장바구니에서 수량을 줄여주세요.`);
+      setError(
+        `재고가 부족한 상품이 있어요: ${overStock.map((i) => `${i.product.name}(재고 ${maxQtyForSelection(i.product, i.line.optionValueIds)}개)`).join(", ")}. 장바구니에서 수량을 줄여주세요.`,
+      );
       return;
     }
     const closedGroups = groups.filter((g) => !isEventOrderable(g.event));
@@ -129,7 +143,7 @@ export function CheckoutView() {
       const batchId = crypto.randomUUID();
       const createdOrders: Order[] = [];
       for (const group of groups) {
-        const groupTotal = group.items.reduce((sum, i) => sum + i.product.price * i.qty, 0);
+        const groupTotal = group.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
         const groupNeedsEntranceMethod = group.items.some((i) => (i.product.deliveryType ?? group.event.type) !== "PARCEL");
         const order = await createOrder({
           eventId: group.event.id,
@@ -148,7 +162,14 @@ export function CheckoutView() {
           }),
           apartmentName: address.apartmentName || undefined,
           paymentMethod: method,
-          items: group.items.map((i) => ({ productId: i.product.id, productName: i.product.name, productEmoji: i.product.emoji, price: i.product.price, quantity: i.qty })),
+          items: group.items.map((i) => ({
+            productId: i.product.id,
+            productName: i.product.name,
+            productEmoji: i.product.emoji,
+            price: unitPrice(i.product, i.line.optionValueIds),
+            quantity: i.line.qty,
+            options: buildOptionSnapshot(i.product, i.line.optionValueIds),
+          })),
           total: groupTotal,
         });
         createdOrders.push(order);
@@ -232,7 +253,7 @@ export function CheckoutView() {
         )}
         <div className="flex flex-col gap-4">
           {groups.map((g) => {
-            const groupTotal = g.items.reduce((sum, i) => sum + i.product.price * i.qty, 0);
+            const groupTotal = g.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
             return (
               <div key={g.event.id}>
                 <div className="mb-1.5 flex items-center justify-between">
@@ -241,11 +262,12 @@ export function CheckoutView() {
                 </div>
                 <div className="flex flex-col gap-1.5 text-[13px] text-text-muted">
                   {g.items.map((i) => (
-                    <div key={i.product.id} className="flex justify-between">
+                    <div key={`${i.product.id}::${i.line.optionValueIds.join(",")}`} className="flex justify-between">
                       <span>
-                        {i.product.name} x{i.qty}
+                        {i.product.name}
+                        {i.line.optionValueIds.length > 0 && ` (${optionSelectionLabel(i.product, i.line.optionValueIds)})`} x{i.line.qty}
                       </span>
-                      <span>{formatPrice(i.product.price * i.qty)}</span>
+                      <span>{formatPrice(unitPrice(i.product, i.line.optionValueIds) * i.line.qty)}</span>
                     </div>
                   ))}
                 </div>

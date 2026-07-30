@@ -17,6 +17,38 @@ export type ProductDetailBlock =
   | { type: "text"; text: string }
   | { type: "images"; urls: string[]; columns: 1 | 2 | 3 };
 
+// 옵션 그룹에 속한 선택지 하나(예: 색상 그룹의 "빨강"). priceDelta는 이 값을
+// 고르면 기준 판매가에 더해지는 금액(음수 가능). hasStock=false면 재고 제한이
+// 없다는 뜻이라 stock 필드가 아예 없다 — 있으면 그 이벤트 리스팅 기준 남은
+// 재고(event_option_stock 스냅샷)를 뜻한다. defaultStock은 카탈로그 값으로,
+// 새 이벤트에 리스팅을 추가할 때만 stock의 초기값으로 복사되고 그 이후로는
+// 서로 독립적으로 움직인다(product_option_values.default_stock 참고).
+export interface ProductOptionValue {
+  id: string;
+  name: string;
+  priceDelta: number;
+  hasStock: boolean;
+  defaultStock?: number;
+  sortOrder: number;
+  // 이벤트 리스팅에 조인된 경우에만 채워짐(카탈로그 단독 조회 시엔 없음) —
+  // hasStock=true인 옵션값의 "이 리스팅" 기준 남은 재고.
+  stock?: number;
+}
+
+// 상품 옵션 그룹(색상/사이즈/중량/추가옵션 등) — required/multi/순서 같은
+// "구조"는 origin/weight/storage와 동일하게 카탈로그 전용 값이라 이 상품을
+// 파는 모든 이벤트가 그대로 공유하고, 이벤트별로 달라지지 않는다.
+export interface ProductOptionGroup {
+  id: string;
+  name: string;
+  // true면 반드시 하나 이상 선택해야 장바구니에 담을 수 있음(예: 색상/사이즈).
+  required: boolean;
+  // true면 여러 값 동시 선택 가능(예: 추가옵션), false면 하나만(예: 색상).
+  multi: boolean;
+  sortOrder: number;
+  values: ProductOptionValue[];
+}
+
 // 카탈로그 상품 — 사진/설명/원산지 등 "내용물"만 담고 있고 이벤트와 무관하게
 // 하나만 존재한다. "상품 관리"(`/admin/products`) 화면에서 검색·수정하는
 // 대상이며, 여러 이벤트에서 그대로 재사용된다(복제해도 새로 안 늘어남).
@@ -40,6 +72,9 @@ export interface CatalogProduct {
   // 온다. listCatalogProducts()가 관리자 화면에서만 호출되기 때문에 이 타입에
   // 같이 둬도 고객 화면에는 절대 노출되지 않는다.
   costPrice?: number;
+  // 색상/사이즈/중량/추가옵션 등 — 신발/의류/식품/과일/묶음상품 어디든 같은
+  // 구조로 표현하기 위한 유연한 옵션 그룹 목록. 정렬 순서(sortOrder)대로 온다.
+  optionGroups?: ProductOptionGroup[];
 }
 
 // 이벤트에 실제로 노출되는 상품(리스팅) — 카탈로그 상품 하나를 이번 회차에
@@ -73,6 +108,9 @@ export interface Product {
   // false면 고객 화면(그리드/이벤트 상세 등)에서 숨김 — 상품은 남겨두되 잠시
   // 판매만 중단하고 싶을 때(예: 다음 회차 준비 중) 삭제 없이 끄는 용도.
   visible?: boolean;
+  // 색상/사이즈/중량/추가옵션 등 — 그룹 구조(required/multi/이름)는 카탈로그와
+  // 동일하지만, 각 값의 stock은 이 리스팅(event_option_stock) 기준으로 온다.
+  optionGroups?: ProductOptionGroup[];
 }
 
 // 이벤트 카드에 붙는 판매용 뱃지 — 배송방식 뱃지(EventTypeBadge)와는 별개로
@@ -121,6 +159,11 @@ export interface EventProductSeed {
   deliveryType?: EventType;
   stock?: number;
   visible?: boolean;
+  // 옵션값별 재고 스냅샷(optionValueId -> stock) — event_option_stock 테이블의
+  // mock 버전. 카탈로그 옵션값의 defaultStock을 이 이벤트에 추가한 시점에
+  // 복사해두고, 이후로는 이 값만 독립적으로 차감/복구된다. hasStock=false인
+  // 옵션값은 여기 키가 없음(재고 제한 없음).
+  optionStock?: Record<string, number>;
 }
 
 export interface MarketEventSeed {
@@ -167,12 +210,28 @@ export interface Profile {
   isAdmin: boolean;
 }
 
+// 주문 시점에 고른 옵션 하나의 스냅샷 — 화면에 보여주는 이름/가격조정은
+// 카탈로그가 나중에 바뀌거나 삭제돼도 영향받지 않도록 값 자체로 복사해
+// 저장한다(price_snapshot과 동일한 이유). optionValueId는 화면에 표시되진
+// 않지만 취소/환불 시 어느 옵션값의 재고(event_option_stock)를 복구해야
+// 하는지 찾는 키로 쓴다 — 카탈로그에서 그 옵션값이 나중에 지워지면 복구
+// 대상 행도 이미 cascade로 같이 사라진 상태라 그냥 조용히 무시된다.
+export interface OrderItemOption {
+  optionValueId: string;
+  groupName: string;
+  valueName: string;
+  priceDelta: number;
+}
+
 export interface OrderItem {
   productId: string;
   productName: string;
   productEmoji: string;
   price: number;
   quantity: number;
+  // 이 주문 라인에서 고른 옵션들의 스냅샷(단가 price에 이미 priceDelta가
+  // 반영돼 있음 — options는 표시용). 옵션이 없는 상품은 빈 배열이거나 undefined.
+  options?: OrderItemOption[];
 }
 
 export interface Order {

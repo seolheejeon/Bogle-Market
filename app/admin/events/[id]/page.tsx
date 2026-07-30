@@ -8,11 +8,12 @@ import {
   listCatalogProducts,
   addEventProduct,
   updateEventProduct,
+  updateEventOptionStock,
   removeEventProduct,
   getEventProductCosts,
   getSoldQuantities,
 } from "@/lib/data";
-import type { CatalogProduct, EventType, MarketEvent, Product } from "@/types";
+import type { CatalogProduct, EventType, MarketEvent, Product, ProductOptionValue } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice, toDateInputValue, dateInputValueToIso } from "@/lib/format";
 import { ProductPhoto } from "@/components/ProductPhoto";
@@ -259,6 +260,14 @@ function EventProductRow({
           <p className="text-[11.5px] text-text-muted">
             원가 {formatPrice(costPrice ?? 0)} · 개당 예상수익 {formatPrice(profitPerItem)} · 판매 {soldQty}개 · 누적 예상수익 {formatPrice(totalProfit)}
           </p>
+          {(product.optionGroups ?? []).some((g) => g.values.some((v) => v.hasStock)) && (
+            <p className="truncate text-[11.5px] text-text-muted">
+              옵션재고{" "}
+              {product
+                .optionGroups!.flatMap((g) => g.values.filter((v) => v.hasStock).map((v) => `${v.name} ${v.stock ?? 0}개`))
+                .join(", ")}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap justify-end gap-1.5">
           <button onClick={toggleVisible} disabled={busy} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50">
@@ -337,6 +346,18 @@ function EventProductRow({
         <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
         고객 화면에 노출
       </label>
+      {(product.optionGroups ?? []).some((g) => g.values.some((v) => v.hasStock)) && (
+        <div>
+          <p className="mb-1 text-[11.5px] font-bold text-text-muted">옵션별 재고 (이 회차만 — 바로 저장돼요)</p>
+          <div className="flex flex-col gap-1.5">
+            {product.optionGroups!.flatMap((g) =>
+              g.values
+                .filter((v) => v.hasStock)
+                .map((v) => <OptionStockField key={v.id} eventProductId={product.id} groupName={g.name} value={v} onSaved={onSaved} />),
+            )}
+          </div>
+        </div>
+      )}
       {error && <p className="text-[11.5px] font-semibold text-red-600">{error}</p>}
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} className="rounded-[7px] bg-accent px-2.5 py-1.5 text-[12px] font-bold text-white">
@@ -347,6 +368,53 @@ function EventProductRow({
         </button>
       </div>
     </div>
+  );
+}
+
+// 옵션값 하나의 이번 회차 재고 — 다른 필드처럼 "저장" 버튼을 기다리지 않고
+// blur 즉시 저장한다(event_option_stock 스냅샷만 바뀌고 카탈로그 기본
+// 재고는 그대로 유지됨).
+function OptionStockField({
+  eventProductId,
+  groupName,
+  value,
+  onSaved,
+}: {
+  eventProductId: string;
+  groupName: string;
+  value: ProductOptionValue;
+  onSaved: () => void;
+}) {
+  const [stock, setStock] = useState(String(value.stock ?? 0));
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await updateEventOptionStock(eventProductId, value.id, Math.max(0, Number(stock) || 0));
+      onSaved();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <label className="flex items-center gap-2 text-[12px] text-text-muted">
+      <span className="w-32 shrink-0 truncate">
+        {groupName} · {value.name}
+      </span>
+      <input
+        className="w-20 rounded-[6px] border border-border bg-bg-card px-2 py-1 text-[12.5px]"
+        type="number"
+        min={0}
+        disabled={saving}
+        value={stock}
+        onChange={(e) => setStock(e.target.value)}
+        onBlur={() => stock !== String(value.stock ?? 0) && save()}
+      />
+    </label>
   );
 }
 

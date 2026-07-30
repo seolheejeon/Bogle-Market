@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { listCatalogProducts, createCatalogProduct, updateCatalogProduct, deleteCatalogProduct } from "@/lib/data";
-import type { CatalogProduct, ProductDetailBlock } from "@/types";
+import type { CatalogProduct, ProductDetailBlock, ProductOptionGroup } from "@/types";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { PhotoUploader } from "@/components/admin/PhotoUploader";
 import { DetailBlockEditor } from "@/components/admin/DetailBlockEditor";
+import { ProductOptionEditor } from "@/components/admin/ProductOptionEditor";
 import { formatPrice } from "@/lib/format";
 
 // 상품은 하나만 존재하고 여러 이벤트가 재사용한다 — 여기서 고치는 사진/설명은
@@ -137,6 +138,7 @@ function CatalogProductForm({
   const [description, setDescription] = useState(initial?.description ?? "");
   const [photos, setPhotos] = useState<string[]>(initial?.photos ?? []);
   const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>(initial?.detailBlocks ?? []);
+  const [optionGroups, setOptionGroups] = useState<ProductOptionGroup[]>(initial?.optionGroups ?? []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -163,6 +165,8 @@ function CatalogProductForm({
         description: description || undefined,
         photos,
         detailBlocks,
+        // 이름을 안 채운 그룹/값은 저장하지 않는다(에디터에서 빈 값으로 남겨둔 것).
+        optionGroups: optionGroups.filter((g) => g.name.trim()).map((g) => ({ ...g, values: g.values.filter((v) => v.name.trim()) })),
       });
       console.log("[상품 저장] DB 저장 완료");
     } catch (e) {
@@ -227,6 +231,10 @@ function CatalogProductForm({
       <div>
         <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
         <DetailBlockEditor blocks={detailBlocks} onChange={setDetailBlocks} />
+      </div>
+      <div>
+        <p className="mb-1.5 text-[12px] font-bold text-text-muted">옵션 (색상/사이즈/중량/추가옵션 등)</p>
+        <ProductOptionEditor groups={optionGroups} onChange={setOptionGroups} />
       </div>
       {error && <p className="text-[12.5px] font-semibold text-red-600">{error}</p>}
       <div className="flex gap-2">

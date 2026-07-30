@@ -238,11 +238,14 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
 
             <p className="mb-2 text-[12.5px] font-bold text-text-muted">주문 상품</p>
             <div className="flex flex-col gap-2">
-              {order.items.map((item) => (
-                <div key={item.productId} className="flex items-center gap-3">
+              {order.items.map((item, i) => (
+                <div key={`${item.productId}-${i}`} className="flex items-center gap-3">
                   <div className="flex h-[44px] w-[44px] items-center justify-center rounded-[10px] bg-accent-soft text-xl">{item.productEmoji}</div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[13px]">{item.productName}</p>
+                    {item.options && item.options.length > 0 && (
+                      <p className="truncate text-[11.5px] text-text-muted">{item.options.map((o) => o.valueName).join(", ")}</p>
+                    )}
                     <p className="text-[12px] text-text-muted">
                       {formatPrice(item.price)} x {item.quantity}
                     </p>

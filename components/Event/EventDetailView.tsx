@@ -10,6 +10,7 @@ import { isEventOrderable } from "@/lib/order-policy";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
+import { hasRequiredOptions } from "@/lib/product-options";
 
 export function EventDetailView({ eventId }: { eventId: string }) {
   const router = useRouter();
@@ -65,7 +66,16 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                 </Link>
                 <p className="text-[13.5px] font-bold">{formatPrice(product.price)}</p>
               </div>
-              <QtyControl productId={product.id} max={product.stock} closed={closed} />
+              {!closed && product.stock !== 0 && hasRequiredOptions(product) ? (
+                <Link
+                  href={`/product/${product.id}`}
+                  className="shrink-0 rounded-full border border-accent px-3 py-1.5 text-[11.5px] font-bold text-accent"
+                >
+                  옵션선택
+                </Link>
+              ) : (
+                <QtyControl productId={product.id} max={product.stock} closed={closed} />
+              )}
             </div>
           ))}
         </div>

@@ -36,6 +36,8 @@ import type {
   OrderStatus,
   PaymentMethod,
   Product,
+  ProductOptionGroup,
+  ProductOptionValue,
   Profile,
   StoreSettings,
 } from "@/types";
@@ -64,7 +66,18 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     detailBlocks: catalog?.detailBlocks,
     stock: listing.stock,
     visible: listing.visible,
+    optionGroups: mergeOptionStock(catalog?.optionGroups, listing.optionStock),
   };
+}
+
+// 카탈로그의 옵션 그룹/값(구조)에 이 리스팅의 옵션값별 재고 스냅샷을 채워
+// 넣는다. hasStock=false인 옵션값은 재고 제한이 없어 stock을 아예 안 채운다.
+function mergeOptionStock(groups: ProductOptionGroup[] | undefined, optionStock: Record<string, number> | undefined): ProductOptionGroup[] | undefined {
+  if (!groups) return undefined;
+  return groups.map((g) => ({
+    ...g,
+    values: g.values.map((v) => (v.hasStock ? { ...v, stock: optionStock?.[v.id] ?? v.defaultStock ?? 0 } : v)),
+  }));
 }
 
 function orderNumber(): string {
@@ -81,7 +94,10 @@ function orderNumber(): string {
 export async function listEvents(): Promise<MarketEvent[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { data, error } = await supabase.from("events").select("*, event_products(*, products(*))").order("deadline_at", { ascending: true });
+    const { data, error } = await supabase
+      .from("events")
+      .select("*, event_products(*, products(*, product_option_groups(*, product_option_values(*))), event_option_stock(*))")
+      .order("deadline_at", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(mapSupabaseEvent);
   }
@@ -161,6 +177,14 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
   // 마스터(카탈로그) 기준 원가가 아니라, 이 회차에서 실제로 쓰던 값을 이어받음.
   const costs = await getEventProductCosts(source.products.map((p) => p.id));
   for (const p of source.products) {
+    // 옵션값별 재고도 가격/원가와 마찬가지로 "원본 회차에서 실제로 쓰던 값"을
+    // 그대로 이어받는다 — 카탈로그의 기본 재고로 새로 초기화하지 않는다.
+    const optionStock: Record<string, number> = {};
+    for (const g of p.optionGroups ?? []) {
+      for (const v of g.values) {
+        if (v.hasStock && v.stock !== undefined) optionStock[v.id] = v.stock;
+      }
+    }
     await addEventProduct(created.id, {
       catalogProductId: p.catalogProductId,
       price: p.price,
@@ -168,6 +192,7 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
       deliveryType: p.deliveryType,
       stock: p.stock,
       visible: p.visible,
+      optionStock: Object.keys(optionStock).length > 0 ? optionStock : undefined,
     });
   }
   const full = await getEvent(created.id);
@@ -193,7 +218,10 @@ export async function listCatalogProducts(): Promise<CatalogProduct[]> {
     const supabase = getSupabaseBrowserClient()!;
     // product_costs를 함께 embed — 이 함수는 관리자 화면에서만 호출되므로
     // 안전하다(RLS가 어차피 비관리자에게는 이 조인을 null로 돌려준다).
-    const { data, error } = await supabase.from("products").select("*, product_costs(cost_price)").order("name", { ascending: true });
+    const { data, error } = await supabase
+      .from("products")
+      .select("*, product_costs(cost_price), product_option_groups(*, product_option_values(*))")
+      .order("name", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(mapSupabaseCatalogProduct);
   }
@@ -235,8 +263,11 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
         throw costError;
       }
     }
+    if (input.optionGroups !== undefined && input.optionGroups.length > 0) {
+      await saveOptionGroupsForProduct(supabase, data.id, input.optionGroups);
+    }
     console.log("[lib/data] createCatalogProduct supabase insert 완료");
-    return { ...mapSupabaseCatalogProduct(data), costPrice: input.costPrice };
+    return { ...mapSupabaseCatalogProduct(data), costPrice: input.costPrice, optionGroups: input.optionGroups };
   }
   const product: CatalogProduct = { ...input, id: genId("cat") };
   saveCatalogProducts([product, ...loadCatalogProducts()]);
@@ -275,6 +306,9 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
         throw costError;
       }
     }
+    if (patch.optionGroups !== undefined) {
+      await saveOptionGroupsForProduct(supabase, catalogProductId, patch.optionGroups);
+    }
     console.log("[lib/data] updateCatalogProduct supabase update 완료");
     return;
   }
@@ -300,6 +334,59 @@ export async function deleteCatalogProduct(catalogProductId: string): Promise<vo
   saveCatalogProducts(loadCatalogProducts().filter((c) => c.id !== catalogProductId));
 }
 
+// ---------- 카탈로그 상품 옵션 그룹/값 (Supabase 전용 저장 로직) ----------
+// upsert-then-prune 패턴: 화면(관리자 옵션 에디터)이 넘긴 그룹/값 배열의 id를
+// 그대로 DB id로 써서(신규 항목도 화면에서 crypto.randomUUID()로 미리 uuid를
+// 만들어 넘김) 기존 id는 갱신, 새 id는 삽입되게 하고, 넘어오지 않은(=삭제된)
+// id만 지운다. 그래야 값 자체를 지웠다 새로 만들지 않아 event_option_stock의
+// FK(on delete cascade)가 안 바뀐 옵션값의 기존 재고를 실수로 날리지 않는다.
+async function saveOptionGroupsForProduct(supabase: ReturnType<typeof getSupabaseBrowserClient>, productId: string, groups: ProductOptionGroup[]): Promise<void> {
+  const sb = supabase!;
+  const keepGroupIds = groups.map((g) => g.id);
+  if (groups.length > 0) {
+    const { error } = await sb.from("product_option_groups").upsert(
+      groups.map((g, i) => ({ id: g.id, product_id: productId, name: g.name, required: g.required, multi: g.multi, sort_order: g.sortOrder ?? i })),
+    );
+    if (error) throw error;
+  }
+  const delGroups = sb.from("product_option_groups").delete().eq("product_id", productId);
+  const { error: delGroupError } = await (keepGroupIds.length > 0 ? delGroups.not("id", "in", `(${keepGroupIds.join(",")})`) : delGroups);
+  if (delGroupError) throw delGroupError;
+
+  const allValues = groups.flatMap((g) =>
+    g.values.map((v, i) => ({
+      id: v.id,
+      group_id: g.id,
+      name: v.name,
+      price_delta: v.priceDelta,
+      has_stock: v.hasStock,
+      default_stock: v.defaultStock ?? null,
+      sort_order: v.sortOrder ?? i,
+    })),
+  );
+  if (allValues.length > 0) {
+    const { error } = await sb.from("product_option_values").upsert(allValues);
+    if (error) throw error;
+  }
+  if (keepGroupIds.length > 0) {
+    const keepValueIds = allValues.map((v) => v.id);
+    const delValues = sb.from("product_option_values").delete().in("group_id", keepGroupIds);
+    const { error: delValueError } = await (keepValueIds.length > 0 ? delValues.not("id", "in", `(${keepValueIds.join(",")})`) : delValues);
+    if (delValueError) throw delValueError;
+  }
+}
+
+// 카탈로그 상품의 옵션 그룹/값(구조)만 조회 — addEventProduct가 새 리스팅의
+// event_option_stock 초기값(default_stock)을 계산할 때 쓴다.
+async function fetchOptionGroupsForProduct(supabase: ReturnType<typeof getSupabaseBrowserClient>, productId: string): Promise<ProductOptionGroup[]> {
+  const { data, error } = await supabase!
+    .from("product_option_groups")
+    .select("*, product_option_values(*)")
+    .eq("product_id", productId);
+  if (error) throw error;
+  return mapSupabaseOptionGroups(data) ?? [];
+}
+
 // ---------- 이벤트별 상품 등록(리스팅) ----------
 // 카탈로그 상품 하나를 이번 이벤트에 어떤 가격/재고/노출로 팔지 나타낸다.
 
@@ -313,6 +400,11 @@ export interface NewEventProductInput {
   deliveryType?: EventType;
   stock?: number;
   visible?: boolean;
+  // 옵션값별 초기 재고(optionValueId -> stock)를 명시적으로 주면 카탈로그의
+  // 기본 재고(defaultStock) 대신 이 값으로 event_option_stock을 초기화한다 —
+  // duplicateEvent가 원본 회차의 실제 재고를 그대로 이어받을 때 쓰는 용도.
+  // 안 주면(보통의 "이벤트에 상품 추가" 흐름) 카탈로그 기본값으로 채워진다.
+  optionStock?: Record<string, number>;
 }
 
 export async function addEventProduct(eventId: string, input: NewEventProductInput): Promise<Product> {
@@ -335,10 +427,32 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
       const { error: costError } = await supabase.from("event_product_costs").upsert({ event_product_id: data.id, cost_price: input.costPrice });
       if (costError) throw costError;
     }
-    return mapSupabaseEventProduct(data);
+    const catalogGroups = await fetchOptionGroupsForProduct(supabase, input.catalogProductId);
+    const optionStockRows = catalogGroups.flatMap((g) =>
+      g.values
+        .filter((v) => v.hasStock)
+        .map((v) => ({ event_product_id: data.id, option_value_id: v.id, stock: input.optionStock?.[v.id] ?? v.defaultStock ?? 0 })),
+    );
+    if (optionStockRows.length > 0) {
+      const { error: stockError } = await supabase.from("event_option_stock").insert(optionStockRows);
+      if (stockError) throw stockError;
+    }
+    const { data: full, error: fullError } = await supabase
+      .from("event_products")
+      .select("*, products(*, product_option_groups(*, product_option_values(*))), event_option_stock(*)")
+      .eq("id", data.id)
+      .single();
+    if (fullError) throw fullError;
+    return mapSupabaseEventProduct(full);
   }
   const catalog = loadCatalogProducts().find((c) => c.id === input.catalogProductId);
   if (!catalog) throw new Error("상품을 찾을 수 없어요.");
+  const optionStock: Record<string, number> = {};
+  for (const g of catalog.optionGroups ?? []) {
+    for (const v of g.values) {
+      if (v.hasStock) optionStock[v.id] = input.optionStock?.[v.id] ?? v.defaultStock ?? 0;
+    }
+  }
   const listing: EventProductSeed = {
     id: genId("lst"),
     eventId,
@@ -348,6 +462,7 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
     deliveryType: input.deliveryType,
     stock: input.stock,
     visible: input.visible ?? true,
+    optionStock: Object.keys(optionStock).length > 0 ? optionStock : undefined,
   };
   saveEvents(loadEvents().map((e) => (e.id === eventId ? { ...e, products: [...e.products, listing] } : e)));
   return mergeListing(listing, catalog);
@@ -384,6 +499,25 @@ export async function updateEventProduct(eventProductId: string, patch: EventPro
   }
   const events = loadEvents();
   saveEvents(events.map((e) => ({ ...e, products: e.products.map((p) => (p.id === eventProductId ? { ...p, ...patch } : p)) })));
+}
+
+// 리스팅의 옵션값 하나의 재고를 직접 고쳐쓴다(관리자가 "이 회차엔 빨강이
+// 5개밖에 없어" 하고 조정하는 용도) — event_option_stock 스냅샷만 바뀌고
+// 카탈로그의 기본 재고(defaultStock)는 그대로 둔다.
+export async function updateEventOptionStock(eventProductId: string, optionValueId: string, stock: number): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("event_option_stock").upsert({ event_product_id: eventProductId, option_value_id: optionValueId, stock });
+    if (error) throw error;
+    return;
+  }
+  const events = loadEvents();
+  saveEvents(
+    events.map((e) => ({
+      ...e,
+      products: e.products.map((p) => (p.id === eventProductId ? { ...p, optionStock: { ...p.optionStock, [optionValueId]: stock } } : p)),
+    })),
+  );
 }
 
 export async function removeEventProduct(eventProductId: string): Promise<void> {
@@ -562,11 +696,15 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       product_name: item.productName,
       price_snapshot: item.price,
       quantity: item.quantity,
+      options: item.options ?? [],
     }));
     const { error: itemError } = await supabase.from("order_items").insert(itemRows);
     if (itemError) throw itemError;
     for (const item of input.items) {
       await supabase.rpc("decrement_stock", { p_event_product_id: item.productId, p_qty: item.quantity });
+      for (const opt of item.options ?? []) {
+        await supabase.rpc("decrement_option_stock", { p_event_product_id: item.productId, p_option_value_id: opt.optionValueId, p_qty: item.quantity });
+      }
     }
     return mapSupabaseOrder(orderRow, input.items);
   }
@@ -598,30 +736,48 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
   return order;
 }
 
-// 재고가 있는 리스팅(stock이 정해진 리스팅)만 골라 주문 수량만큼 차감한다(0
-// 밑으로는 안 내려감). stock이 undefined인 리스팅(재고 제한 없음)은 그대로 둔다.
-function decrementProductStock(events: MarketEventSeed[], items: OrderItem[]): MarketEventSeed[] {
+// 리스팅(event_products) 재고와 그 안의 옵션값별 재고(event_option_stock의
+// mock 버전인 optionStock)를 합쳐서 주문 수량만큼 차감/복구하는 공통 로직.
+// sign=1이면 차감(0 밑으로는 안 내려감), sign=-1이면 복구.
+function applyStockDelta(events: MarketEventSeed[], items: OrderItem[], sign: 1 | -1): MarketEventSeed[] {
   const deltaByProduct = new Map(items.map((i) => [i.productId, i.quantity]));
+  const optionDeltaByProduct = new Map<string, Record<string, number>>();
+  for (const i of items) {
+    if (!i.options || i.options.length === 0) continue;
+    const map = optionDeltaByProduct.get(i.productId) ?? {};
+    for (const opt of i.options) map[opt.optionValueId] = (map[opt.optionValueId] ?? 0) + i.quantity;
+    optionDeltaByProduct.set(i.productId, map);
+  }
   return events.map((e) => ({
     ...e,
     products: e.products.map((p) => {
       const qty = deltaByProduct.get(p.id);
-      if (!qty || p.stock === undefined) return p;
-      return { ...p, stock: Math.max(0, p.stock - qty) };
+      const optionDelta = optionDeltaByProduct.get(p.id);
+      let next = p;
+      if (qty && next.stock !== undefined) {
+        next = { ...next, stock: sign > 0 ? Math.max(0, next.stock - qty) : next.stock + qty };
+      }
+      if (optionDelta && next.optionStock) {
+        const optionStock = { ...next.optionStock };
+        for (const [optionValueId, q] of Object.entries(optionDelta)) {
+          if (optionStock[optionValueId] === undefined) continue;
+          optionStock[optionValueId] = sign > 0 ? Math.max(0, optionStock[optionValueId] - q) : optionStock[optionValueId] + q;
+        }
+        next = { ...next, optionStock };
+      }
+      return next;
     }),
   }));
 }
 
+// 재고가 있는 리스팅(stock이 정해진 리스팅)만 골라 주문 수량만큼 차감한다(0
+// 밑으로는 안 내려감). stock이 undefined인 리스팅(재고 제한 없음)은 그대로 둔다.
+function decrementProductStock(events: MarketEventSeed[], items: OrderItem[]): MarketEventSeed[] {
+  return applyStockDelta(events, items, 1);
+}
+
 function restoreProductStock(events: MarketEventSeed[], items: OrderItem[]): MarketEventSeed[] {
-  const deltaByProduct = new Map(items.map((i) => [i.productId, i.quantity]));
-  return events.map((e) => ({
-    ...e,
-    products: e.products.map((p) => {
-      const qty = deltaByProduct.get(p.id);
-      if (!qty || p.stock === undefined) return p;
-      return { ...p, stock: p.stock + qty };
-    }),
-  }));
+  return applyStockDelta(events, items, -1);
 }
 
 export async function listOrdersForProfile(profileId: string): Promise<Order[]> {
@@ -681,9 +837,13 @@ export async function updateOrderStatus(
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     if (isRestockingStatus(status)) {
-      const { data: itemRows } = await supabase.from("order_items").select("event_product_id, quantity").eq("order_id", orderId);
+      const { data: itemRows } = await supabase.from("order_items").select("event_product_id, quantity, options").eq("order_id", orderId);
       for (const item of itemRows ?? []) {
-        if (item.event_product_id) await supabase.rpc("increment_stock", { p_event_product_id: item.event_product_id, p_qty: item.quantity });
+        if (!item.event_product_id) continue;
+        await supabase.rpc("increment_stock", { p_event_product_id: item.event_product_id, p_qty: item.quantity });
+        for (const opt of item.options ?? []) {
+          await supabase.rpc("increment_option_stock", { p_event_product_id: item.event_product_id, p_option_value_id: opt.optionValueId, p_qty: item.quantity });
+        }
       }
     }
     const patch: Record<string, unknown> = { status };
@@ -1056,6 +1216,49 @@ function mapSupabaseAddress(row: Record<string, any>): Address {
   };
 }
 
+// product_option_values 행 -> 카탈로그 옵션값(이벤트 재고 정보 없이 구조만).
+function mapSupabaseOptionValue(row: Record<string, any>): ProductOptionValue {
+  return {
+    id: row.id,
+    name: row.name,
+    priceDelta: row.price_delta ?? 0,
+    hasStock: row.has_stock ?? false,
+    defaultStock: row.default_stock ?? undefined,
+    sortOrder: row.sort_order ?? 0,
+  };
+}
+
+// product_option_groups 행(+ 중첩된 product_option_values(*))을 카탈로그
+// 옵션 그룹 목록으로 변환 — 정렬 순서(sort_order)대로 정리해서 내려준다.
+function mapSupabaseOptionGroups(rows: Record<string, any>[] | undefined): ProductOptionGroup[] | undefined {
+  if (!rows || rows.length === 0) return undefined;
+  return rows
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      required: row.required ?? true,
+      multi: row.multi ?? false,
+      sortOrder: row.sort_order ?? 0,
+      values: (row.product_option_values ?? []).map(mapSupabaseOptionValue).sort((a: ProductOptionValue, b: ProductOptionValue) => a.sortOrder - b.sortOrder),
+    }))
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+// 이벤트 리스팅의 event_option_stock 행들을 optionValueId -> stock 맵으로.
+function eventOptionStockMap(rows: Record<string, any>[] | undefined): Map<string, number> {
+  return new Map((rows ?? []).map((r) => [r.option_value_id, r.stock]));
+}
+
+// 카탈로그 옵션 그룹(구조)에 특정 리스팅의 event_option_stock 값을 채워 넣는다.
+function mergeSupabaseOptionStock(groups: ProductOptionGroup[] | undefined, stockRows: Record<string, any>[] | undefined): ProductOptionGroup[] | undefined {
+  if (!groups) return undefined;
+  const stockMap = eventOptionStockMap(stockRows);
+  return groups.map((g) => ({
+    ...g,
+    values: g.values.map((v) => (v.hasStock ? { ...v, stock: stockMap.get(v.id) ?? v.defaultStock ?? 0 } : v)),
+  }));
+}
+
 function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
   return {
     id: row.id,
@@ -1074,11 +1277,12 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     // RLS상 비관리자에게는 이 값 자체가 null로 오므로 costPrice가 그냥
     // undefined가 된다(별도 분기 불필요).
     costPrice: Array.isArray(row.product_costs) ? row.product_costs[0]?.cost_price : row.product_costs?.cost_price,
+    optionGroups: mapSupabaseOptionGroups(row.product_option_groups),
   };
 }
 
-// event_products 행(+ 중첩된 products(*) 카탈로그 조인)을 화면이 쓰는 평평한
-// Product로 합친다. mock 모드의 mergeListing과 같은 역할.
+// event_products 행(+ 중첩된 products(*) 카탈로그 조인, event_option_stock(*))을
+// 화면이 쓰는 평평한 Product로 합친다. mock 모드의 mergeListing과 같은 역할.
 function mapSupabaseEventProduct(row: Record<string, any>): Product {
   const catalog = row.products ?? {};
   return {
@@ -1098,6 +1302,7 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     detailBlocks: catalog.detail_blocks && catalog.detail_blocks.length > 0 ? catalog.detail_blocks : undefined,
     stock: row.stock ?? undefined,
     visible: row.visible ?? true,
+    optionGroups: mergeSupabaseOptionStock(mapSupabaseOptionGroups(catalog.product_option_groups), row.event_option_stock),
   };
 }
 
@@ -1115,7 +1320,14 @@ function mapSupabaseEvent(row: Record<string, any>): MarketEvent {
 }
 
 function mapSupabaseOrderItem(row: Record<string, any>): OrderItem {
-  return { productId: row.event_product_id, productName: row.product_name, productEmoji: "📦", price: row.price_snapshot, quantity: row.quantity };
+  return {
+    productId: row.event_product_id,
+    productName: row.product_name,
+    productEmoji: "📦",
+    price: row.price_snapshot,
+    quantity: row.quantity,
+    options: row.options && row.options.length > 0 ? row.options : undefined,
+  };
 }
 
 function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
