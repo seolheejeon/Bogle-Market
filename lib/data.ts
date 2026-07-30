@@ -157,10 +157,14 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
     deliveryAt: overrides.deliveryAt,
     notice: source.notice,
   });
+  // 원가도 가격/재고와 마찬가지로 "원본 이벤트의 스냅샷"을 그대로 복사한다 —
+  // 마스터(카탈로그) 기준 원가가 아니라, 이 회차에서 실제로 쓰던 값을 이어받음.
+  const costs = await getEventProductCosts(source.products.map((p) => p.id));
   for (const p of source.products) {
     await addEventProduct(created.id, {
       catalogProductId: p.catalogProductId,
       price: p.price,
+      costPrice: costs[p.id],
       deliveryType: p.deliveryType,
       stock: p.stock,
       visible: p.visible,
@@ -187,7 +191,9 @@ export async function deleteEvent(id: string): Promise<void> {
 export async function listCatalogProducts(): Promise<CatalogProduct[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { data, error } = await supabase.from("products").select("*").order("name", { ascending: true });
+    // product_costs를 함께 embed — 이 함수는 관리자 화면에서만 호출되므로
+    // 안전하다(RLS가 어차피 비관리자에게는 이 조인을 null로 돌려준다).
+    const { data, error } = await supabase.from("products").select("*, product_costs(cost_price)").order("name", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(mapSupabaseCatalogProduct);
   }
@@ -212,6 +218,7 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
         storage: input.storage,
         eat: input.eat,
         description: input.description,
+        base_price: input.basePrice ?? 0,
       })
       .select()
       .single();
@@ -219,8 +226,17 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
       console.error("[lib/data] createCatalogProduct supabase insert 실패", error);
       throw error;
     }
+    // 원가는 별도 admin-only 테이블에 저장 — products insert가 끝난 뒤 새로
+    // 생긴 id로 upsert한다(값이 없으면 건드리지 않고 기본 0으로 남겨둠).
+    if (input.costPrice !== undefined) {
+      const { error: costError } = await supabase.from("product_costs").upsert({ product_id: data.id, cost_price: input.costPrice });
+      if (costError) {
+        console.error("[lib/data] createCatalogProduct 원가 저장 실패", costError);
+        throw costError;
+      }
+    }
     console.log("[lib/data] createCatalogProduct supabase insert 완료");
-    return mapSupabaseCatalogProduct(data);
+    return { ...mapSupabaseCatalogProduct(data), costPrice: input.costPrice };
   }
   const product: CatalogProduct = { ...input, id: genId("cat") };
   saveCatalogProducts([product, ...loadCatalogProducts()]);
@@ -242,10 +258,22 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     if (patch.storage !== undefined) row.storage = patch.storage;
     if (patch.eat !== undefined) row.eat = patch.eat;
     if (patch.description !== undefined) row.description = patch.description;
-    const { error } = await supabase.from("products").update(row).eq("id", catalogProductId);
-    if (error) {
-      console.error("[lib/data] updateCatalogProduct supabase update 실패", error);
-      throw error;
+    if (patch.basePrice !== undefined) row.base_price = patch.basePrice;
+    if (Object.keys(row).length > 0) {
+      const { error } = await supabase.from("products").update(row).eq("id", catalogProductId);
+      if (error) {
+        console.error("[lib/data] updateCatalogProduct supabase update 실패", error);
+        throw error;
+      }
+    }
+    if (patch.costPrice !== undefined) {
+      const { error: costError } = await supabase
+        .from("product_costs")
+        .upsert({ product_id: catalogProductId, cost_price: patch.costPrice, updated_at: new Date().toISOString() });
+      if (costError) {
+        console.error("[lib/data] updateCatalogProduct 원가 저장 실패", costError);
+        throw costError;
+      }
     }
     console.log("[lib/data] updateCatalogProduct supabase update 완료");
     return;
@@ -278,6 +306,10 @@ export async function deleteCatalogProduct(catalogProductId: string): Promise<vo
 export interface NewEventProductInput {
   catalogProductId: string;
   price: number;
+  // 이 이벤트에 추가하는 시점의 원가 스냅샷 — 보통 카탈로그 기준 원가를 그대로
+  // 넘기지만, 2+1/묶음 판매 등으로 이 회차만 원가가 다르면 호출부(화면)에서
+  // 미리 값을 바꿔 넘기면 된다. undefined면 원가를 기록하지 않는다(0으로 남음).
+  costPrice?: number;
   deliveryType?: EventType;
   stock?: number;
   visible?: boolean;
@@ -299,6 +331,10 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
       .select("*, products(*)")
       .single();
     if (error) throw error;
+    if (input.costPrice !== undefined) {
+      const { error: costError } = await supabase.from("event_product_costs").upsert({ event_product_id: data.id, cost_price: input.costPrice });
+      if (costError) throw costError;
+    }
     return mapSupabaseEventProduct(data);
   }
   const catalog = loadCatalogProducts().find((c) => c.id === input.catalogProductId);
@@ -308,6 +344,7 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
     eventId,
     catalogProductId: input.catalogProductId,
     price: input.price,
+    costPrice: input.costPrice,
     deliveryType: input.deliveryType,
     stock: input.stock,
     visible: input.visible ?? true,
@@ -318,6 +355,7 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
 
 export interface EventProductPatch {
   price?: number;
+  costPrice?: number;
   deliveryType?: EventType;
   stock?: number;
   visible?: boolean;
@@ -334,8 +372,14 @@ export async function updateEventProduct(eventProductId: string, patch: EventPro
     // 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
     if ("stock" in patch) row.stock = patch.stock ?? null;
     if (patch.visible !== undefined) row.visible = patch.visible;
-    const { error } = await supabase.from("event_products").update(row).eq("id", eventProductId);
-    if (error) throw error;
+    if (Object.keys(row).length > 0) {
+      const { error } = await supabase.from("event_products").update(row).eq("id", eventProductId);
+      if (error) throw error;
+    }
+    if (patch.costPrice !== undefined) {
+      const { error: costError } = await supabase.from("event_product_costs").upsert({ event_product_id: eventProductId, cost_price: patch.costPrice });
+      if (costError) throw costError;
+    }
     return;
   }
   const events = loadEvents();
@@ -351,6 +395,59 @@ export async function removeEventProduct(eventProductId: string): Promise<void> 
   }
   const events = loadEvents();
   saveEvents(events.map((e) => ({ ...e, products: e.products.filter((p) => p.id !== eventProductId) })));
+}
+
+// ---------- 원가/수익 (관리자 전용) ----------
+// product_costs/event_product_costs는 RLS가 is_admin()으로만 걸려 있어서
+// listEvents()/getEvent()/listCatalogProducts()가 쓰는 공개 쿼리에는 아예
+// 섞여 들어오지 않는다 — 관리자 화면에서 이 함수들을 따로 호출해서 이미
+// 불러온 이벤트 리스팅/카탈로그 상품에 화면 쪽에서 직접 매칭해 붙인다.
+
+// eventProductId -> 원가 스냅샷.
+export async function getEventProductCosts(eventProductIds: string[]): Promise<Record<string, number>> {
+  if (eventProductIds.length === 0) return {};
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.from("event_product_costs").select("*").in("event_product_id", eventProductIds);
+    if (error) throw error;
+    return Object.fromEntries((data ?? []).map((r: Record<string, any>) => [r.event_product_id, r.cost_price]));
+  }
+  const result: Record<string, number> = {};
+  for (const e of loadEvents()) {
+    for (const p of e.products) {
+      if (eventProductIds.includes(p.id) && p.costPrice !== undefined) result[p.id] = p.costPrice;
+    }
+  }
+  return result;
+}
+
+// eventProductId -> 취소 제외 총 판매 수량("예상 수익" 계산용 — 발주확인 전
+// 주문도 포함해서 지금까지 들어온 주문 기준으로 미리 보여준다. done 이후
+// refund_requested/refunded도 실제로는 반품될 수 있어 포함 여부가 갈릴 수
+// 있는데, 여기서는 "예상"이라는 표현에 맞춰 취소된 주문만 제외한다).
+export async function getSoldQuantities(eventId: string): Promise<Record<string, number>> {
+  const result: Record<string, number> = {};
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase
+      .from("order_items")
+      .select("event_product_id, quantity, orders!inner(event_id, status)")
+      .eq("orders.event_id", eventId)
+      .neq("orders.status", "cancelled");
+    if (error) throw error;
+    for (const row of data ?? []) {
+      if (!row.event_product_id) continue;
+      result[row.event_product_id] = (result[row.event_product_id] ?? 0) + row.quantity;
+    }
+    return result;
+  }
+  const orders = loadOrders().filter((o) => o.eventId === eventId && o.status !== "cancelled");
+  for (const o of orders) {
+    for (const item of o.items) {
+      result[item.productId] = (result[item.productId] ?? 0) + item.quantity;
+    }
+  }
+  return result;
 }
 
 // ---------- Notifications ----------
@@ -971,6 +1068,12 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     eat: row.eat ?? undefined,
     description: row.description ?? undefined,
     detailBlocks: row.detail_blocks && row.detail_blocks.length > 0 ? row.detail_blocks : undefined,
+    basePrice: row.base_price ?? 0,
+    // product_costs는 1:1 관계라 PostgREST가 보통 객체로 embed하지만, 관계
+    // 감지 방식에 따라 배열로 올 수도 있어 양쪽 다 방어적으로 처리한다.
+    // RLS상 비관리자에게는 이 값 자체가 null로 오므로 costPrice가 그냥
+    // undefined가 된다(별도 분기 불필요).
+    costPrice: Array.isArray(row.product_costs) ? row.product_costs[0]?.cost_price : row.product_costs?.cost_price,
   };
 }
 

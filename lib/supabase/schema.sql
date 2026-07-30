@@ -69,7 +69,21 @@ create table if not exists products (
   storage text,
   eat text,
   description text,
+  -- 새 이벤트에 이 상품을 추가할 때 기본값으로 복사되는 기준 판매가. 공개
+  -- 정보라(고객도 결국 event_products.price로 실제 판매가를 보게 됨) 다른
+  -- 컬럼처럼 그냥 products에 둔다 — 원가와 달리 숨길 필요가 없다.
+  base_price integer not null default 0 check (base_price >= 0),
   created_at timestamptz not null default now()
+);
+
+-- 카탈로그 상품의 기준 원가 — 관리자만 봐야 하는 값이라 products와 분리된
+-- 별도 테이블에 둔다. RLS를 is_admin()으로만 걸어서, 고객 화면이 쓰는 공개
+-- 쿼리(products/event_products)에는 이 값이 절대 섞여 들어올 수 없다(같은
+-- select 문에 join하지 않는 한 애초에 노출될 방법이 없음).
+create table if not exists product_costs (
+  product_id uuid primary key references products(id) on delete cascade,
+  cost_price integer not null default 0 check (cost_price >= 0),
+  updated_at timestamptz not null default now()
 );
 
 -- 이벤트별 상품 등록(리스팅) — 카탈로그 상품 하나를 이번 회차에 어떤
@@ -91,6 +105,15 @@ create table if not exists event_products (
   -- false면 고객 화면에서 숨김(삭제 없이 판매만 잠시 중단). 기본은 true.
   visible boolean not null default true,
   created_at timestamptz not null default now()
+);
+
+-- 이벤트 리스팅의 원가 스냅샷 — 상품을 이 이벤트에 추가한 시점의
+-- product_costs.cost_price를 복사해두고, 이후 카탈로그 원가가 바뀌어도 이
+-- 값은 그대로 유지된다(event_products.price가 이미 하는 것과 같은 스냅샷
+-- 방식). product_costs와 마찬가지로 관리자만 조회 가능한 별도 테이블.
+create table if not exists event_product_costs (
+  event_product_id uuid primary key references event_products(id) on delete cascade,
+  cost_price integer not null default 0 check (cost_price >= 0)
 );
 
 -- 주문은 정확히 하나의 이벤트에만 속한다 — 장바구니에 마감일/배송일이 다른
@@ -207,6 +230,8 @@ alter table order_items enable row level security;
 alter table notifications enable row level security;
 alter table store_settings enable row level security;
 alter table banners enable row level security;
+alter table product_costs enable row level security;
+alter table event_product_costs enable row level security;
 
 -- SECURITY DEFINER helper: checks admin status while bypassing RLS itself.
 -- Policies must call this instead of subquerying `profiles` directly — a
@@ -249,6 +274,18 @@ create policy "admins manage products" on products for all
   with check (is_admin());
 drop policy if exists "admins manage event_products" on event_products;
 create policy "admins manage event_products" on event_products for all
+  using (is_admin())
+  with check (is_admin());
+
+-- 원가는 관리자만 조회/수정 가능 — select using까지 is_admin()으로 걸어서
+-- 고객(비로그인 포함)은 이 테이블에 아예 접근할 수 없다(다른 공개 테이블과
+-- 달리 "누구나 읽기" 정책이 없음).
+drop policy if exists "admins manage product costs" on product_costs;
+create policy "admins manage product costs" on product_costs for all
+  using (is_admin())
+  with check (is_admin());
+drop policy if exists "admins manage event product costs" on event_product_costs;
+create policy "admins manage event product costs" on event_product_costs for all
   using (is_admin())
   with check (is_admin());
 

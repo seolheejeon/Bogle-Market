@@ -6,6 +6,7 @@ import type { CatalogProduct, ProductDetailBlock } from "@/types";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { PhotoUploader } from "@/components/admin/PhotoUploader";
 import { DetailBlockEditor } from "@/components/admin/DetailBlockEditor";
+import { formatPrice } from "@/lib/format";
 
 // 상품은 하나만 존재하고 여러 이벤트가 재사용한다 — 여기서 고치는 사진/설명은
 // 이 상품을 쓰는 모든 이벤트에 바로 반영된다. 가격·재고·노출은 이벤트마다
@@ -93,6 +94,10 @@ export default function AdminProductsPage() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13px] font-semibold">{p.name}</p>
                 <p className="truncate text-[12px] text-text-muted">{[p.origin, p.weight, p.storage].filter(Boolean).join(" · ") || "추가 정보 없음"}</p>
+                <p className="truncate text-[11.5px] text-text-muted">
+                  기준가 {formatPrice(p.basePrice ?? 0)}
+                  {p.costPrice !== undefined && ` · 원가 ${formatPrice(p.costPrice)}`}
+                </p>
               </div>
               <div className="flex gap-1.5">
                 <button onClick={() => setEditingId(p.id)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
@@ -123,6 +128,8 @@ function CatalogProductForm({
 }) {
   const [emoji, setEmoji] = useState(initial?.emoji ?? "📦");
   const [name, setName] = useState(initial?.name ?? "");
+  const [basePrice, setBasePrice] = useState(initial?.basePrice !== undefined ? String(initial.basePrice) : "");
+  const [costPrice, setCostPrice] = useState(initial?.costPrice !== undefined ? String(initial.costPrice) : "");
   const [origin, setOrigin] = useState(initial?.origin ?? "");
   const [weight, setWeight] = useState(initial?.weight ?? "");
   const [storage, setStorage] = useState(initial?.storage ?? "");
@@ -147,6 +154,8 @@ function CatalogProductForm({
       await onSubmit({
         name: name.trim(),
         emoji: emoji || "📦",
+        basePrice: basePrice.trim() === "" ? 0 : Math.max(0, Number(basePrice) || 0),
+        costPrice: costPrice.trim() === "" ? 0 : Math.max(0, Number(costPrice) || 0),
         origin: origin || undefined,
         weight: weight || undefined,
         storage: storage || undefined,
@@ -181,6 +190,33 @@ function CatalogProductForm({
         <input className="w-28 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" placeholder="보관법" value={storage} onChange={(e) => setStorage(e.target.value)} />
         <input className="w-28 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" placeholder="조리법" value={eat} onChange={(e) => setEat(e.target.value)} />
       </div>
+      <div className="flex flex-wrap gap-2">
+        <label className="min-w-[110px] flex-1 text-[11.5px] font-semibold text-text-muted">
+          기준 판매가
+          <input
+            className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+            placeholder="0"
+            type="number"
+            min={0}
+            value={basePrice}
+            onChange={(e) => setBasePrice(e.target.value)}
+          />
+        </label>
+        <label className="min-w-[110px] flex-1 text-[11.5px] font-semibold text-text-muted">
+          원가 <span className="font-normal">(관리자만 봐요)</span>
+          <input
+            className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+            placeholder="0"
+            type="number"
+            min={0}
+            value={costPrice}
+            onChange={(e) => setCostPrice(e.target.value)}
+          />
+        </label>
+      </div>
+      <p className="-mt-1.5 text-[11px] text-text-muted">
+        새 이벤트에 이 상품을 추가하면 기준 판매가·원가가 기본값으로 채워지고, 그 회차에서만 다르게(2+1 묶음 등) 바꿀 수 있어요.
+      </p>
       <textarea
         className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
         rows={3}

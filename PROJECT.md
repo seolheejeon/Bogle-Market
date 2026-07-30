@@ -3,7 +3,7 @@
 보글마켓 개발 진행상황과 주요 기획 결정을 기록하는 문서입니다.
 **기능이 완료되거나 기획이 바뀔 때마다 이 문서도 함께 업데이트합니다.**
 
-마지막 업데이트: 2026-07-30 (운영 UX 개선 8종 — 배송방법 선택형 송장입력, 이벤트 저장 상태 표시, 배송일 날짜만 입력, 상품상세 sticky 헤더, 카테고리 복귀 동선, 택배 날짜탭 제거, 이벤트 뱃지, 브랜드 컬러 리뉴얼)
+마지막 업데이트: 2026-07-30 (상품 마스터 원가/판매가 + 수익 계산 시스템 — 원가는 관리자만 조회 가능한 별도 테이블로 분리)
 
 ---
 
@@ -237,6 +237,21 @@
 - **⑧ 브랜드 컬러 리뉴얼** — 기존 초록 계열("초록 쇼핑몰" 느낌)을 사용자가 제공한 홍보물(베이지/크림 배경 + 다크 브라운 텍스트 + 테라코타 오렌지 포인트)에 맞춰 전면 재조정. `app/globals.css`의 CSS 커스텀 프로퍼티(`--accent`/`--bg-page`/`--bg-card`/`--bg-sunken`/`--text`/`--text-muted`/`--border`)와 라이트/다크 모드 양쪽을 다시 정의 — 컴포넌트 코드는 전부 이 변수(또는 `bg-accent` 등 Tailwind 별칭)를 통해서만 색을 쓰고 있어서 값만 바꿔도 앱 전체(고객 화면 + 관리자 화면)에 일괄 반영됨. 배송방식/상태 뱃지(문고리·사다드림·택배·특가·HOT·NEW·예약상품·마감임박·주문상태 7종)도 새 팔레트에 맞게 톤을 다시 잡되 서로 구분되는 색상은 유지. 하드코딩돼 있던 민트그린 그라디언트 2곳(홈 히어로, 담기 애니메이션)도 새 accent-soft 톤으로 교체. 브라우저로 라이트/다크 모드 양쪽의 배경·텍스트·버튼 색이 실제로 새 값(`#f6ede0`/`#4a3826`/`#c9532f` 등)으로 렌더링되는 것을 computed style로 직접 확인
 - 브라우저로 검증(mock 모드): 배송중 처리에서 문고리 이벤트 주문은 "문고리"가 기본 선택된 채 입력 없이 바로 전환되고, 택배로 바꾸면 택배사/송장번호 입력이 나타나는 것 확인. 이벤트 수정 화면에서 뱃지를 "HOT"→"마감임박"으로 바꾸면 즉시 "✓ 저장 완료"가 뜨고 목록/상품상세/이벤트상세에 새 뱃지가 정확히 반영되는 것 확인. 배송일 입력이 날짜 선택기로만 동작하는 것, 택배 카테고리에서 날짜탭 없이 바로 상품이 나오는 것 확인
 
+**배너 이미지 크롭 버그 수정**
+- 홈 배너가 고정된 짧은 박스(`h-40`/`h-48`) + `object-cover`로 렌더링되고 있어서, 세로로 긴 포스터형 배너 이미지를 올리면 위쪽 일부만 남기고 다 잘려나갔음. `w-full h-auto`로 바꿔 이미지 자체의 원본 비율대로 전체가 보이도록 수정(`components/Home/HomeView.tsx`)
+
+**상품 마스터 원가/판매가 + 수익 계산 시스템**
+- 배경: 상품 저장이 mock 모드(브라우저 localStorage)로 동작 중이던 문제를 고치는 과정에서(Netlify 환경변수 미설정 확인 및 안내로 해결), 이어서 "카탈로그 상품에 원가/판매가를 저장하고, 이벤트별로 스냅샷·override 가능하게, 수익도 자동 계산해달라"는 요청을 받아 진행
+- **카탈로그 상품(`products`)에 기준 판매가(`base_price`) 추가** — 새 이벤트에 상품을 추가할 때 기본값으로 복사되는 값. 공개 정보라 origin/weight 등과 같은 컬럼으로 저장
+- **원가는 완전히 별도의 admin-only 테이블로 분리**(`product_costs`, `event_product_costs`) — RLS를 `is_admin()`으로만 걸어서 고객(비로그인 포함)은 이 테이블에 접근 자체가 불가능함. `CatalogProduct`/`Product` 타입에 원가 필드를 그냥 얹는 방식은 고르지 않았는데, 그렇게 하면 고객 화면이 쓰는 공개 쿼리(`listEvents()`/`getEvent()`)의 응답 JSON에 원가가 그대로 실려서 브라우저 개발자도구 네트워크 탭으로 누구나 볼 수 있게 되기 때문 — "고객은 원가/수익 정보를 절대 볼 수 없어야 한다"는 요구사항을 UI에서 안 보여주는 정도가 아니라 DB 레벨에서 원천 차단
+  - `lib/data.ts`에 `getEventProductCosts(eventProductIds)` / `getSoldQuantities(eventId)`를 새로 추가 — 관리자 화면에서만 호출되고, 이미 불러온 이벤트 리스팅에 화면 쪽에서 직접 매칭해 붙인다(공개 데이터 흐름과 완전히 분리)
+  - `listCatalogProducts()`는 관리자 전용 함수이므로 `product_costs`를 안전하게 embed해서 `CatalogProduct.costPrice`로 내려줌
+- **이벤트에 상품을 추가하면 기준 판매가·원가가 자동으로 복사**되어 입력란에 미리 채워짐(`AddExistingProductForm`) — 2+1/묶음 판매처럼 이 회차만 다르게 팔고 싶으면 추가하기 전에 값을 바꾸면 됨(override)
+- **가격 스냅샷**: 리스팅(`event_products.price`)은 이미 독립 컬럼이라 마스터가 바뀌어도 안 바뀌었는데, 원가도 `event_product_costs`라는 리스팅별 스냅샷 테이블로 똑같이 동작하게 함 — 이벤트 수정 화면(`EventProductRow`)에서 가격과 함께 원가도 그 회차만 수정 가능. 이벤트 복제(`duplicateEvent`)도 마스터가 아니라 **원본 이벤트의 원가 스냅샷을 그대로** 복사함
+- **수익 계산**: 개당 예상수익(판매가－원가)과, 취소된 주문을 제외한 실제 판매수량을 곱한 누적 예상수익을 이벤트 상품 목록의 각 줄과 이벤트 전체 합계에 표시(`app/admin/events/[id]/page.tsx`) — "예상"이라는 표현대로 발주확인 전 주문도 포함해서 지금까지 들어온 주문 기준으로 미리 보여줌(반품/환불까지 제외하는 엄격한 net 계산은 아님)
+- 브라우저로 검증(mock 모드): 카탈로그 상품에 기준가/원가 입력 → 그 상품을 새 이벤트에 추가하니 가격·원가 입력란에 정확히 자동으로 채워지는 것 확인. 기존에 이미 추가돼 있던 리스팅(마스터 원가 설정 이전에 추가됨)은 원가 0원 그대로 유지되는 것을 확인(스냅샷 동작 검증). 개당 예상수익·누적 예상수익 계산이 정확한 것, 고객 상품 상세 페이지 어디에도 "원가"라는 문자열 자체가 전혀 나타나지 않는 것을 확인
+- ⚠️ **배포 시 확인 필요**: 실제 Supabase 프로젝트에는 아직 `base_price`/`product_costs`/`event_product_costs`가 없음 — 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 먼저 실행해야 함(안 하면 상품 등록/이벤트 상품 추가가 에러로 실패함)
+
 # 진행 중인 기능
 
 - **카드/카카오페이 결제**: Toss Payments 키가 없어서 지금은 무통장입금과 동일하게 관리자가 수동으로 확인하는 방식으로 대체 중
@@ -253,8 +268,7 @@
 - [ ] 재고 차감(`decrement_stock`)이 부족분을 그냥 0으로 클램프할 뿐 거부하지 않음 — 동시에 여러 명이 마지막 재고를 주문하면 이론적으로 재고 이상으로 판매될 수 있음(이벤트별 판매 정책 작업 중 확인, 지금 규모에선 발생 확률 낮은 레이스 컨디션이라 별도 항목으로만 남김)
 
 **기존에 알려져 있던 항목**
-- [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트의 `events.is_flash`(boolean) → `events.badge`(text enum) 마이그레이션 미적용 — 적용 전까지는 이벤트 등록/수정 자체가 실패함(존재하지 않는 `badge` 컬럼에 쓰려고 시도하므로 배너와 달리 조용히 안 되는 게 아니라 에러가 남). 아래 DB 구조 표의 `events` 행 및 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
-- [ ] 실제 Supabase 프로젝트에 `banners` 테이블 마이그레이션 미적용 — `lib/supabase/schema.sql`을 SQL 에디터에서 한 번 더 실행해야 배너 관리 기능이 실 서비스에서 동작함(적용 전까지는 자동 슬라이드로만 동작, 에러 없음)
+- [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 `products.base_price`/`product_costs`/`event_product_costs` 마이그레이션 미적용 — 적용 전까지는 상품 등록·수정, 이벤트에 상품 추가가 에러로 실패함(존재하지 않는 컬럼/테이블에 쓰려고 시도). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [ ] 스마트택배 API 키 발급 후 `SWEETTRACKER_API_KEY` 환경변수 설정 + `app/api/tracking/route.ts`의 응답 필드명/택배사 코드(`t_code`)를 실제 응답과 대조 확인 (지금은 키가 없어 항상 "준비 중" 폴백으로만 동작 확인함)
 - [ ] Toss Payments 실제 가맹점 키 연동 (카드/카카오페이 자동결제)
 - [ ] 인천 이음카드 온라인 결제 연동 방법 조사
@@ -281,8 +295,10 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `profiles` | id(=auth.users.id), username(unique), nickname, phone(unique), is_admin | 1:1 auth 연동. 이메일은 auth.users에만 있고 이 테이블엔 없음(사용자에게 절대 노출 안 함). `is_admin=true`가 관리자 |
 | `addresses` | id, profile_id, name, phone, zonecode, road_address, apartment_name, detail_address, entrance_method, memo, is_default | 회원 배송지. Daum 주소검색으로만 입력받음 — `road_address`/`zonecode`는 검색 결과 그대로, `apartment_name`은 검색 결과가 공동주택일 때만 채워지는 값(사용자가 입력하는 항목 아님, 관리자 아파트별 필터용), `detail_address`(동/호 등)만 사용자가 직접 입력. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, badge(NONE/SALE/HOT/NEW/RESERVE/DEADLINE), deadline_at, delivery_at, notice | 공동구매 회차. `badge`는 예전엔 `is_flash`(boolean)였음 — `badge='SALE'`만 예외적으로 주문 마감 정책(`lib/order-policy.ts`)에 영향을 주고 나머지는 순수 노출용 뱃지. ⚠️ 실제 Supabase 프로젝트는 아직 `is_flash` 컬럼 그대로라 마이그레이션 필요(TODO 참고) |
-| `products` | id, name, emoji, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, eat, description | **카탈로그 상품** — 이벤트와 무관하게 상품당 한 행만 존재하는 "내용물"(사진/설명/원산지 등). 같은 상품이 여러 회차에 걸려도 여기엔 한 번만 있고, 아래 `event_products`가 이 id를 재사용함. 삭제하려는 상품이 `event_products`에서 쓰이고 있으면 FK가 막음(에러코드 `23503`) |
+| `products` | id, name, emoji, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, eat, description, base_price | **카탈로그 상품** — 이벤트와 무관하게 상품당 한 행만 존재하는 "내용물"(사진/설명/원산지 등). 같은 상품이 여러 회차에 걸려도 여기엔 한 번만 있고, 아래 `event_products`가 이 id를 재사용함. 삭제하려는 상품이 `event_products`에서 쓰이고 있으면 FK가 막음(에러코드 `23503`). `base_price`는 새 이벤트에 추가할 때 기본값으로 복사되는 기준 판매가(공개 정보) |
+| `product_costs` | product_id(PK, →products), cost_price, updated_at | 카탈로그 상품의 **기준 원가** — `products`와 분리된 admin-only 테이블(RLS가 `is_admin()`으로만 select까지 걸림). 고객 화면이 쓰는 공개 쿼리에는 이 값이 절대 섞여 들어올 수 없음(같은 select에 join하지 않는 한 노출될 방법 자체가 없음) |
 | `event_products` | id, event_id, product_id(→products), price, delivery_type, stock, visible | **이벤트별 상품 리스팅** — 옛 `products` 테이블이 하던 역할(이벤트에 속한 판매 정보)을 그대로 가져오되 내용은 `product_id`로 카탈로그를 참조. `price`/`delivery_type`/`stock`/`visible`은 리스팅마다 독립적이라, 같은 카탈로그 상품도 회차별로 다른 가격·재고·노출 여부를 가질 수 있음. `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `stock`이 null이면 재고 제한 없음, 값이 있으면 그 수량만큼만 판매되고 0이면 품절. `visible=false`면 고객 화면에서 이 리스팅만 숨김(카탈로그 상품 자체나 다른 회차 리스팅엔 영향 없음) — RLS도 `visible or is_admin()`으로 비노출 리스팅을 비관리자에게 숨김. 화면(`Product` 타입)에는 `products`와 조인한 평평한 모양으로 합쳐져서 전달됨(`catalogProductId`로 원본 카탈로그 id를 알 수 있음) |
+| `event_product_costs` | event_product_id(PK, →event_products), cost_price | 이벤트 리스팅의 **원가 스냅샷** — 상품을 이 이벤트에 추가한 시점의 `product_costs.cost_price`를 복사해두고, 이후 카탈로그 원가가 바뀌어도 유지됨(`event_products.price`가 이미 하는 스냅샷 방식과 동일). `product_costs`와 마찬가지로 admin-only RLS |
 | `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, cancel_requested, cancel_reason, courier_code, tracking_number, total | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용). `status`는 `wait`→`paid`→`confirmed`(발주확인)→`ship`→`done` 순서로 진행하고, `done` 이후 `refund_requested`/`refunded`가 곁가지로 붙을 수 있으며 `wait`/`paid` 단계에서는 고객이 직접 `cancelled`로 바꿀 수 있음(RLS/RPC로 서버에서도 강제). `cancel_requested`는 발주확인 이후 고객이 취소를 "요청"했는지 나타내는 플래그 — status는 그대로 두고(배송 준비 계속 진행) 관리자가 승인(cancelled로 전환)하거나 거절(플래그만 해제)할 때까지 대기. `cancel_reason`은 고객이 남긴 취소 사유(선택). `courier_code`/`tracking_number`는 배송중(ship) 처리 시 관리자가 입력 — 스마트택배 API의 택배사 코드 기준(`types/index.ts`의 `COURIER_LABEL`), 문고리/사다드림 주문은 항상 null |
 | `order_items` | id, order_id, event_product_id(→event_products), product_name, price_snapshot, quantity | 주문 상품 스냅샷. `event_product_id`는 카탈로그 분리 이전엔 `product_id`였던 컬럼 — 가리키는 대상(리스팅 id)은 동일해서 주문/재고/취소 로직은 변경 없음. TS 쪽 `OrderItem.productId` 필드명은 그대로 유지(DB 컬럼명만 바뀜) |
 | `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
@@ -314,6 +330,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 - 알림 발송/배너 연결의 상품·이벤트 선택을 실시간 검색 콤보박스(`SearchPicker`)로 통일, 상품 선택은 이벤트별 리스팅이 아닌 카탈로그 상품 기준으로 표시
 - 배송중 처리를 배송방법(문고리/사다드림/택배/직접전달) 선택형으로 개편 — 택배일 때만 택배사·송장번호 입력, 기본값은 이벤트 배송방식을 따름
 - 이벤트 수정 화면에 저장 상태(저장 중/완료/실패) 표시, 배송일은 날짜만 입력, 이벤트 뱃지(없음/특가/HOT/NEW/예약상품/마감임박) 설정 추가
+- 카탈로그 상품에 기준 판매가/원가 저장, 이벤트에 상품 추가 시 자동 복사(회차별 override 가능), 원가는 별도 admin-only 테이블이라 고객 화면에 절대 노출 안 됨, 이벤트 상품별 예상수익(개당·누적) 자동 계산
 
 **계획**
 - 매출/정산 리포트 (현재 대시보드는 오늘 매출만 단순 합산)

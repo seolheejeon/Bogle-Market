@@ -31,6 +31,15 @@ export interface CatalogProduct {
   eat?: string;
   description?: string;
   detailBlocks?: ProductDetailBlock[];
+  // 새 이벤트에 이 상품을 추가할 때 기본값으로 복사되는 기준 판매가 — 공개
+  // 정보라 다른 필드처럼 products 테이블에 그대로 저장된다. 실제 판매가는
+  // 이벤트별 리스팅(event_products.price)이 독립적으로 갖는다.
+  basePrice?: number;
+  // 기준 원가 — 관리자에게만 보여야 하는 값이라 products/CatalogProduct와는
+  // 별도의 admin-only 테이블(product_costs, RLS is_admin()만 조회 가능)에서
+  // 온다. listCatalogProducts()가 관리자 화면에서만 호출되기 때문에 이 타입에
+  // 같이 둬도 고객 화면에는 절대 노출되지 않는다.
+  costPrice?: number;
 }
 
 // 이벤트에 실제로 노출되는 상품(리스팅) — 카탈로그 상품 하나를 이번 회차에
@@ -103,6 +112,12 @@ export interface EventProductSeed {
   eventId: string;
   catalogProductId: string;
   price: number;
+  // 상품을 이 이벤트에 추가한 시점의 원가 스냅샷 — 이후 카탈로그 원가(기준
+  // 원가)가 바뀌어도 이 값은 그대로 유지된다(가격 스냅샷과 같은 방식). mock
+  // 모드에는 관리자/고객을 가르는 실제 접근 제어가 없어서(브라우저 localStorage
+  // 하나뿐) 다른 모든 값처럼 그냥 이 안에 둔다 — 실 서비스(Supabase)에서는
+  // event_product_costs라는 별도 admin-only 테이블에 저장된다.
+  costPrice?: number;
   deliveryType?: EventType;
   stock?: number;
   visible?: boolean;
