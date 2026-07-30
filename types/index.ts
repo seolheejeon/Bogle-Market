@@ -66,11 +66,26 @@ export interface Product {
   visible?: boolean;
 }
 
+// 이벤트 카드에 붙는 판매용 뱃지 — 배송방식 뱃지(EventTypeBadge)와는 별개로
+// 관리자가 이벤트 수정 화면에서 직접 고른다. SALE(특가)만 예외적으로
+// lib/order-policy.ts의 마감 정책(STRICT_DEADLINE)에도 영향을 준다 — 나머지는
+// 순수 노출용 라벨이라 주문 로직과 무관하다.
+export type EventBadge = "NONE" | "SALE" | "HOT" | "NEW" | "RESERVE" | "DEADLINE";
+
+export const EVENT_BADGE_LABEL: Record<EventBadge, string> = {
+  NONE: "없음",
+  SALE: "특가",
+  HOT: "HOT",
+  NEW: "NEW",
+  RESERVE: "예약상품",
+  DEADLINE: "마감임박",
+};
+
 export interface MarketEvent {
   id: string;
   type: EventType;
   title: string;
-  isFlash?: boolean;
+  badge: EventBadge;
   deadlineAt: string; // ISO
   deliveryAt: string; // ISO
   notice: string;
@@ -97,7 +112,7 @@ export interface MarketEventSeed {
   id: string;
   type: EventType;
   title: string;
-  isFlash?: boolean;
+  badge: EventBadge;
   deadlineAt: string;
   deliveryAt: string;
   notice: string;

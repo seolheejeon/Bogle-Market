@@ -30,7 +30,7 @@ export function HomeView() {
     listBanners().then(setBanners);
   }, []);
 
-  const flash = events?.find((e) => e.isFlash);
+  const flash = events?.find((e) => e.badge === "SALE");
   const door = events ? nearestOfType(events, "DOOR") : undefined;
   const group = events ? nearestOfType(events, "GROUP_BUY") : undefined;
 
@@ -173,7 +173,7 @@ export function HomeView() {
           href={`/product/${autoHeroSlides[activeIndex].product.id}`}
           {...heroPointerProps}
           className="flex touch-pan-y items-stretch gap-3 overflow-hidden rounded-2xl p-4 select-none active:cursor-grabbing sm:cursor-grab"
-          style={{ background: "linear-gradient(135deg, var(--accent-soft), #d7f3e3)" }}
+          style={{ background: "linear-gradient(135deg, var(--accent-soft), #f0d2b8)" }}
         >
           <div className="flex min-w-0 flex-1 flex-col justify-center py-1">
             <p className="text-[13px] font-semibold text-accent-dark">{autoHeroSlides[activeIndex].eyebrow}</p>

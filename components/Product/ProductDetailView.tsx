@@ -4,13 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { findProductWithEvent } from "@/lib/data";
 import type { MarketEvent, Product } from "@/types";
+import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice, formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
 import { isEventOrderable } from "@/lib/order-policy";
 import { useCart } from "@/lib/cart-context";
 import { ProductDetailContent } from "@/components/Product/ProductDetailContent";
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
 import { ProductPhoto, isPhotoUrl } from "@/components/ProductPhoto";
-import { EventTypeBadge } from "@/components/Badge";
+import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 
 // A small clone of the product photo flies from the "담기" button to the
 // header's cart icon as lightweight visual confirmation that something was
@@ -36,7 +37,7 @@ function flyToCart(fromEl: HTMLElement, photo: string) {
     alignItems: "center",
     justifyContent: "center",
     fontSize: "18px",
-    background: "var(--accent-soft, #d7f3e3)",
+    background: "var(--accent-soft, #f7e4d3)",
     boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
     transition: "transform 0.55s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.55s ease",
   });
@@ -88,6 +89,20 @@ export function ProductDetailView({ productId }: { productId: string }) {
   if (data === null) return <p className="p-4 text-sm text-text-muted">상품을 찾을 수 없어요.</p>;
 
   const { product, event } = data;
+
+  // 카테고리 화면(문고리/사다드림/택배 탭 + 날짜)에서 들어온 경우, "←"를 누르면
+  // 이벤트 상세가 아니라 방금 보던 그 화면(선택했던 탭/날짜/스크롤 위치까지)으로
+  // 그대로 돌아간다 — router.back()은 진짜 브라우저 뒤로가기라 CategoryView가
+  // URL에 저장해둔 선택 상태와 브라우저의 스크롤 복원을 그대로 활용한다. 직접
+  // 링크로 들어와 뒤로 갈 곳이 없을 때만 이벤트 상세로 대체 이동한다.
+  function goBack() {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push(`/event/${event.id}`);
+    }
+  }
+
   const photos = product.photos && product.photos.length > 0 ? product.photos : [product.emoji];
   // 이미 장바구니에 담은 수량까지 합쳐서 재고를 넘지 않게 한다.
   const inCart = cart[product.id] || 0;
@@ -106,10 +121,16 @@ export function ProductDetailView({ productId }: { productId: string }) {
 
   return (
     <div>
-      <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <button onClick={() => router.push(`/event/${event.id}`)} className="p-1 text-xl text-text">
+      <div className="sticky top-[71px] z-10 flex items-center gap-2 border-b border-border bg-bg-card px-4 py-2.5">
+        <button onClick={goBack} className="shrink-0 p-1 text-xl text-text" aria-label="뒤로가기">
           ‹
         </button>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[11px] font-semibold text-text-muted">
+            {EVENT_TYPE_LABEL[product.deliveryType ?? event.type]} · {formatEventDateChip(event.deliveryAt)}
+          </p>
+          <p className="truncate text-[13.5px] leading-tight font-extrabold">{product.name}</p>
+        </div>
       </div>
       <div className="p-4">
         <div className="relative flex aspect-square w-full items-center justify-center rounded-2xl bg-accent-soft text-[76px]">
@@ -137,7 +158,8 @@ export function ProductDetailView({ productId }: { productId: string }) {
         )}
 
         <button onClick={() => router.push(`/event/${event.id}`)} className="mt-3.5 flex items-center gap-1.5">
-          <EventTypeBadge type={product.deliveryType ?? event.type} flash={event.isFlash} />
+          <EventTypeBadge type={product.deliveryType ?? event.type} />
+          <EventBadgeTag badge={event.badge} />
           <span className="text-[12px] font-semibold text-text-muted">{event.title}</span>
         </button>
         <p className="mt-1 text-[12px] text-text-muted">

@@ -111,7 +111,7 @@ export async function createEvent(input: Omit<MarketEvent, "id" | "products">): 
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase
       .from("events")
-      .insert({ type: input.type, title: input.title, is_flash: input.isFlash ?? false, deadline_at: input.deadlineAt, delivery_at: input.deliveryAt, notice: input.notice })
+      .insert({ type: input.type, title: input.title, badge: input.badge, deadline_at: input.deadlineAt, delivery_at: input.deliveryAt, notice: input.notice })
       .select()
       .single();
     if (error) throw error;
@@ -129,7 +129,7 @@ export async function updateEvent(id: string, patch: Partial<Omit<MarketEvent, "
     const row: Record<string, unknown> = {};
     if (patch.type !== undefined) row.type = patch.type;
     if (patch.title !== undefined) row.title = patch.title;
-    if (patch.isFlash !== undefined) row.is_flash = patch.isFlash;
+    if (patch.badge !== undefined) row.badge = patch.badge;
     if (patch.deadlineAt !== undefined) row.deadline_at = patch.deadlineAt;
     if (patch.deliveryAt !== undefined) row.delivery_at = patch.deliveryAt;
     if (patch.notice !== undefined) row.notice = patch.notice;
@@ -152,7 +152,7 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
   const created = await createEvent({
     type: source.type,
     title: overrides.title,
-    isFlash: source.isFlash,
+    badge: source.badge,
     deadlineAt: overrides.deadlineAt,
     deliveryAt: overrides.deliveryAt,
     notice: source.notice,
@@ -1003,7 +1003,7 @@ function mapSupabaseEvent(row: Record<string, any>): MarketEvent {
     id: row.id,
     type: row.type,
     title: row.title,
-    isFlash: row.is_flash,
+    badge: row.badge ?? "NONE",
     deadlineAt: row.deadline_at,
     deliveryAt: row.delivery_at,
     notice: row.notice ?? "",

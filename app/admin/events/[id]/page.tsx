@@ -5,8 +5,9 @@ import Link from "next/link";
 import { getEvent, updateEvent, listCatalogProducts, addEventProduct, updateEventProduct, removeEventProduct } from "@/lib/data";
 import type { CatalogProduct, EventType, MarketEvent, Product } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
-import { formatPrice } from "@/lib/format";
+import { formatPrice, toDateInputValue, dateInputValueToIso } from "@/lib/format";
 import { ProductPhoto } from "@/components/ProductPhoto";
+import { EventBadgePicker } from "@/components/admin/EventBadgePicker";
 
 const DELIVERY_TYPES: EventType[] = ["DOOR", "GROUP_BUY", "PARCEL"];
 
@@ -19,7 +20,10 @@ function toLocalInputValue(iso: string) {
 export default function AdminEventEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [event, setEvent] = useState<MarketEvent | null | undefined>(undefined);
-  const [saving, setSaving] = useState(false);
+  // 이 화면은 각 필드가 blur될 때마다 자동 저장되는 방식이라 "저장 버튼"이
+  // 따로 없다 — 대신 지금 이 상태(저장 중/완료/실패)를 명확히 보여줘서 자동
+  // 저장이라는 것과 실제로 저장됐는지를 사용자가 헷갈리지 않게 한다.
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
   function refresh() {
@@ -31,21 +35,30 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
   if (event === null) return <p className="text-sm text-text-muted">이벤트를 찾을 수 없어요.</p>;
 
   async function saveEventFields(patch: Partial<MarketEvent>) {
-    setSaving(true);
+    setSaveStatus("saving");
     setError(null);
     try {
       await updateEvent(id, patch);
       refresh();
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1800);
     } catch (e) {
       setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
-    } finally {
-      setSaving(false);
+      setSaveStatus("error");
     }
   }
 
   return (
     <div className="max-w-2xl">
-      <p className="mb-4 text-[15px] font-bold">{event.title} 관리</p>
+      <div className="mb-4 flex items-center justify-between">
+        <p className="text-[15px] font-bold">{event.title} 관리</p>
+        <span className="text-[11.5px] font-semibold">
+          {saveStatus === "saving" && <span className="text-text-muted">저장 중...</span>}
+          {saveStatus === "saved" && <span className="text-accent-dark">✓ 저장 완료</span>}
+          {saveStatus === "error" && <span className="text-red-600">⚠ 저장 실패</span>}
+        </span>
+      </div>
+      <p className="mb-2 -mt-2 text-[11.5px] text-text-muted">각 항목은 입력을 마치고 다른 곳을 누르면(포커스를 벗어나면) 자동으로 저장돼요.</p>
 
       <div className="mb-6 flex flex-col gap-3 rounded-xl border border-border p-4">
         <label className="text-[12.5px] font-semibold text-text-muted">
@@ -56,6 +69,10 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
             onBlur={(e) => e.target.value !== event.title && saveEventFields({ title: e.target.value })}
           />
         </label>
+        <div>
+          <p className="mb-1.5 text-[12.5px] font-semibold text-text-muted">뱃지</p>
+          <EventBadgePicker value={event.badge} onChange={(badge) => saveEventFields({ badge })} />
+        </div>
         <label className="text-[12.5px] font-semibold text-text-muted">
           주문 마감
           <input
@@ -68,10 +85,10 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
         <label className="text-[12.5px] font-semibold text-text-muted">
           배송일
           <input
-            type="datetime-local"
+            type="date"
             className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-            defaultValue={toLocalInputValue(event.deliveryAt)}
-            onBlur={(e) => saveEventFields({ deliveryAt: new Date(e.target.value).toISOString() })}
+            defaultValue={toDateInputValue(event.deliveryAt)}
+            onBlur={(e) => saveEventFields({ deliveryAt: dateInputValueToIso(e.target.value) })}
           />
         </label>
         <label className="text-[12.5px] font-semibold text-text-muted">
@@ -83,8 +100,7 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
             onBlur={(e) => e.target.value !== event.notice && saveEventFields({ notice: e.target.value })}
           />
         </label>
-        {saving && <p className="text-[11.5px] text-text-muted">저장 중...</p>}
-        {error && <p className="text-[11.5px] font-semibold text-red-600">{error}</p>}
+        {saveStatus === "error" && error && <p className="text-[11.5px] font-semibold text-red-600">{error}</p>}
       </div>
 
       <p className="mb-2 text-[13.5px] font-bold">상품 목록</p>

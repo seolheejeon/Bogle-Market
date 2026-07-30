@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { listEvents, deleteEvent, duplicateEvent, updateEvent } from "@/lib/data";
 import type { MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, toDateInputValue, dateInputValueToIso } from "@/lib/format";
+import { EventBadgeTag } from "@/components/Badge";
 
 function toLocalInputValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -58,7 +59,7 @@ export default function AdminEventsPage() {
               <div>
                 <div className="flex items-center gap-1.5">
                   <span className="rounded-md bg-bg-sunken px-1.5 py-0.5 text-[11px] font-bold text-text-muted">{EVENT_TYPE_LABEL[e.type]}</span>
-                  {e.isFlash && <span className="rounded-md bg-[var(--badge-flash-bg)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--badge-flash-fg)]">특가</span>}
+                  <EventBadgeTag badge={e.badge} />
                   <span className="text-[14px] font-bold">{e.title}</span>
                 </div>
                 <p className="mt-1 text-[12px] text-text-muted">
@@ -101,7 +102,7 @@ function DuplicateForm({ event, onDone, onCreated }: { event: MarketEvent; onDon
   const router = useRouter();
   const [title, setTitle] = useState(`${event.title} (사본)`);
   const [deadlineAt, setDeadlineAt] = useState(toLocalInputValue(new Date(Date.now() + 24 * 3600 * 1000)));
-  const [deliveryAt, setDeliveryAt] = useState(toLocalInputValue(new Date(Date.now() + 48 * 3600 * 1000)));
+  const [deliveryAt, setDeliveryAt] = useState(toDateInputValue(new Date(Date.now() + 48 * 3600 * 1000).toISOString()));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -116,7 +117,7 @@ function DuplicateForm({ event, onDone, onCreated }: { event: MarketEvent; onDon
       const created = await duplicateEvent(event.id, {
         title: title.trim(),
         deadlineAt: new Date(deadlineAt).toISOString(),
-        deliveryAt: new Date(deliveryAt).toISOString(),
+        deliveryAt: dateInputValueToIso(deliveryAt),
       });
       onCreated();
       router.push(`/admin/events/${created.id}`);
@@ -143,7 +144,7 @@ function DuplicateForm({ event, onDone, onCreated }: { event: MarketEvent; onDon
         <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
           배송일
           <input
-            type="datetime-local"
+            type="date"
             className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
             value={deliveryAt}
             onChange={(e) => setDeliveryAt(e.target.value)}

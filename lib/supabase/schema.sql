@@ -43,7 +43,11 @@ create table if not exists events (
   id uuid primary key default gen_random_uuid(),
   type text not null check (type in ('DOOR', 'GROUP_BUY', 'PARCEL')),
   title text not null,
-  is_flash boolean not null default false,
+  -- 이벤트 카드에 붙는 판매용 뱃지 — 관리자가 이벤트 수정 화면에서 직접 고른다.
+  -- SALE(특가)만 예외적으로 lib/order-policy.ts의 마감 정책(STRICT_DEADLINE)에도
+  -- 영향을 준다. 예전엔 is_flash(boolean)였는데, HOT/NEW/예약상품/마감임박처럼
+  -- 더 다양한 뱃지를 지원하려고 badge(text enum)로 바꿨다.
+  badge text not null default 'NONE' check (badge in ('NONE', 'SALE', 'HOT', 'NEW', 'RESERVE', 'DEADLINE')),
   deadline_at timestamptz not null,
   delivery_at timestamptz not null,
   notice text not null default '',

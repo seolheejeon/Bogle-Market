@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createEvent } from "@/lib/data";
-import type { EventType } from "@/types";
+import type { EventBadge, EventType } from "@/types";
+import { toDateInputValue, dateInputValueToIso } from "@/lib/format";
+import { EventBadgePicker } from "@/components/admin/EventBadgePicker";
 
 function toLocalInputValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -14,9 +16,9 @@ export default function NewEventPage() {
   const router = useRouter();
   const [type, setType] = useState<EventType>("DOOR");
   const [title, setTitle] = useState("");
-  const [isFlash, setIsFlash] = useState(false);
+  const [badge, setBadge] = useState<EventBadge>("NONE");
   const [deadlineAt, setDeadlineAt] = useState(toLocalInputValue(new Date(Date.now() + 24 * 3600 * 1000)));
-  const [deliveryAt, setDeliveryAt] = useState(toLocalInputValue(new Date(Date.now() + 48 * 3600 * 1000)));
+  const [deliveryAt, setDeliveryAt] = useState(toDateInputValue(new Date(Date.now() + 48 * 3600 * 1000).toISOString()));
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,9 +34,9 @@ export default function NewEventPage() {
       const event = await createEvent({
         type,
         title: title.trim(),
-        isFlash,
+        badge,
         deadlineAt: new Date(deadlineAt).toISOString(),
-        deliveryAt: new Date(deliveryAt).toISOString(),
+        deliveryAt: dateInputValueToIso(deliveryAt),
         notice,
       });
       router.push(`/admin/events/${event.id}`);
@@ -61,17 +63,17 @@ export default function NewEventPage() {
           이벤트 이름
           <input className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="예) 7/24 문고리배송" />
         </label>
-        <label className="flex items-center gap-2 text-[12.5px] text-text-muted">
-          <input type="checkbox" checked={isFlash} onChange={(e) => setIsFlash(e.target.checked)} />
-          1시간 특가로 표시
-        </label>
+        <div>
+          <p className="mb-1.5 text-[12.5px] font-semibold text-text-muted">뱃지</p>
+          <EventBadgePicker value={badge} onChange={setBadge} />
+        </div>
         <label className="text-[12.5px] font-semibold text-text-muted">
           주문 마감
           <input type="datetime-local" className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" value={deadlineAt} onChange={(e) => setDeadlineAt(e.target.value)} />
         </label>
         <label className="text-[12.5px] font-semibold text-text-muted">
           배송일
-          <input type="datetime-local" className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" value={deliveryAt} onChange={(e) => setDeliveryAt(e.target.value)} />
+          <input type="date" className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" value={deliveryAt} onChange={(e) => setDeliveryAt(e.target.value)} />
         </label>
         <label className="text-[12.5px] font-semibold text-text-muted">
           안내 문구

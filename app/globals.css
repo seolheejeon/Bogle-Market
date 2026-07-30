@@ -1,48 +1,59 @@
 @import "tailwindcss";
 
 :root {
-  --accent: #059669;
-  --accent-dark: #047857;
-  --accent-soft: #ecfdf5;
-  --bg-page: #eef1ee;
-  --bg-card: #ffffff;
-  --bg-sunken: #f8faf9;
-  --text: #14201b;
-  --text-muted: #667169;
-  --border: #e4e9e5;
-  --badge-door-bg: #d1fae5;
-  --badge-door-fg: #047857;
-  --badge-group-bg: #ffedd5;
-  --badge-group-fg: #c2410c;
-  --badge-parcel-bg: #dbeafe;
-  --badge-parcel-fg: #1d4ed8;
-  --badge-flash-bg: #fee2e2;
-  --badge-flash-fg: #dc2626;
-  --status-wait-bg: #f1f5f4;
-  --status-wait-fg: #4b5a52;
-  --status-paid-bg: #eef2ff;
-  --status-paid-fg: #4338ca;
-  --status-ship-bg: #dbeafe;
-  --status-ship-fg: #1d4ed8;
-  --status-done-bg: #d1fae5;
-  --status-done-fg: #047857;
-  --status-confirmed-bg: #ede9fe;
-  --status-confirmed-fg: #6d28d9;
-  --status-refund-requested-bg: #ffedd5;
-  --status-refund-requested-fg: #c2410c;
-  --status-refunded-bg: #f1f5f4;
-  --status-refunded-fg: #4b5a52;
+  /* "따뜻한 동네 공동구매" — 베이지/크림 배경에 브라운 텍스트, 테라코타 오렌지
+     포인트. 예전엔 초록 계열(쇼핑몰 느낌)이었는데 브랜드 홍보물(베이지/크림/
+     브라운/오렌지 톤)에 맞춰 전면 재조정했다. */
+  --accent: #c9532f;
+  --accent-dark: #a13f22;
+  --accent-soft: #f7e4d3;
+  --bg-page: #f6ede0;
+  --bg-card: #fffaf3;
+  --bg-sunken: #f0e2cd;
+  --text: #4a3826;
+  --text-muted: #8d7a66;
+  --border: #e6d7c1;
+  --badge-door-bg: #e3e8d0;
+  --badge-door-fg: #57682b;
+  --badge-group-bg: #f5ddc0;
+  --badge-group-fg: #9c5a1f;
+  --badge-parcel-bg: #dbe6e6;
+  --badge-parcel-fg: #3f6e6e;
+  --badge-flash-bg: #f8d9d2;
+  --badge-flash-fg: #b8402a;
+  --badge-hot-bg: #f8d3dc;
+  --badge-hot-fg: #b23458;
+  --badge-new-bg: #d7ece6;
+  --badge-new-fg: #29806a;
+  --badge-reserve-bg: #e6dbee;
+  --badge-reserve-fg: #6f4a8a;
+  --badge-deadline-bg: #f5e3b8;
+  --badge-deadline-fg: #93650f;
+  --status-wait-bg: #eee4d4;
+  --status-wait-fg: #6b5d4a;
+  --status-paid-bg: #dde3f0;
+  --status-paid-fg: #3d4f8a;
+  --status-ship-bg: #dbe6e6;
+  --status-ship-fg: #3f6e6e;
+  --status-done-bg: #dfe8cd;
+  --status-done-fg: #4c6b28;
+  --status-confirmed-bg: #e6dbee;
+  --status-confirmed-fg: #6f4a8a;
+  --status-refund-requested-bg: #f5ddc0;
+  --status-refund-requested-fg: #9c5a1f;
+  --status-refunded-bg: #eee4d4;
+  --status-refunded-fg: #6b5d4a;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg-page: #0f1512;
-    --bg-card: #171f1a;
-    --bg-sunken: #1c2621;
-    --text: #eaf1ec;
-    --text-muted: #8ea296;
-    --border: #2a352e;
-    --accent-soft: #103224;
+    --bg-page: #221a13;
+    --bg-card: #2b2118;
+    --bg-sunken: #362a1d;
+    --text: #f2e8da;
+    --text-muted: #b6a48c;
+    --border: #493a29;
+    --accent-soft: #3d2a1d;
   }
 }
 

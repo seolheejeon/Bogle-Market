@@ -7,7 +7,7 @@ import { getEvent } from "@/lib/data";
 import type { MarketEvent } from "@/types";
 import { formatDeadlineLabel, formatEventDateChip, formatPrice } from "@/lib/format";
 import { isEventOrderable } from "@/lib/order-policy";
-import { EventTypeBadge } from "@/components/Badge";
+import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
 
@@ -34,7 +34,8 @@ export function EventDetailView({ eventId }: { eventId: string }) {
       </div>
       <div className="p-4">
         <div className="mb-2 flex items-center gap-1.5">
-          <EventTypeBadge type={event.type} flash={event.isFlash} />
+          <EventTypeBadge type={event.type} />
+          <EventBadgeTag badge={event.badge} />
         </div>
         <p className="text-[17px] font-extrabold">{event.title}</p>
         <p className="mt-1 text-[13px] text-text-muted">

@@ -99,10 +99,11 @@ export default function AdminHomePage() {
     await notifyStatusChange(order, next, eventById.get(order.eventId)?.title);
     refresh();
   }
-  // 배송중 전환 전용 — 택배사/송장번호를 같이 받아서 저장하고, 알림에도 포함해 보낸다.
-  async function submitShipping(order: Order, courierCode: string, trackingNumber: string) {
-    await updateOrderStatus(order.id, "ship", { courierCode, trackingNumber });
-    await notifyStatusChange(order, "ship", eventById.get(order.eventId)?.title, { courierCode, trackingNumber });
+  // 배송중 전환 전용 — 택배 방법을 골랐을 때만 택배사/송장번호를 같이 받아서
+  // 저장하고 알림에도 포함해 보낸다. 문고리/사다드림/직접전달은 shipping이 없다.
+  async function submitShipping(order: Order, shipping?: { courierCode: string; trackingNumber: string }) {
+    await updateOrderStatus(order.id, "ship", shipping);
+    await notifyStatusChange(order, "ship", eventById.get(order.eventId)?.title, shipping);
     setShippingId(null);
     refresh();
   }
@@ -443,7 +444,7 @@ export default function AdminHomePage() {
                         onClick={() => setShippingId(shippingId === o.id ? null : o.id)}
                         className="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white"
                       >
-                        송장 입력
+                        배송 시작
                       </button>
                     ) : (
                       NEXT_STATUS[o.status] && (
@@ -467,7 +468,11 @@ export default function AdminHomePage() {
               </div>
             </div>
             {shippingId === o.id && (
-              <ShippingForm onSubmit={(courierCode, trackingNumber) => submitShipping(o, courierCode, trackingNumber)} onCancel={() => setShippingId(null)} />
+              <ShippingForm
+                defaultMethod={eventById.get(o.eventId)?.type ?? "PARCEL"}
+                onSubmit={(shipping) => submitShipping(o, shipping)}
+                onCancel={() => setShippingId(null)}
+              />
             )}
           </div>
         ))}
@@ -476,18 +481,37 @@ export default function AdminHomePage() {
   );
 }
 
-function ShippingForm({ onSubmit, onCancel }: { onSubmit: (courierCode: string, trackingNumber: string) => Promise<void>; onCancel: () => void }) {
+type ShipMethod = EventType | "DIRECT";
+const SHIP_METHODS: ShipMethod[] = ["DOOR", "GROUP_BUY", "PARCEL", "DIRECT"];
+const SHIP_METHOD_LABEL: Record<ShipMethod, string> = { DOOR: "문고리", GROUP_BUY: "사다드림", PARCEL: "택배", DIRECT: "직접 전달" };
+
+// 배송방법을 먼저 고르고, 택배일 때만 택배사/송장번호를 추가로 받는다 — 문고리/
+// 사다드림/직접전달은 입력 없이 바로 배송중으로 전환된다. 기본 선택값은 이
+// 주문이 속한 이벤트의 배송방식(defaultMethod)을 따르되, 택배 이벤트라도 상황에
+// 따라 직접 전달하는 경우가 있어 그때는 관리자가 직접 바꿔 고르면 된다.
+function ShippingForm({
+  defaultMethod,
+  onSubmit,
+  onCancel,
+}: {
+  defaultMethod: EventType;
+  onSubmit: (shipping?: { courierCode: string; trackingNumber: string }) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [method, setMethod] = useState<ShipMethod>(defaultMethod);
   const [courierCode, setCourierCode] = useState<string>(COURIER_OPTIONS[0].code);
   const [trackingNumber, setTrackingNumber] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const needsTracking = method === "PARCEL";
+
   async function submit() {
-    if (!trackingNumber.trim()) return;
+    if (needsTracking && !trackingNumber.trim()) return;
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(courierCode, trackingNumber.trim());
+      await onSubmit(needsTracking ? { courierCode, trackingNumber: trackingNumber.trim() } : undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
     } finally {
@@ -497,27 +521,45 @@ function ShippingForm({ onSubmit, onCancel }: { onSubmit: (courierCode: string, 
 
   return (
     <div className="mt-2 rounded-lg bg-bg-sunken p-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={courierCode}
-          onChange={(e) => setCourierCode(e.target.value)}
-          className="rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
-        >
-          {COURIER_OPTIONS.map((c) => (
-            <option key={c.code} value={c.code}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-        <input
-          value={trackingNumber}
-          onChange={(e) => setTrackingNumber(e.target.value)}
-          placeholder="송장번호"
-          className="min-w-[140px] flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
-        />
+      <div className="flex flex-wrap gap-1.5">
+        {SHIP_METHODS.map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMethod(m)}
+            className={`rounded-full border px-2.5 py-1 text-[12px] font-semibold ${
+              method === m ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"
+            }`}
+          >
+            {SHIP_METHOD_LABEL[m]}
+          </button>
+        ))}
+      </div>
+      {needsTracking && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <select
+            value={courierCode}
+            onChange={(e) => setCourierCode(e.target.value)}
+            className="rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
+          >
+            {COURIER_OPTIONS.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          <input
+            value={trackingNumber}
+            onChange={(e) => setTrackingNumber(e.target.value)}
+            placeholder="송장번호"
+            className="min-w-[140px] flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
+          />
+        </div>
+      )}
+      <div className="mt-2 flex gap-2">
         <button
           onClick={submit}
-          disabled={submitting || !trackingNumber.trim()}
+          disabled={submitting || (needsTracking && !trackingNumber.trim())}
           className="rounded-[7px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-50"
         >
           {submitting ? "저장 중..." : "배송시작"}
