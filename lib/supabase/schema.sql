@@ -230,10 +230,24 @@ create policy "admins manage event_products" on event_products for all
   with check (is_admin());
 
 -- Profiles: user manages their own row; admins can read all
+-- signUp() creates the auth.users row first, then inserts the matching
+-- profiles row as that same (now-authenticated) user — RLS defaults to
+-- deny-all on insert without an explicit policy, which silently broke every
+-- signup with a 403 until this was added (never caught before because this
+-- flow only ever ran against mock-mode local storage, never a real Supabase
+-- project, until 2026-07-30).
+drop policy if exists "user creates own profile" on profiles;
+create policy "user creates own profile" on profiles for insert with check (auth.uid() = id);
 drop policy if exists "user reads own profile" on profiles;
 create policy "user reads own profile" on profiles for select using (auth.uid() = id);
+-- with check도 "auth.uid() = id"만 있으면 자기 자신의 is_admin을 true로 바꿔서
+-- 셀프 관리자 승격을 할 수 있다(실제로 재현해서 확인함) — is_admin()이 이 UPDATE
+-- 문 시작 시점의(즉 이 요청 이전) 값을 보게 되므로, 원래 관리자가 아니었다면
+-- is_admin을 true로 바꾸는 건 항상 막히고, 원래 관리자였던 사람은 그대로 유지된다.
 drop policy if exists "user updates own profile" on profiles;
-create policy "user updates own profile" on profiles for update using (auth.uid() = id);
+create policy "user updates own profile" on profiles for update
+  using (auth.uid() = id)
+  with check (auth.uid() = id and (is_admin = false or is_admin()));
 drop policy if exists "admins read all profiles" on profiles;
 create policy "admins read all profiles" on profiles for select
   using (is_admin());
