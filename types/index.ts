@@ -2,7 +2,7 @@ export type EventType = "DOOR" | "GROUP_BUY" | "PARCEL";
 
 export type PaymentMethod = "bank_transfer" | "card" | "kakaopay" | "incheon_eum";
 
-export type OrderStatus = "wait" | "paid" | "ship" | "done" | "cancelled";
+export type OrderStatus = "wait" | "paid" | "confirmed" | "ship" | "done" | "refund_requested" | "refunded" | "cancelled";
 
 // The product detail page's long-form "상세설명" content, rendered top to
 // bottom in order — mirrors the shape a future admin editor would write
@@ -14,9 +14,34 @@ export type ProductDetailBlock =
   | { type: "text"; text: string }
   | { type: "image"; url: string; alt?: string };
 
+// 카탈로그 상품 — 사진/설명/원산지 등 "내용물"만 담고 있고 이벤트와 무관하게
+// 하나만 존재한다. "상품 관리"(`/admin/products`) 화면에서 검색·수정하는
+// 대상이며, 여러 이벤트에서 그대로 재사용된다(복제해도 새로 안 늘어남).
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  emoji: string;
+  photos?: string[];
+  origin?: string;
+  weight?: string;
+  storage?: string;
+  eat?: string;
+  description?: string;
+  detailBlocks?: ProductDetailBlock[];
+}
+
+// 이벤트에 실제로 노출되는 상품(리스팅) — 카탈로그 상품 하나를 이번 회차에
+// 어떤 가격/재고/노출 여부로 팔지 나타낸다. 장바구니/주문/재고 차감은 전부
+// 이 리스팅의 id 기준으로 돈다(카탈로그 원본이 아니라) — 같은 카탈로그
+// 상품이 여러 이벤트에 동시에 걸려도 이벤트별로 독립된 재고를 가져야 하기
+// 때문. 화면 코드가 지금까지처럼 "상품 하나"를 평평하게 다룰 수 있도록
+// 카탈로그 내용(name/photos/description 등)과 리스팅 정보(price/stock 등)를
+// 합쳐서 내려준다 — 필드 구성 자체는 기존 Product와 거의 동일하다.
 export interface Product {
   id: string;
   eventId: string;
+  // 이 리스팅이 참조하는 카탈로그 상품의 id — "상품 관리"에서 수정하는 대상.
+  catalogProductId: string;
   name: string;
   price: number;
   emoji: string;
@@ -30,6 +55,12 @@ export interface Product {
   eat?: string;
   description?: string;
   detailBlocks?: ProductDetailBlock[];
+  // undefined = 재고 제한 없음(상시 판매). 정해두면 그 수량만큼만 주문 가능하고,
+  // 0이 되면 품절 처리된다.
+  stock?: number;
+  // false면 고객 화면(그리드/이벤트 상세 등)에서 숨김 — 상품은 남겨두되 잠시
+  // 판매만 중단하고 싶을 때(예: 다음 회차 준비 중) 삭제 없이 끄는 용도.
+  visible?: boolean;
 }
 
 export interface MarketEvent {
@@ -41,6 +72,33 @@ export interface MarketEvent {
   deliveryAt: string; // ISO
   notice: string;
   products: Product[];
+}
+
+// mock 모드 로컬스토리지에 이벤트와 함께 내장되는 "리스팅 원본" — 카탈로그
+// 내용(name/photos/description 등)은 없고 이 이벤트에서의 가격/재고/노출/
+// 배송방식 오버라이드만 담는다. lib/data.ts가 이 원본을 카탈로그 상품과
+// 조인해서 화면이 쓰는 평평한 Product로 합쳐준다 — Supabase 모드에서
+// event_products·products 테이블을 조인한 것과 같은 결과를 mock에서도
+// 내기 위함(두 모드가 항상 같은 방식으로 동작하도록).
+export interface EventProductSeed {
+  id: string;
+  eventId: string;
+  catalogProductId: string;
+  price: number;
+  deliveryType?: EventType;
+  stock?: number;
+  visible?: boolean;
+}
+
+export interface MarketEventSeed {
+  id: string;
+  type: EventType;
+  title: string;
+  isFlash?: boolean;
+  deadlineAt: string;
+  deliveryAt: string;
+  notice: string;
+  products: EventProductSeed[];
 }
 
 export interface Address {
@@ -106,6 +164,17 @@ export interface Order {
   recipientPhone: string;
   paymentMethod: PaymentMethod;
   status: OrderStatus;
+  // 발주확인(confirmed) 이후 고객이 취소를 "요청"하면 true — 상태 자체는 그대로
+  // 두고(배송 준비는 계속 진행) 이 플래그만 세워서, 관리자가 승인(취소 처리)
+  // 하거나 거절(사유와 함께 알림)할 때까지 대기시킨다. wait/paid 단계의 셀프
+  // 취소는 이 플래그 없이 바로 status를 cancelled로 바꾼다(cancelOrder()).
+  cancelRequested: boolean;
+  // 고객이 취소 요청 시 남긴 사유(선택) — 관리자가 승인/거절을 판단할 때 참고.
+  cancelReason: string | null;
+  // 배송중(ship) 처리 시 관리자가 입력 — 택배(PARCEL)가 아닌 문고리/사다드림
+  // 주문은 항상 null.
+  courierCode: string | null;
+  trackingNumber: string | null;
   items: OrderItem[];
   total: number;
   createdAt: string; // ISO
@@ -142,11 +211,36 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   incheon_eum: "인천 이음카드",
 };
 
+// 스마트택배(SweetTracker) API의 택배사 코드(t_code) 기준 — 배송조회 API
+// 연동 전에 실제 코드값을 스마트택배 콘솔의 companylist API로 재확인할 것.
+export const COURIER_OPTIONS = [
+  { code: "04", label: "CJ대한통운" },
+  { code: "05", label: "한진택배" },
+  { code: "08", label: "롯데택배" },
+  { code: "01", label: "우체국택배" },
+  { code: "06", label: "로젠택배" },
+] as const;
+
+export const COURIER_LABEL: Record<string, string> = Object.fromEntries(COURIER_OPTIONS.map((c) => [c.code, c.label]));
+
+// 실시간 API 조회가 안 될 때(키 미설정/오류) 대신 열어주는 각 택배사 공식
+// 배송조회 페이지 — 송장번호만 채워 넣으면 된다.
+export const COURIER_TRACKING_URL: Record<string, (invoice: string) => string> = {
+  "04": (inv) => `https://trace.cjlogistics.com/next/tracking.html?wblNo=${inv}`,
+  "05": (inv) => `https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mCode=MN038&schLang=KR&wblnumText2=${inv}`,
+  "08": (inv) => `https://www.lotteglogis.com/home/reservation/tracking/linkView?InvNo=${inv}`,
+  "01": (inv) => `https://service.epost.go.kr/trace.RetrieveDomRigiTraceList.comm?displayHeader=N&sid1=${inv}`,
+  "06": (inv) => `https://www.ilogen.com/m/personal/trace.pop/${inv}`,
+};
+
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   wait: "입금대기",
   paid: "입금완료",
+  confirmed: "발주확인",
   ship: "배송중",
   done: "배송완료",
+  refund_requested: "반품/환불 신청",
+  refunded: "환불완료",
   cancelled: "취소",
 };
 

@@ -6,9 +6,62 @@
 // including the admin panel, is testable before a real backend exists.
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import { loadEvents, saveEvents, loadOrders, saveOrders, loadNotifications, saveNotifications, loadAccounts, loadStoreSettings, saveStoreSettings, genId } from "@/lib/local-store";
-import type { Address, MarketEvent, NotificationItem, Order, OrderItem, OrderStatus, PaymentMethod, Product, Profile, StoreSettings } from "@/types";
+import {
+  loadEvents,
+  saveEvents,
+  loadCatalogProducts,
+  saveCatalogProducts,
+  loadOrders,
+  saveOrders,
+  loadNotifications,
+  saveNotifications,
+  loadAccounts,
+  loadStoreSettings,
+  saveStoreSettings,
+  genId,
+} from "@/lib/local-store";
+import type {
+  Address,
+  CatalogProduct,
+  EventProductSeed,
+  EventType,
+  MarketEvent,
+  MarketEventSeed,
+  NotificationItem,
+  Order,
+  OrderItem,
+  OrderStatus,
+  PaymentMethod,
+  Product,
+  Profile,
+  StoreSettings,
+} from "@/types";
 import { EMPTY_STORE_SETTINGS } from "@/types";
+
+// 이벤트 리스팅(EventProductSeed/event_products 행)과 카탈로그 상품을 합쳐서
+// 화면이 쓰는 평평한 Product로 만든다. mock/Supabase 두 모드 모두 최종적으로
+// 이 모양으로 맞춰서 내려주므로, 화면 쪽 컴포넌트는 지금까지와 똑같이 상품을
+// 하나의 평평한 객체로 다루면 된다.
+function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undefined): Product {
+  return {
+    id: listing.id,
+    eventId: listing.eventId,
+    catalogProductId: listing.catalogProductId,
+    name: catalog?.name ?? "(삭제된 상품)",
+    price: listing.price,
+    emoji: catalog?.emoji ?? "📦",
+    photos: catalog?.photos,
+    deliveryType: listing.deliveryType,
+    origin: catalog?.origin,
+    weight: catalog?.weight,
+    storage: catalog?.storage,
+    eat: catalog?.eat,
+    description: catalog?.description,
+    detailBlocks: catalog?.detailBlocks,
+    stock: listing.stock,
+    visible: listing.visible,
+  };
+}
 
 function orderNumber(): string {
   const now = new Date();
@@ -24,11 +77,15 @@ function orderNumber(): string {
 export async function listEvents(): Promise<MarketEvent[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { data, error } = await supabase.from("events").select("*, products(*)").order("deadline_at", { ascending: true });
+    const { data, error } = await supabase.from("events").select("*, event_products(*, products(*))").order("deadline_at", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(mapSupabaseEvent);
   }
-  return loadEvents();
+  const catalogMap = new Map(loadCatalogProducts().map((c) => [c.id, c]));
+  return loadEvents().map((e) => ({
+    ...e,
+    products: e.products.map((listing) => mergeListing(listing, catalogMap.get(listing.catalogProductId))),
+  }));
 }
 
 export async function getEvent(id: string): Promise<MarketEvent | null> {
@@ -54,12 +111,12 @@ export async function createEvent(input: Omit<MarketEvent, "id" | "products">): 
       .select()
       .single();
     if (error) throw error;
-    return { ...mapSupabaseEvent({ ...data, products: [] }) };
+    return { ...mapSupabaseEvent({ ...data, event_products: [] }) };
   }
   const events = loadEvents();
-  const newEvent: MarketEvent = { ...input, id: genId("event"), products: [] };
+  const newEvent: MarketEventSeed = { ...input, id: genId("event"), products: [] };
   saveEvents([newEvent, ...events]);
-  return newEvent;
+  return { ...newEvent, products: [] };
 }
 
 export async function updateEvent(id: string, patch: Partial<Omit<MarketEvent, "id" | "products">>): Promise<void> {
@@ -80,6 +137,35 @@ export async function updateEvent(id: string, patch: Partial<Omit<MarketEvent, "
   saveEvents(events.map((e) => (e.id === id ? { ...e, ...patch } : e)));
 }
 
+// 같은 이벤트를 다음 회차로 복제 — 카탈로그 상품은 그대로 재사용하고(새로
+// 안 늘어남), 리스팅(가격/재고/노출/배송방식)만 복사한다. 회차마다 바뀌는
+// 제목/마감/배송일만 새로 받는다("이벤트 복제" UX의 핵심은 이 세 값만
+// 입력하면 끝나는 것). 재고는 원본 값을 그대로 복사하므로 새 회차의 실제
+// 재고에 맞게 admin이 따로 조정해야 한다.
+export async function duplicateEvent(eventId: string, overrides: { title: string; deadlineAt: string; deliveryAt: string }): Promise<MarketEvent> {
+  const source = await getEvent(eventId);
+  if (!source) throw new Error("이벤트를 찾을 수 없어요.");
+  const created = await createEvent({
+    type: source.type,
+    title: overrides.title,
+    isFlash: source.isFlash,
+    deadlineAt: overrides.deadlineAt,
+    deliveryAt: overrides.deliveryAt,
+    notice: source.notice,
+  });
+  for (const p of source.products) {
+    await addEventProduct(created.id, {
+      catalogProductId: p.catalogProductId,
+      price: p.price,
+      deliveryType: p.deliveryType,
+      stock: p.stock,
+      visible: p.visible,
+    });
+  }
+  const full = await getEvent(created.id);
+  return full!;
+}
+
 export async function deleteEvent(id: string): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
@@ -90,66 +176,165 @@ export async function deleteEvent(id: string): Promise<void> {
   saveEvents(loadEvents().filter((e) => e.id !== id));
 }
 
-export async function addProduct(eventId: string, input: Omit<Product, "id" | "eventId">): Promise<Product> {
+// ---------- 카탈로그 상품 (상품 관리 화면 전용) ----------
+// 사진/설명/원산지 등 "내용물"만 다루고 이벤트와 무관 — 여러 이벤트가 같은
+// 카탈로그 상품을 리스팅으로 재사용한다.
+
+export async function listCatalogProducts(): Promise<CatalogProduct[]> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.from("products").select("*").order("name", { ascending: true });
+    if (error) throw error;
+    return (data ?? []).map(mapSupabaseCatalogProduct);
+  }
+  return loadCatalogProducts()
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): Promise<CatalogProduct> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase
       .from("products")
       .insert({
-        event_id: eventId,
         name: input.name,
-        price: input.price,
         emoji: input.emoji,
         photos: input.photos ?? [],
         detail_blocks: input.detailBlocks ?? [],
-        delivery_type: input.deliveryType ?? null,
         origin: input.origin,
         weight: input.weight,
         storage: input.storage,
+        eat: input.eat,
         description: input.description,
       })
       .select()
       .single();
     if (error) throw error;
-    return mapSupabaseProduct(data);
+    return mapSupabaseCatalogProduct(data);
   }
-  const events = loadEvents();
-  const product: Product = { ...input, id: genId("prod"), eventId };
-  saveEvents(events.map((e) => (e.id === eventId ? { ...e, products: [...e.products, product] } : e)));
+  const product: CatalogProduct = { ...input, id: genId("cat") };
+  saveCatalogProducts([product, ...loadCatalogProducts()]);
   return product;
 }
 
-export async function updateProduct(productId: string, patch: Partial<Product>): Promise<void> {
+export async function updateCatalogProduct(catalogProductId: string, patch: Partial<Omit<CatalogProduct, "id">>): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     const row: Record<string, unknown> = {};
     if (patch.name !== undefined) row.name = patch.name;
-    if (patch.price !== undefined) row.price = patch.price;
     if (patch.emoji !== undefined) row.emoji = patch.emoji;
     if (patch.photos !== undefined) row.photos = patch.photos;
     if (patch.detailBlocks !== undefined) row.detail_blocks = patch.detailBlocks;
-    if (patch.deliveryType !== undefined) row.delivery_type = patch.deliveryType ?? null;
     if (patch.origin !== undefined) row.origin = patch.origin;
     if (patch.weight !== undefined) row.weight = patch.weight;
     if (patch.storage !== undefined) row.storage = patch.storage;
+    if (patch.eat !== undefined) row.eat = patch.eat;
     if (patch.description !== undefined) row.description = patch.description;
-    const { error } = await supabase.from("products").update(row).eq("id", productId);
+    const { error } = await supabase.from("products").update(row).eq("id", catalogProductId);
     if (error) throw error;
     return;
   }
-  const events = loadEvents();
-  saveEvents(events.map((e) => ({ ...e, products: e.products.map((p) => (p.id === productId ? { ...p, ...patch } : p)) })));
+  saveCatalogProducts(loadCatalogProducts().map((c) => (c.id === catalogProductId ? { ...c, ...patch } : c)));
 }
 
-export async function deleteProduct(productId: string): Promise<void> {
+// 사용 중인(어느 이벤트에라도 리스팅된) 카탈로그 상품은 삭제할 수 없다 —
+// Supabase는 FK 제약(event_products.product_id, on delete 기본 NO ACTION)이
+// 막아주고, mock 모드는 여기서 직접 확인해 같은 사용자 경험을 준다.
+export async function deleteCatalogProduct(catalogProductId: string): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { error } = await supabase.from("products").delete().eq("id", productId);
+    const { error } = await supabase.from("products").delete().eq("id", catalogProductId);
+    if (error) {
+      if (error.code === "23503") throw new Error("이 상품은 이벤트에서 사용 중이라 삭제할 수 없어요. 먼저 이벤트에서 제거해 주세요.");
+      throw error;
+    }
+    return;
+  }
+  const inUse = loadEvents().some((e) => e.products.some((p) => p.catalogProductId === catalogProductId));
+  if (inUse) throw new Error("이 상품은 이벤트에서 사용 중이라 삭제할 수 없어요. 먼저 이벤트에서 제거해 주세요.");
+  saveCatalogProducts(loadCatalogProducts().filter((c) => c.id !== catalogProductId));
+}
+
+// ---------- 이벤트별 상품 등록(리스팅) ----------
+// 카탈로그 상품 하나를 이번 이벤트에 어떤 가격/재고/노출로 팔지 나타낸다.
+
+export interface NewEventProductInput {
+  catalogProductId: string;
+  price: number;
+  deliveryType?: EventType;
+  stock?: number;
+  visible?: boolean;
+}
+
+export async function addEventProduct(eventId: string, input: NewEventProductInput): Promise<Product> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase
+      .from("event_products")
+      .insert({
+        event_id: eventId,
+        product_id: input.catalogProductId,
+        price: input.price,
+        delivery_type: input.deliveryType ?? null,
+        stock: input.stock ?? null,
+        visible: input.visible ?? true,
+      })
+      .select("*, products(*)")
+      .single();
+    if (error) throw error;
+    return mapSupabaseEventProduct(data);
+  }
+  const catalog = loadCatalogProducts().find((c) => c.id === input.catalogProductId);
+  if (!catalog) throw new Error("상품을 찾을 수 없어요.");
+  const listing: EventProductSeed = {
+    id: genId("lst"),
+    eventId,
+    catalogProductId: input.catalogProductId,
+    price: input.price,
+    deliveryType: input.deliveryType,
+    stock: input.stock,
+    visible: input.visible ?? true,
+  };
+  saveEvents(loadEvents().map((e) => (e.id === eventId ? { ...e, products: [...e.products, listing] } : e)));
+  return mergeListing(listing, catalog);
+}
+
+export interface EventProductPatch {
+  price?: number;
+  deliveryType?: EventType;
+  stock?: number;
+  visible?: boolean;
+}
+
+export async function updateEventProduct(eventProductId: string, patch: EventProductPatch): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const row: Record<string, unknown> = {};
+    if (patch.price !== undefined) row.price = patch.price;
+    if (patch.deliveryType !== undefined) row.delivery_type = patch.deliveryType ?? null;
+    // "stock" in patch (아닌 !== undefined)로 확인 — 재고 한도를 다시 "무제한"으로
+    // 비우는 것도 유효한 값 변경이라, patch.stock이 undefined인 채로 명시적으로
+    // 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
+    if ("stock" in patch) row.stock = patch.stock ?? null;
+    if (patch.visible !== undefined) row.visible = patch.visible;
+    const { error } = await supabase.from("event_products").update(row).eq("id", eventProductId);
     if (error) throw error;
     return;
   }
   const events = loadEvents();
-  saveEvents(events.map((e) => ({ ...e, products: e.products.filter((p) => p.id !== productId) })));
+  saveEvents(events.map((e) => ({ ...e, products: e.products.map((p) => (p.id === eventProductId ? { ...p, ...patch } : p)) })));
+}
+
+export async function removeEventProduct(eventProductId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("event_products").delete().eq("id", eventProductId);
+    if (error) throw error;
+    return;
+  }
+  const events = loadEvents();
+  saveEvents(events.map((e) => ({ ...e, products: e.products.filter((p) => p.id !== eventProductId) })));
 }
 
 // ---------- Notifications ----------
@@ -249,13 +434,16 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     if (error) throw error;
     const itemRows = input.items.map((item) => ({
       order_id: orderRow.id,
-      product_id: item.productId,
+      event_product_id: item.productId,
       product_name: item.productName,
       price_snapshot: item.price,
       quantity: item.quantity,
     }));
     const { error: itemError } = await supabase.from("order_items").insert(itemRows);
     if (itemError) throw itemError;
+    for (const item of input.items) {
+      await supabase.rpc("decrement_stock", { p_event_product_id: item.productId, p_qty: item.quantity });
+    }
     return mapSupabaseOrder(orderRow, input.items);
   }
   const order: Order = {
@@ -273,12 +461,43 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     recipientPhone: input.recipientPhone,
     paymentMethod: input.paymentMethod,
     status: "wait",
+    cancelRequested: false,
+    cancelReason: null,
+    courierCode: null,
+    trackingNumber: null,
     items: input.items,
     total: input.total,
     createdAt: new Date().toISOString(),
   };
   saveOrders([order, ...loadOrders()]);
+  saveEvents(decrementProductStock(loadEvents(), input.items));
   return order;
+}
+
+// 재고가 있는 리스팅(stock이 정해진 리스팅)만 골라 주문 수량만큼 차감한다(0
+// 밑으로는 안 내려감). stock이 undefined인 리스팅(재고 제한 없음)은 그대로 둔다.
+function decrementProductStock(events: MarketEventSeed[], items: OrderItem[]): MarketEventSeed[] {
+  const deltaByProduct = new Map(items.map((i) => [i.productId, i.quantity]));
+  return events.map((e) => ({
+    ...e,
+    products: e.products.map((p) => {
+      const qty = deltaByProduct.get(p.id);
+      if (!qty || p.stock === undefined) return p;
+      return { ...p, stock: Math.max(0, p.stock - qty) };
+    }),
+  }));
+}
+
+function restoreProductStock(events: MarketEventSeed[], items: OrderItem[]): MarketEventSeed[] {
+  const deltaByProduct = new Map(items.map((i) => [i.productId, i.quantity]));
+  return events.map((e) => ({
+    ...e,
+    products: e.products.map((p) => {
+      const qty = deltaByProduct.get(p.id);
+      if (!qty || p.stock === undefined) return p;
+      return { ...p, stock: p.stock + qty };
+    }),
+  }));
 }
 
 export async function listOrdersForProfile(profileId: string): Promise<Order[]> {
@@ -325,14 +544,133 @@ export async function lookupGuestOrders(name: string, pin: string): Promise<Orde
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export async function updateOrderStatus(orderId: string, status: OrderStatus): Promise<void> {
+// 취소/환불로 바뀔 때는 차감됐던 재고를 되돌려준다(재고 제한이 있는 상품만).
+function isRestockingStatus(status: OrderStatus): boolean {
+  return status === "cancelled" || status === "refunded";
+}
+
+export async function updateOrderStatus(
+  orderId: string,
+  status: OrderStatus,
+  shipping?: { courierCode: string; trackingNumber: string },
+): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
+    if (isRestockingStatus(status)) {
+      const { data: itemRows } = await supabase.from("order_items").select("event_product_id, quantity").eq("order_id", orderId);
+      for (const item of itemRows ?? []) {
+        if (item.event_product_id) await supabase.rpc("increment_stock", { p_event_product_id: item.event_product_id, p_qty: item.quantity });
+      }
+    }
+    const patch: Record<string, unknown> = { status };
+    if (shipping) {
+      patch.courier_code = shipping.courierCode;
+      patch.tracking_number = shipping.trackingNumber;
+    }
+    const { error } = await supabase.from("orders").update(patch).eq("id", orderId);
     if (error) throw error;
     return;
   }
-  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, status } : o)));
+  const orders = loadOrders();
+  if (isRestockingStatus(status)) {
+    const target = orders.find((o) => o.id === orderId);
+    if (target) saveEvents(restoreProductStock(loadEvents(), target.items));
+  }
+  saveOrders(
+    orders.map((o) =>
+      o.id === orderId
+        ? { ...o, status, ...(shipping ? { courierCode: shipping.courierCode, trackingNumber: shipping.trackingNumber } : {}) }
+        : o,
+    ),
+  );
+}
+
+// 고객 셀프취소 — 발주확인(confirmed) 이전 단계(wait/paid)에서만 가능. 회원은
+// RLS가, 게스트는 SECURITY DEFINER RPC(cancel_guest_order)가 이 조건을
+// 서버 측에서도 강제한다. mock 모드는 별도 인증 계층이 없어 여기서 직접 확인.
+export async function cancelOrder(orderId: string, opts: { profileId?: string | null; guestName?: string; guestPin?: string }): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    if (opts.profileId) {
+      await updateOrderStatus(orderId, "cancelled");
+      return;
+    }
+    const { error } = await supabase.rpc("cancel_guest_order", { p_order_id: orderId, p_name: opts.guestName, p_pin: opts.guestPin });
+    if (error) throw error;
+    return;
+  }
+  const target = loadOrders().find((o) => o.id === orderId);
+  if (!target || (target.status !== "wait" && target.status !== "paid")) {
+    throw new Error("이미 발주가 확인된 주문이에요. 취소가 필요하면 관리자에게 문의해 주세요.");
+  }
+  await updateOrderStatus(orderId, "cancelled");
+}
+
+// 발주확인(confirmed)/배송중(ship) 단계의 취소는 즉시 처리하지 않고 "요청"만
+// 남긴다 — status는 그대로 두어 배송 준비가 계속 진행되게 하고, 관리자가
+// 승인(실제 취소 + 재고 복구)하거나 거절(사유와 함께 알림)할 때까지 기다린다.
+export async function requestCancellation(
+  orderId: string,
+  opts: { profileId?: string | null; guestName?: string; guestPin?: string; reason?: string },
+): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    if (opts.profileId) {
+      const { error } = await supabase.from("orders").update({ cancel_requested: true, cancel_reason: opts.reason || null }).eq("id", orderId);
+      if (error) throw error;
+      return;
+    }
+    const { error } = await supabase.rpc("request_guest_cancel", {
+      p_order_id: orderId,
+      p_name: opts.guestName,
+      p_pin: opts.guestPin,
+      p_reason: opts.reason || null,
+    });
+    if (error) throw error;
+    return;
+  }
+  const target = loadOrders().find((o) => o.id === orderId);
+  if (!target || (target.status !== "confirmed" && target.status !== "ship")) {
+    throw new Error("지금 상태에서는 취소를 요청할 수 없어요.");
+  }
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, cancelRequested: true, cancelReason: opts.reason || null } : o)));
+}
+
+// 관리자가 취소 요청을 승인 — 실제로 주문을 취소 처리하고(재고 복구는
+// updateOrderStatus가 처리) 요청 플래그를 내린다.
+export async function approveCancelRequest(orderId: string): Promise<void> {
+  await updateOrderStatus(orderId, "cancelled");
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("orders").update({ cancel_requested: false }).eq("id", orderId);
+    if (error) throw error;
+    return;
+  }
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, cancelRequested: false } : o)));
+}
+
+// 관리자가 취소 요청을 거절 — 주문 상태(발주확인/배송중)는 그대로 두고 요청
+// 플래그만 내린다. 거절 사유는 고객 알림에 담아 보내는 쪽(호출부)에서 처리.
+export async function rejectCancelRequest(orderId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("orders").update({ cancel_requested: false }).eq("id", orderId);
+    if (error) throw error;
+    return;
+  }
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, cancelRequested: false } : o)));
+}
+
+// 고객이 배송완료 후 반품/환불을 신청 — 관리자가 확인 후 수동으로 환불완료
+// 처리한다(입금확인 등 다른 상태 전환과 같은 패턴).
+export async function requestRefund(orderId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("orders").update({ status: "refund_requested" }).eq("id", orderId);
+    if (error) throw error;
+    return;
+  }
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, status: "refund_requested" as OrderStatus } : o)));
 }
 
 // ---------- Profiles (admin customer lookup) ----------
@@ -488,20 +826,42 @@ function mapSupabaseAddress(row: Record<string, any>): Address {
   };
 }
 
-function mapSupabaseProduct(row: Record<string, any>): Product {
+function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
   return {
     id: row.id,
-    eventId: row.event_id,
     name: row.name,
-    price: row.price,
     emoji: row.emoji ?? "📦",
     photos: row.photos && row.photos.length > 0 ? row.photos : undefined,
-    deliveryType: row.delivery_type ?? undefined,
     origin: row.origin ?? undefined,
     weight: row.weight ?? undefined,
     storage: row.storage ?? undefined,
+    eat: row.eat ?? undefined,
     description: row.description ?? undefined,
     detailBlocks: row.detail_blocks && row.detail_blocks.length > 0 ? row.detail_blocks : undefined,
+  };
+}
+
+// event_products 행(+ 중첩된 products(*) 카탈로그 조인)을 화면이 쓰는 평평한
+// Product로 합친다. mock 모드의 mergeListing과 같은 역할.
+function mapSupabaseEventProduct(row: Record<string, any>): Product {
+  const catalog = row.products ?? {};
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    catalogProductId: row.product_id,
+    name: catalog.name ?? "(삭제된 상품)",
+    price: row.price,
+    emoji: catalog.emoji ?? "📦",
+    photos: catalog.photos && catalog.photos.length > 0 ? catalog.photos : undefined,
+    deliveryType: row.delivery_type ?? undefined,
+    origin: catalog.origin ?? undefined,
+    weight: catalog.weight ?? undefined,
+    storage: catalog.storage ?? undefined,
+    eat: catalog.eat ?? undefined,
+    description: catalog.description ?? undefined,
+    detailBlocks: catalog.detail_blocks && catalog.detail_blocks.length > 0 ? catalog.detail_blocks : undefined,
+    stock: row.stock ?? undefined,
+    visible: row.visible ?? true,
   };
 }
 
@@ -514,12 +874,12 @@ function mapSupabaseEvent(row: Record<string, any>): MarketEvent {
     deadlineAt: row.deadline_at,
     deliveryAt: row.delivery_at,
     notice: row.notice ?? "",
-    products: (row.products ?? []).map(mapSupabaseProduct),
+    products: (row.event_products ?? []).map(mapSupabaseEventProduct),
   };
 }
 
 function mapSupabaseOrderItem(row: Record<string, any>): OrderItem {
-  return { productId: row.product_id, productName: row.product_name, productEmoji: "📦", price: row.price_snapshot, quantity: row.quantity };
+  return { productId: row.event_product_id, productName: row.product_name, productEmoji: "📦", price: row.price_snapshot, quantity: row.quantity };
 }
 
 function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
@@ -538,6 +898,10 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     recipientPhone: row.recipient_phone,
     paymentMethod: row.payment_method,
     status: row.status,
+    cancelRequested: row.cancel_requested ?? false,
+    cancelReason: row.cancel_reason ?? null,
+    courierCode: row.courier_code ?? null,
+    trackingNumber: row.tracking_number ?? null,
     items,
     total: row.total,
     createdAt: row.created_at,

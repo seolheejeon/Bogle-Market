@@ -1,13 +1,12 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
-import { getEvent, updateEvent, addProduct, updateProduct, deleteProduct } from "@/lib/data";
-import type { EventType, MarketEvent, Product, ProductDetailBlock } from "@/types";
+import { use, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { getEvent, updateEvent, listCatalogProducts, addEventProduct, updateEventProduct, removeEventProduct } from "@/lib/data";
+import type { CatalogProduct, EventType, MarketEvent, Product } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice } from "@/lib/format";
 import { ProductPhoto } from "@/components/ProductPhoto";
-import { PhotoUploader } from "@/components/admin/PhotoUploader";
-import { DetailBlockEditor } from "@/components/admin/DetailBlockEditor";
 
 const DELIVERY_TYPES: EventType[] = ["DOOR", "GROUP_BUY", "PARCEL"];
 
@@ -81,70 +80,111 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
       </div>
 
       <p className="mb-2 text-[13.5px] font-bold">상품 목록</p>
+      <p className="mb-2 text-[11.5px] text-text-muted">
+        사진·설명 등 상품 내용은{" "}
+        <Link href="/admin/products" className="font-semibold text-accent-dark underline">
+          상품 관리
+        </Link>
+        에서 고치면 이 상품을 쓰는 모든 이벤트에 바로 반영돼요. 여기서는 이번 회차의 가격·재고·노출만 정해요.
+      </p>
       <div className="mb-4 flex flex-col gap-2">
         {event.products.map((p) => (
-          <ProductRow key={p.id} product={p} eventType={event.type} onSaved={refresh} />
+          <EventProductRow key={p.id} product={p} eventType={event.type} onSaved={refresh} />
         ))}
         {event.products.length === 0 && <p className="text-[12.5px] text-text-muted">등록된 상품이 없어요.</p>}
       </div>
 
-      <AddProductForm eventId={event.id} eventType={event.type} onAdded={refresh} />
+      <AddExistingProductForm eventId={event.id} eventType={event.type} alreadyAddedIds={event.products.map((p) => p.catalogProductId)} onAdded={refresh} />
     </div>
   );
 }
 
-interface ProductFormValues {
-  emoji: string;
-  name: string;
-  price: number;
-  origin?: string;
-  weight?: string;
-  storage?: string;
-  deliveryType: EventType;
-  photos: string[];
-  detailBlocks: ProductDetailBlock[];
-}
+function EventProductRow({ product, eventType, onSaved }: { product: Product; eventType: EventType; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [price, setPrice] = useState(String(product.price));
+  const [deliveryType, setDeliveryType] = useState<EventType>(product.deliveryType ?? eventType);
+  const [stock, setStock] = useState(product.stock !== undefined ? String(product.stock) : "");
+  const [visible, setVisible] = useState(product.visible !== false);
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-// One form for both creating and editing a product — every field (photos,
-// delivery type, basic info, full 상세설명 block editor) is available up
-// front so a product can be written start-to-finish and saved in one shot,
-// instead of adding bare fields first and only being able to fill in the
-// rest through a separate edit step afterward.
-function ProductFormFields({
-  eventType,
-  initial,
-  values,
-  setters,
-}: {
-  eventType: EventType;
-  initial?: Product;
-  values: {
-    emoji: string;
-    name: string;
-    price: string;
-    origin: string;
-    weight: string;
-    storage: string;
-    deliveryType: EventType;
-    photos: string[];
-    detailBlocks: ProductDetailBlock[];
-  };
-  setters: {
-    setEmoji: (v: string) => void;
-    setName: (v: string) => void;
-    setPrice: (v: string) => void;
-    setOrigin: (v: string) => void;
-    setWeight: (v: string) => void;
-    setStorage: (v: string) => void;
-    setDeliveryType: (v: EventType) => void;
-    setPhotos: (v: string[]) => void;
-    setDetailBlocks: (v: ProductDetailBlock[]) => void;
-  };
-}) {
+  async function save() {
+    if (!price) return;
+    setSaving(true);
+    await updateEventProduct(product.id, {
+      price: Number(price) || 0,
+      deliveryType,
+      stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
+      visible,
+    });
+    setSaving(false);
+    setEditing(false);
+    onSaved();
+  }
+  async function remove() {
+    if (!confirm(`"${product.name}"을(를) 이 이벤트에서 뺄까요? (상품 자체는 삭제되지 않아요)`)) return;
+    await removeEventProduct(product.id);
+    onSaved();
+  }
+  // 노출 스위치/품절 처리는 편집 화면을 열지 않고 목록에서 바로 한 번에 끝낸다.
+  async function toggleVisible() {
+    setBusy(true);
+    await updateEventProduct(product.id, { visible: !(product.visible !== false) });
+    setBusy(false);
+    onSaved();
+  }
+  async function toggleSoldout() {
+    setBusy(true);
+    await updateEventProduct(product.id, { stock: product.stock === 0 ? undefined : 0 });
+    setBusy(false);
+    onSaved();
+  }
+
+  const isSoldout = product.stock === 0;
+  const isVisible = product.visible !== false;
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-3 rounded-lg border border-border p-2.5">
+        <ProductPhoto photo={product.photos?.[0] ?? product.emoji} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-xl" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-semibold">
+            {product.name}
+            {!isVisible && <span className="ml-1.5 rounded-md bg-bg-sunken px-1.5 py-0.5 text-[10.5px] font-bold text-text-muted">숨김</span>}
+          </p>
+          <p className="text-[12px] text-text-muted">
+            {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
+            {product.stock !== undefined && ` · 재고 ${product.stock}개`}
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <button onClick={toggleVisible} disabled={busy} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50">
+            {isVisible ? "숨기기" : "노출"}
+          </button>
+          <button
+            onClick={toggleSoldout}
+            disabled={busy}
+            className={`rounded-[7px] border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50 ${isSoldout ? "border-red-200 bg-red-50 text-red-600" : "border-border"}`}
+          >
+            {isSoldout ? "품절중" : "품절 처리"}
+          </button>
+          <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
+            가격/재고 수정
+          </button>
+          <button onClick={remove} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold text-red-600">
+            제거
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <>
-      <PhotoUploader photos={values.photos} onChange={setters.setPhotos} />
-
+    <div className="flex flex-col gap-2.5 rounded-lg border border-accent bg-accent-soft p-2.5">
+      <div className="flex items-center gap-3">
+        <ProductPhoto photo={product.photos?.[0] ?? product.emoji} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-xl" />
+        <p className="text-[13px] font-semibold">{product.name}</p>
+      </div>
       <div>
         <p className="mb-1 text-[11.5px] font-bold text-text-muted">배송방식</p>
         <div className="flex gap-1.5">
@@ -152,9 +192,9 @@ function ProductFormFields({
             <button
               key={t}
               type="button"
-              onClick={() => setters.setDeliveryType(t)}
+              onClick={() => setDeliveryType(t)}
               className={`rounded-[7px] border px-2.5 py-1.5 text-[12px] font-semibold ${
-                values.deliveryType === t ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"
+                deliveryType === t ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"
               }`}
             >
               {EVENT_TYPE_LABEL[t]}
@@ -162,120 +202,27 @@ function ProductFormFields({
           ))}
         </div>
       </div>
-
       <div className="flex flex-wrap gap-2">
-        <input
-          className="w-14 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-center text-[13px]"
-          value={values.emoji}
-          onChange={(e) => setters.setEmoji(e.target.value)}
-          placeholder="🥚"
-        />
-        <input
-          className="min-w-[140px] flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-          placeholder="상품명"
-          value={values.name}
-          onChange={(e) => setters.setName(e.target.value)}
-        />
         <input
           className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
           placeholder="가격"
           type="number"
-          value={values.price}
-          onChange={(e) => setters.setPrice(e.target.value)}
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
         />
         <input
           className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-          placeholder="원산지"
-          value={values.origin}
-          onChange={(e) => setters.setOrigin(e.target.value)}
-        />
-        <input
-          className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-          placeholder="중량"
-          value={values.weight}
-          onChange={(e) => setters.setWeight(e.target.value)}
-        />
-        <input
-          className="w-28 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-          placeholder="보관법"
-          value={values.storage}
-          onChange={(e) => setters.setStorage(e.target.value)}
+          placeholder="재고(비우면 무제한)"
+          type="number"
+          min={0}
+          value={stock}
+          onChange={(e) => setStock(e.target.value)}
         />
       </div>
-
-      <div>
-        <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
-        <DetailBlockEditor blocks={values.detailBlocks} onChange={setters.setDetailBlocks} />
-      </div>
-    </>
-  );
-}
-
-function ProductRow({ product, eventType, onSaved }: { product: Product; eventType: EventType; onSaved: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const [emoji, setEmoji] = useState(product.emoji);
-  const [name, setName] = useState(product.name);
-  const [price, setPrice] = useState(String(product.price));
-  const [origin, setOrigin] = useState(product.origin ?? "");
-  const [weight, setWeight] = useState(product.weight ?? "");
-  const [storage, setStorage] = useState(product.storage ?? "");
-  const [deliveryType, setDeliveryType] = useState<EventType>(product.deliveryType ?? eventType);
-  const [photos, setPhotos] = useState<string[]>(product.photos ?? []);
-  const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>(product.detailBlocks ?? []);
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    if (!name.trim() || !price) return;
-    setSaving(true);
-    await updateProduct(product.id, {
-      name: name.trim(),
-      price: Number(price) || 0,
-      emoji: emoji || "📦",
-      photos,
-      detailBlocks,
-      deliveryType,
-      origin,
-      weight,
-      storage,
-    });
-    setSaving(false);
-    setEditing(false);
-    onSaved();
-  }
-  async function remove() {
-    if (!confirm(`"${product.name}" 상품을 삭제할까요?`)) return;
-    await deleteProduct(product.id);
-    onSaved();
-  }
-
-  if (!editing) {
-    return (
-      <div className="flex items-center gap-3 rounded-lg border border-border p-2.5">
-        <ProductPhoto photo={product.photos?.[0] ?? product.emoji} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-xl" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-semibold">{product.name}</p>
-          <p className="text-[12px] text-text-muted">
-            {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
-          </p>
-        </div>
-        <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
-          수정
-        </button>
-        <button onClick={remove} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold text-red-600">
-          삭제
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-2.5 rounded-lg border border-accent bg-accent-soft p-2.5">
-      <ProductFormFields
-        eventType={eventType}
-        initial={product}
-        values={{ emoji, name, price, origin, weight, storage, deliveryType, photos, detailBlocks }}
-        setters={{ setEmoji, setName, setPrice, setOrigin, setWeight, setStorage, setDeliveryType, setPhotos, setDetailBlocks }}
-      />
+      <label className="flex items-center gap-2 text-[12.5px] text-text-muted">
+        <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
+        고객 화면에 노출
+      </label>
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} className="rounded-[7px] bg-accent px-2.5 py-1.5 text-[12px] font-bold text-white">
           저장
@@ -288,31 +235,57 @@ function ProductRow({ product, eventType, onSaved }: { product: Product; eventTy
   );
 }
 
-function AddProductForm({ eventId, eventType, onAdded }: { eventId: string; eventType: EventType; onAdded: () => void }) {
-  const [emoji, setEmoji] = useState("📦");
-  const [name, setName] = useState("");
+// 새 상품을 처음부터 만드는 게 아니라, 카탈로그에서 검색해 골라 이번
+// 이벤트의 가격/재고/노출만 정하고 바로 추가한다("상품은 하나, 이벤트에서
+// 재사용" — 이벤트 안에서 상품을 새로 만들지 않는다).
+function AddExistingProductForm({
+  eventId,
+  eventType,
+  alreadyAddedIds,
+  onAdded,
+}: {
+  eventId: string;
+  eventType: EventType;
+  alreadyAddedIds: string[];
+  onAdded: () => void;
+}) {
+  const [catalog, setCatalog] = useState<CatalogProduct[] | null>(null);
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<CatalogProduct | null>(null);
   const [price, setPrice] = useState("");
-  const [origin, setOrigin] = useState("");
-  const [weight, setWeight] = useState("");
-  const [storage, setStorage] = useState("");
-  const [deliveryType, setDeliveryType] = useState<EventType>(eventType);
-  const [photos, setPhotos] = useState<string[]>([]);
-  const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>([]);
+  const [stock, setStock] = useState("");
+  const [visible, setVisible] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  async function submit() {
-    if (!name.trim() || !price) return;
-    setSubmitting(true);
-    await addProduct(eventId, { name: name.trim(), price: Number(price) || 0, emoji: emoji || "📦", photos, detailBlocks, deliveryType, origin, weight, storage });
-    setEmoji("📦");
-    setName("");
+  useEffect(() => {
+    listCatalogProducts().then(setCatalog);
+  }, []);
+
+  const results = useMemo(() => {
+    if (!catalog) return [];
+    const q = query.trim().toLowerCase();
+    return catalog.filter((c) => !alreadyAddedIds.includes(c.id) && (q === "" || c.name.toLowerCase().includes(q)));
+  }, [catalog, query, alreadyAddedIds]);
+
+  function pick(c: CatalogProduct) {
+    setSelected(c);
     setPrice("");
-    setOrigin("");
-    setWeight("");
-    setStorage("");
-    setDeliveryType(eventType);
-    setPhotos([]);
-    setDetailBlocks([]);
+    setStock("");
+    setVisible(true);
+  }
+
+  async function submit() {
+    if (!selected || !price) return;
+    setSubmitting(true);
+    await addEventProduct(eventId, {
+      catalogProductId: selected.id,
+      price: Number(price) || 0,
+      deliveryType: eventType,
+      stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
+      visible,
+    });
+    setSelected(null);
+    setQuery("");
     setSubmitting(false);
     onAdded();
   }
@@ -320,14 +293,77 @@ function AddProductForm({ eventId, eventType, onAdded }: { eventId: string; even
   return (
     <div className="flex flex-col gap-2.5 rounded-xl border border-dashed border-border p-3.5">
       <p className="text-[12.5px] font-bold text-text-muted">상품 추가</p>
-      <ProductFormFields
-        eventType={eventType}
-        values={{ emoji, name, price, origin, weight, storage, deliveryType, photos, detailBlocks }}
-        setters={{ setEmoji, setName, setPrice, setOrigin, setWeight, setStorage, setDeliveryType, setPhotos, setDetailBlocks }}
-      />
-      <button onClick={submit} disabled={submitting} className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50">
-        {submitting ? "저장 중..." : "저장"}
-      </button>
+      {!selected ? (
+        <>
+          <input
+            className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+            placeholder="상품명 검색 (예: 유정란)"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto">
+            {catalog === null && <p className="text-[12px] text-text-muted">불러오는 중...</p>}
+            {catalog !== null && results.length === 0 && (
+              <p className="text-[12px] text-text-muted">
+                검색 결과가 없어요.{" "}
+                <Link href="/admin/products" className="font-semibold text-accent-dark underline">
+                  상품 관리에서 새로 등록
+                </Link>
+                할 수 있어요.
+              </p>
+            )}
+            {results.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => pick(c)}
+                className="flex items-center gap-2.5 rounded-[8px] border border-border px-2.5 py-2 text-left hover:border-accent"
+              >
+                <ProductPhoto photo={c.photos?.[0] ?? c.emoji} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent-soft text-lg" />
+                <span className="truncate text-[13px] font-semibold">{c.name}</span>
+              </button>
+            ))}
+          </div>
+          <Link href="/admin/products" className="text-[12px] font-semibold text-accent-dark underline">
+            + 새 상품 만들기
+          </Link>
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-2.5 rounded-[8px] bg-accent-soft px-2.5 py-2">
+            <ProductPhoto photo={selected.photos?.[0] ?? selected.emoji} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-bg-card text-lg" />
+            <span className="text-[13px] font-semibold">{selected.name}</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <input
+              className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+              placeholder="가격"
+              type="number"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+            />
+            <input
+              className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+              placeholder="재고(비우면 무제한)"
+              type="number"
+              min={0}
+              value={stock}
+              onChange={(e) => setStock(e.target.value)}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-[12.5px] text-text-muted">
+            <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
+            고객 화면에 노출
+          </label>
+          <div className="flex gap-2">
+            <button onClick={submit} disabled={submitting || !price} className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50">
+              {submitting ? "추가 중..." : "이 이벤트에 추가"}
+            </button>
+            <button onClick={() => setSelected(null)} className="rounded-[8px] border border-border px-4 py-2 text-[13px] font-semibold">
+              다시 검색
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

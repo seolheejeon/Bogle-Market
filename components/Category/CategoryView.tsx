@@ -16,7 +16,8 @@ export function CategoryView({ initialType }: { initialType?: EventType }) {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   useEffect(() => {
-    listEvents().then(setEvents);
+    // 노출 꺼둔 상품은 카테고리 그리드에 안 보이게 걸러둔다.
+    listEvents().then((all) => setEvents(all.map((e) => ({ ...e, products: e.products.filter((p) => p.visible !== false) }))));
   }, []);
 
   const eventsForType = useMemo(

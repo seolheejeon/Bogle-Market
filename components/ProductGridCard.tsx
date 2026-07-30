@@ -19,7 +19,7 @@ export function ProductGridCard({ product, rankBadge }: { product: Product; rank
       <p className="mt-1.5 mb-0.5 text-[13.5px] font-semibold">{product.name}</p>
       <div className="flex items-center justify-between">
         <span className="text-[13.5px] font-bold">{formatPrice(product.price)}</span>
-        <QtyControl productId={product.id} />
+        <QtyControl productId={product.id} max={product.stock} />
       </div>
     </Link>
   );

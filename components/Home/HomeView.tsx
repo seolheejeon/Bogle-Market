@@ -22,7 +22,9 @@ export function HomeView() {
   const [heroIndex, setHeroIndex] = useState(0);
 
   useEffect(() => {
-    listEvents().then(setEvents);
+    // 노출 꺼둔 상품은 홈 화면 어디에도(히어로/마감임박/인기상품) 나오지 않게
+    // 이벤트를 불러온 시점에 한 번만 걸러둔다.
+    listEvents().then((all) => setEvents(all.map((e) => ({ ...e, products: e.products.filter((p) => p.visible !== false) }))));
   }, []);
 
   const flash = events?.find((e) => e.isFlash);

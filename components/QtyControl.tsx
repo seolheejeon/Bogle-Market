@@ -2,9 +2,14 @@
 
 import { useCart } from "@/lib/cart-context";
 
-export function QtyControl({ productId }: { productId: string }) {
+// max는 재고 한도(stock)가 정해진 상품에만 전달됨 — undefined면 재고 제한 없음.
+export function QtyControl({ productId, max }: { productId: string; max?: number }) {
   const { cart, changeQty } = useCart();
   const qty = cart[productId] || 0;
+
+  if (max === 0) {
+    return <span className="shrink-0 rounded-full bg-bg-sunken px-2.5 py-1 text-[11px] font-bold text-text-muted">품절</span>;
+  }
 
   if (qty <= 0) {
     return (
@@ -20,6 +25,7 @@ export function QtyControl({ productId }: { productId: string }) {
       </button>
     );
   }
+  const atMax = max !== undefined && qty >= max;
   return (
     <div className="flex items-center gap-1.5">
       <button
@@ -34,7 +40,8 @@ export function QtyControl({ productId }: { productId: string }) {
       </button>
       <span className="min-w-3.5 text-center text-sm font-bold">{qty}</span>
       <button
-        className="h-[26px] w-[26px] rounded-full border border-border bg-bg-card text-sm text-text"
+        className="h-[26px] w-[26px] rounded-full border border-border bg-bg-card text-sm text-text disabled:opacity-40"
+        disabled={atMax}
         onClick={(e) => {
           e.stopPropagation();
           e.preventDefault();

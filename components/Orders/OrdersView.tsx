@@ -13,8 +13,11 @@ const TABS: { value: OrderStatus | "all"; label: string }[] = [
   { value: "all", label: "전체" },
   { value: "wait", label: ORDER_STATUS_LABEL.wait },
   { value: "paid", label: ORDER_STATUS_LABEL.paid },
+  { value: "confirmed", label: ORDER_STATUS_LABEL.confirmed },
   { value: "ship", label: ORDER_STATUS_LABEL.ship },
   { value: "done", label: ORDER_STATUS_LABEL.done },
+  { value: "refund_requested", label: ORDER_STATUS_LABEL.refund_requested },
+  { value: "refunded", label: ORDER_STATUS_LABEL.refunded },
 ];
 
 export function OrdersView() {

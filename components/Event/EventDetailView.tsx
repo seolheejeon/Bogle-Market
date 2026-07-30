@@ -15,7 +15,8 @@ export function EventDetailView({ eventId }: { eventId: string }) {
   const [event, setEvent] = useState<MarketEvent | null | undefined>(undefined);
 
   useEffect(() => {
-    getEvent(eventId).then(setEvent);
+    // 노출 꺼둔 상품은 이벤트 상세의 상품 목록에서도 숨긴다.
+    getEvent(eventId).then((e) => setEvent(e ? { ...e, products: e.products.filter((p) => p.visible !== false) } : e));
   }, [eventId]);
 
   if (event === undefined) return <p className="p-4 text-sm text-text-muted">불러오는 중...</p>;
@@ -55,7 +56,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                 </Link>
                 <p className="text-[13.5px] font-bold">{formatPrice(product.price)}</p>
               </div>
-              <QtyControl productId={product.id} />
+              <QtyControl productId={product.id} max={product.stock} />
             </div>
           ))}
         </div>

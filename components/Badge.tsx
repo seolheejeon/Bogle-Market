@@ -17,8 +17,11 @@ export function EventTypeBadge({ type, flash }: { type: EventType; flash?: boole
 const STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
   wait: "bg-[var(--status-wait-bg)] text-[var(--status-wait-fg)]",
   paid: "bg-[var(--status-paid-bg)] text-[var(--status-paid-fg)]",
+  confirmed: "bg-[var(--status-confirmed-bg)] text-[var(--status-confirmed-fg)]",
   ship: "bg-[var(--status-ship-bg)] text-[var(--status-ship-fg)]",
   done: "bg-[var(--status-done-bg)] text-[var(--status-done-fg)]",
+  refund_requested: "bg-[var(--status-refund-requested-bg)] text-[var(--status-refund-requested-fg)]",
+  refunded: "bg-[var(--status-refunded-bg)] text-[var(--status-refunded-fg)]",
   cancelled: "bg-[var(--badge-flash-bg)] text-[var(--badge-flash-fg)]",
 };
 

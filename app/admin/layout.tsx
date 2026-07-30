@@ -6,9 +6,9 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
 const NAV = [
-  { href: "/admin", label: "대시보드" },
-  { href: "/admin/events", label: "이벤트/상품" },
-  { href: "/admin/orders", label: "주문 관리" },
+  { href: "/admin", label: "운영 메인" },
+  { href: "/admin/events", label: "이벤트 관리" },
+  { href: "/admin/products", label: "상품 관리" },
   { href: "/admin/customers", label: "고객 관리" },
   { href: "/admin/notifications", label: "알림 발송" },
   { href: "/admin/settings", label: "설정" },
