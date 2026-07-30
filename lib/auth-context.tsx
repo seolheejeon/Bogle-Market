@@ -36,8 +36,12 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 // Supabase Auth needs an email-shaped identifier; the user never picks or
 // sees this — only a username. Never send anything to this domain.
+// ⚠️ Must be a syntactically ordinary domain — Supabase Auth rejects IANA
+// special-use/reserved TLDs (.internal, .test, .example, .invalid, ...) at
+// signup with "Email address is invalid", so something like "bogle.internal"
+// doesn't work even though no real mail is ever sent here.
 function toInternalEmail(username: string): string {
-  return `${username}@bogle.internal`;
+  return `${username}@bogle-users.com`;
 }
 
 function mapProfileRow(row: Record<string, any>): Profile {

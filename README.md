@@ -22,6 +22,17 @@ npm run dev
 
 Supabase를 처음 연결할 땐 `lib/supabase/schema.sql` → `lib/supabase/seed.sql` 순서로 SQL 편집기에서 실행하세요.
 
+**Supabase 프로젝트 설정에서 꼭 확인할 것**
+- **Authentication → Sign In / Providers → Email → "Confirm email" 끄기** — 이 앱은 아이디만 쓰고 이메일을 안 보여주려고 내부적으로 `아이디@bogle-users.com`이라는, 실제로 아무도 받을 수 없는 가짜 이메일을 씁니다. "Confirm email"이 켜져 있으면 그 가짜 주소로 확인 링크가 가버려서 아무도 가입을 완료할 수 없어요.
+
+**첫 관리자 계정 만들기**
+1. 앱에서 평소처럼 회원가입
+2. SQL 편집기에서 아래 실행 (아이디는 실제로 가입한 것으로):
+   ```sql
+   update profiles set is_admin = true where username = '가입한아이디';
+   ```
+3. 로그아웃 후 다시 로그인하면 관리자 화면(`/admin`)에 들어갈 수 있습니다.
+
 ## 배포 (Netlify)
 
 이 저장소에는 `netlify.toml`이 포함되어 있고 `@netlify/plugin-nextjs`로 빌드됩니다.
