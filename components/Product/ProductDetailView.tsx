@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { findProductWithEvent } from "@/lib/data";
 import type { MarketEvent, Product } from "@/types";
 import { formatPrice, formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
+import { isEventOrderable } from "@/lib/order-policy";
 import { useCart } from "@/lib/cart-context";
 import { ProductDetailContent } from "@/components/Product/ProductDetailContent";
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
@@ -91,6 +92,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
   // 이미 장바구니에 담은 수량까지 합쳐서 재고를 넘지 않게 한다.
   const inCart = cart[product.id] || 0;
   const soldOut = product.stock === 0;
+  const closed = !isEventOrderable(event);
   const remaining = product.stock !== undefined ? Math.max(0, product.stock - inCart) : undefined;
 
   function addToCart() {
@@ -178,7 +180,9 @@ export function ProductDetailView({ productId }: { productId: string }) {
               장바구니에 담겼습니다
             </div>
           )}
-          {soldOut ? (
+          {closed ? (
+            <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">마감된 이벤트라 더 이상 주문할 수 없어요.</p>
+          ) : soldOut ? (
             <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">품절된 상품이에요.</p>
           ) : (
             <div className="mb-2.5 flex items-center justify-center gap-4">
@@ -203,10 +207,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
           <button
             ref={addButtonRef}
             className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40"
-            disabled={soldOut}
+            disabled={soldOut || closed}
             onClick={addToCart}
           >
-            {soldOut ? "품절" : "장바구니 담기"}
+            {closed ? "마감" : soldOut ? "품절" : "장바구니 담기"}
           </button>
         </div>
       </div>

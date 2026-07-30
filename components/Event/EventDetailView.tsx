@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { getEvent } from "@/lib/data";
 import type { MarketEvent } from "@/types";
 import { formatDeadlineLabel, formatEventDateChip, formatPrice } from "@/lib/format";
+import { isEventOrderable } from "@/lib/order-policy";
 import { EventTypeBadge } from "@/components/Badge";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
@@ -21,6 +22,8 @@ export function EventDetailView({ eventId }: { eventId: string }) {
 
   if (event === undefined) return <p className="p-4 text-sm text-text-muted">불러오는 중...</p>;
   if (event === null) return <p className="p-4 text-sm text-text-muted">이벤트를 찾을 수 없어요.</p>;
+
+  const closed = !isEventOrderable(event);
 
   return (
     <div>
@@ -40,6 +43,11 @@ export function EventDetailView({ eventId }: { eventId: string }) {
         <div className="mt-3 rounded-[10px] p-3 text-[12.5px] leading-relaxed whitespace-pre-line" style={{ background: "#fff8e6", color: "#8a6a12" }}>
           {event.notice}
         </div>
+        {closed && (
+          <div className="mt-3 rounded-[10px] bg-bg-sunken p-3 text-[12.5px] font-semibold text-text-muted">
+            마감된 이벤트예요. 더 이상 주문할 수 없어요.
+          </div>
+        )}
 
         <div className="mt-4">
           {event.products.map((product) => (
@@ -56,7 +64,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                 </Link>
                 <p className="text-[13.5px] font-bold">{formatPrice(product.price)}</p>
               </div>
-              <QtyControl productId={product.id} max={product.stock} />
+              <QtyControl productId={product.id} max={product.stock} closed={closed} />
             </div>
           ))}
         </div>

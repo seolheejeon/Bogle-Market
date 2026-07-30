@@ -3,10 +3,15 @@
 import { useCart } from "@/lib/cart-context";
 
 // max는 재고 한도(stock)가 정해진 상품에만 전달됨 — undefined면 재고 제한 없음.
-export function QtyControl({ productId, max }: { productId: string; max?: number }) {
+// closed는 이벤트 자체가 STRICT_DEADLINE 정책으로 마감된 경우(lib/order-policy.ts) —
+// 재고와 별개로 이 상품을 담을 수 없다는 뜻.
+export function QtyControl({ productId, max, closed }: { productId: string; max?: number; closed?: boolean }) {
   const { cart, changeQty } = useCart();
   const qty = cart[productId] || 0;
 
+  if (closed) {
+    return <span className="shrink-0 rounded-full bg-bg-sunken px-2.5 py-1 text-[11px] font-bold text-text-muted">마감</span>;
+  }
   if (max === 0) {
     return <span className="shrink-0 rounded-full bg-bg-sunken px-2.5 py-1 text-[11px] font-bold text-text-muted">품절</span>;
   }
