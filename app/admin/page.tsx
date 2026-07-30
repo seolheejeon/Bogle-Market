@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { listAllOrders, listEvents, updateOrderStatus, createNotification, approveCancelRequest, rejectCancelRequest } from "@/lib/data";
 import type { EventType, MarketEvent, Order, OrderStatus } from "@/types";
-import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL } from "@/types";
+import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL, COURIER_OPTIONS, COURIER_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 
@@ -24,13 +24,19 @@ const STATUS_CHANGE_NOTICE: Partial<Record<OrderStatus, { title: string; message
   cancelled: { title: "주문이 취소됐어요", message: "취소 요청이 승인돼서 주문이 취소됐어요.", icon: "🧾" },
 };
 
-async function notifyStatusChange(order: Order, next: OrderStatus, eventTitle?: string) {
+async function notifyStatusChange(
+  order: Order,
+  next: OrderStatus,
+  eventTitle?: string,
+  shipping?: { courierCode: string; trackingNumber: string },
+) {
   const notice = STATUS_CHANGE_NOTICE[next];
   if (!order.profileId || !notice) return;
   const prefix = eventTitle ? `[${eventTitle}] ` : "";
+  const shippingSuffix = shipping ? ` (${COURIER_LABEL[shipping.courierCode] ?? "택배"} / ${shipping.trackingNumber})` : "";
   await createNotification({
     title: notice.title,
-    message: `${prefix}주문번호 ${order.orderNumber} ${notice.message}`,
+    message: `${prefix}주문번호 ${order.orderNumber} ${notice.message}${shippingSuffix}`,
     icon: notice.icon,
     linkType: "ORDER",
     linkId: order.id,
@@ -58,6 +64,9 @@ export default function AdminHomePage() {
   const [todayDoneOnly, setTodayDoneOnly] = useState(false);
   const [activeTile, setActiveTile] = useState<string | null>(null);
   const [bulkCompleting, setBulkCompleting] = useState(false);
+  // 배송중 전환은 택배사+송장번호를 먼저 받아야 해서, 한 번에 하나의 주문만
+  // 인라인 입력 폼을 펼쳐둔다.
+  const [shippingId, setShippingId] = useState<string | null>(null);
 
   function refresh() {
     listAllOrders().then((o) => {
@@ -88,6 +97,13 @@ export default function AdminHomePage() {
     if (!next) return;
     await updateOrderStatus(order.id, next);
     await notifyStatusChange(order, next, eventById.get(order.eventId)?.title);
+    refresh();
+  }
+  // 배송중 전환 전용 — 택배사/송장번호를 같이 받아서 저장하고, 알림에도 포함해 보낸다.
+  async function submitShipping(order: Order, courierCode: string, trackingNumber: string) {
+    await updateOrderStatus(order.id, "ship", { courierCode, trackingNumber });
+    await notifyStatusChange(order, "ship", eventById.get(order.eventId)?.title, { courierCode, trackingNumber });
+    setShippingId(null);
     refresh();
   }
   async function cancel(order: Order) {
@@ -393,6 +409,11 @@ export default function AdminHomePage() {
             </p>
             <p className="mt-1 text-[12.5px] text-text-muted">{o.addressSnapshot}</p>
             <p className="mt-1 text-[12.5px] text-text-muted">{o.items.map((i) => `${i.productName} x${i.quantity}`).join(", ")}</p>
+            {o.courierCode && o.trackingNumber && (
+              <p className="mt-1 text-[12px] font-semibold text-accent-dark">
+                {COURIER_LABEL[o.courierCode] ?? "택배"} · {o.trackingNumber}
+              </p>
+            )}
             {o.cancelRequested && o.cancelReason && <p className="mt-1 text-[12px] font-semibold text-red-600">고객 취소 사유: {o.cancelReason}</p>}
             <div className="mt-1.5 flex items-center justify-between">
               <strong className="text-[14px]">{formatPrice(o.total)}</strong>
@@ -408,10 +429,19 @@ export default function AdminHomePage() {
                   </>
                 ) : (
                   <>
-                    {NEXT_STATUS[o.status] && (
-                      <button onClick={() => advance(o)} className="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white">
-                        {NEXT_LABEL[o.status]}
+                    {NEXT_STATUS[o.status] === "ship" ? (
+                      <button
+                        onClick={() => setShippingId(shippingId === o.id ? null : o.id)}
+                        className="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white"
+                      >
+                        송장 입력
                       </button>
+                    ) : (
+                      NEXT_STATUS[o.status] && (
+                        <button onClick={() => advance(o)} className="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white">
+                          {NEXT_LABEL[o.status]}
+                        </button>
+                      )
                     )}
                     {o.status === "refund_requested" && (
                       <button onClick={() => markRefunded(o)} className="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white">
@@ -427,9 +457,57 @@ export default function AdminHomePage() {
                 )}
               </div>
             </div>
+            {shippingId === o.id && (
+              <ShippingForm onSubmit={(courierCode, trackingNumber) => submitShipping(o, courierCode, trackingNumber)} onCancel={() => setShippingId(null)} />
+            )}
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ShippingForm({ onSubmit, onCancel }: { onSubmit: (courierCode: string, trackingNumber: string) => Promise<void>; onCancel: () => void }) {
+  const [courierCode, setCourierCode] = useState<string>(COURIER_OPTIONS[0].code);
+  const [trackingNumber, setTrackingNumber] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit() {
+    if (!trackingNumber.trim()) return;
+    setSubmitting(true);
+    await onSubmit(courierCode, trackingNumber.trim());
+    setSubmitting(false);
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-bg-sunken p-2.5">
+      <select
+        value={courierCode}
+        onChange={(e) => setCourierCode(e.target.value)}
+        className="rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
+      >
+        {COURIER_OPTIONS.map((c) => (
+          <option key={c.code} value={c.code}>
+            {c.label}
+          </option>
+        ))}
+      </select>
+      <input
+        value={trackingNumber}
+        onChange={(e) => setTrackingNumber(e.target.value)}
+        placeholder="송장번호"
+        className="min-w-[140px] flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
+      />
+      <button
+        onClick={submit}
+        disabled={submitting || !trackingNumber.trim()}
+        className="rounded-[7px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white disabled:opacity-50"
+      >
+        {submitting ? "저장 중..." : "배송시작"}
+      </button>
+      <button onClick={onCancel} className="rounded-[7px] border border-border px-3 py-1.5 text-[12px] font-semibold">
+        취소
+      </button>
     </div>
   );
 }

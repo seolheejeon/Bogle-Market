@@ -126,6 +126,11 @@ create table if not exists orders (
   -- 재고 복구) 하거나 거절(플래그만 해제 + 사유와 함께 알림)할 때까지 대기시킨다.
   cancel_requested boolean not null default false,
   cancel_reason text,
+  -- 배송중(ship) 처리 시 관리자가 입력하는 택배사 코드(스마트택배 API 기준,
+  -- types/index.ts의 COURIER_LABEL 참고)와 송장번호. 문고리/사다드림처럼 직접
+  -- 배송하는 주문은 비어있다.
+  courier_code text,
+  tracking_number text,
   total integer not null check (total >= 0),
   created_at timestamptz not null default now()
 );

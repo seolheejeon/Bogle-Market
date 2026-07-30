@@ -171,6 +171,10 @@ export interface Order {
   cancelRequested: boolean;
   // 고객이 취소 요청 시 남긴 사유(선택) — 관리자가 승인/거절을 판단할 때 참고.
   cancelReason: string | null;
+  // 배송중(ship) 처리 시 관리자가 입력 — 택배(PARCEL)가 아닌 문고리/사다드림
+  // 주문은 항상 null.
+  courierCode: string | null;
+  trackingNumber: string | null;
   items: OrderItem[];
   total: number;
   createdAt: string; // ISO
@@ -205,6 +209,28 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   card: "카드 결제",
   kakaopay: "카카오페이",
   incheon_eum: "인천 이음카드",
+};
+
+// 스마트택배(SweetTracker) API의 택배사 코드(t_code) 기준 — 배송조회 API
+// 연동 전에 실제 코드값을 스마트택배 콘솔의 companylist API로 재확인할 것.
+export const COURIER_OPTIONS = [
+  { code: "04", label: "CJ대한통운" },
+  { code: "05", label: "한진택배" },
+  { code: "08", label: "롯데택배" },
+  { code: "01", label: "우체국택배" },
+  { code: "06", label: "로젠택배" },
+] as const;
+
+export const COURIER_LABEL: Record<string, string> = Object.fromEntries(COURIER_OPTIONS.map((c) => [c.code, c.label]));
+
+// 실시간 API 조회가 안 될 때(키 미설정/오류) 대신 열어주는 각 택배사 공식
+// 배송조회 페이지 — 송장번호만 채워 넣으면 된다.
+export const COURIER_TRACKING_URL: Record<string, (invoice: string) => string> = {
+  "04": (inv) => `https://trace.cjlogistics.com/next/tracking.html?wblNo=${inv}`,
+  "05": (inv) => `https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mCode=MN038&schLang=KR&wblnumText2=${inv}`,
+  "08": (inv) => `https://www.lotteglogis.com/home/reservation/tracking/linkView?InvNo=${inv}`,
+  "01": (inv) => `https://service.epost.go.kr/trace.RetrieveDomRigiTraceList.comm?displayHeader=N&sid1=${inv}`,
+  "06": (inv) => `https://www.ilogen.com/m/personal/trace.pop/${inv}`,
 };
 
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {

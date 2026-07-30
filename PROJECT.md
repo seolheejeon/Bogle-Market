@@ -3,7 +3,7 @@
 보글마켓 개발 진행상황과 주요 기획 결정을 기록하는 문서입니다.
 **기능이 완료되거나 기획이 바뀔 때마다 이 문서도 함께 업데이트합니다.**
 
-마지막 업데이트: 2026-07-29 (상품/이벤트 카탈로그 분리 — 안 B로 전환)
+마지막 업데이트: 2026-07-30 (택배 배송조회 — 택배사/송장번호 + 스마트택배 API 연동)
 
 ---
 
@@ -162,6 +162,13 @@
 - **삭제 보호**: 이벤트에서 사용 중인 카탈로그 상품은 삭제 불가 — Supabase는 `event_products.product_id`의 FK(ON DELETE 기본값 NO ACTION)가 막고 에러코드(`23503`)를 친절한 메시지로 변환, mock 모드는 삭제 전에 모든 이벤트의 리스팅을 직접 스캔해서 같은 메시지를 띄움. 반대로 리스팅(이벤트에서의 상품)을 "제거"하는 건 카탈로그 상품 자체엔 영향 없음(검증 완료)
 - 브라우저로 실제 검증: 카탈로그에서 "유정란 20구" 설명을 한 번 수정 → 문고리 1회차/2회차 두 상품 상세 페이지 모두에 즉시 반영됨(동일 카탈로그 재사용 확인). 안동 사다드림에 유정란을 새 가격(8,500원)으로 추가해도 문고리 회차들의 가격(7,900원)은 안 바뀜(리스팅별 독립 가격 확인). 특정 회차에서만 노출을 꺼도 다른 회차의 같은 상품은 그대로 보임(리스팅별 독립 노출 확인)
 
+**택배 배송조회** (`feature/parcel-tracking`)
+- 배경: 택배(PARCEL) 배송의 "지금 어디쯤 왔는지" 문의를 줄이고 싶어서, 배송중 처리에 택배사/송장번호를 남기고 고객이 직접 조회할 수 있게 함. 구현 전 국내 택배 배송조회 방법을 조사(택배사 개별 공식 API는 물량 계약이 있어야 발급되어 소규모 셀러는 신청 자격 자체가 없음, 공공데이터포털 우체국 API는 등기우편만 대상이라 범위가 좁음, 오픈소스 tracker.delivery는 무료지만 21일마다 키를 수동 갱신해야 함) → **스마트택배(SweetTracker) 조회 API**가 회원가입만으로 무료로 쓸 수 있고 CJ대한통운/한진/롯데/우체국/로젠을 하나의 API로 처리해줘서 채택
+- **관리자**: 배송중 처리 버튼이 "송장 입력" 인라인 폼(택배사 드롭다운 + 송장번호)으로 바뀜(택배 이벤트가 아니어도 전 이벤트 공통, 문고리/사다드림은 그냥 안 채우면 됨) — 저장하면 `updateOrderStatus`가 상태 전환과 택배사/송장번호 저장을 같이 하고, 기존 알림 문구에 택배사/송장번호가 덧붙어 자동 발송됨
+- **고객**: 주문상세에 택배사/송장번호 표시 + "배송조회" 버튼. 누르면 서버 라우트(`app/api/tracking`)가 스마트택배 API를 대신 호출해서(API 키를 클라이언트에 노출하지 않기 위해 이 프로젝트 최초의 Route Handler로 만듦) 앱 안에 현재 상태·타임라인을 바로 보여줌
+- **키가 없거나 조회가 실패해도 항상 동작하는 폴백**: `SWEETTRACKER_API_KEY`가 비어있으면(지금 상태) 라우트가 `{ ok:false, reason:"not_configured" }`를 돌려주고, 화면은 대신 해당 택배사 공식 조회 페이지(CJ/한진/롯데/우체국/로젠 각각의 송장조회 URL에 송장번호를 끼워 넣은 딥링크, `COURIER_TRACKING_URL`)를 새 창으로 열어주는 버튼을 보여줌 — 나중에 키를 발급받아 환경변수만 채우면 앱 안 실시간 조회로 자연히 업그레이드되고, 그 전까지도 기능이 끊기지 않음
+- ⚠️ 스마트택배 API 응답 필드명(`level`/`trackingDetails` 등)과 택배사 코드(`t_code`, 지금은 04=CJ/05=한진/08=롯데/01=우체국/06=로젠으로 가정)는 공개 문서와 사례를 바탕으로 구현한 것이라, 실제로 발급받은 키로 한 번 호출해서 대조 확인이 필요함(`app/api/tracking/route.ts` 상단 주석 참고)
+
 **인프라**
 - Supabase 스키마(`lib/supabase/schema.sql`) + seed 데이터(`lib/supabase/seed.sql`)
 - RLS 정책 — `is_admin()` SECURITY DEFINER 함수로 profiles 자기참조 무한재귀 버그 수정
@@ -186,6 +193,7 @@
 - [ ] 비회원 "이름+PIN" 조회가 같은 이름+같은 PIN을 쓰는 타인과 주문이 섞일 여지 있음 (설계 당시 인지된 트레이드오프, 경미하지만 남아있는 리스크)
 
 **기존에 알려져 있던 항목**
+- [ ] 스마트택배 API 키 발급 후 `SWEETTRACKER_API_KEY` 환경변수 설정 + `app/api/tracking/route.ts`의 응답 필드명/택배사 코드(`t_code`)를 실제 응답과 대조 확인 (지금은 키가 없어 항상 "준비 중" 폴백으로만 동작 확인함)
 - [ ] Toss Payments 실제 가맹점 키 연동 (카드/카카오페이 자동결제)
 - [ ] 인천 이음카드 온라인 결제 연동 방법 조사
 - [ ] 배송지 다중 저장/선택 UI (현재는 최근 1건만 자동 채움)
@@ -214,7 +222,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, is_flash, deadline_at, delivery_at, notice | 공동구매 회차 |
 | `products` | id, name, emoji, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, eat, description | **카탈로그 상품** — 이벤트와 무관하게 상품당 한 행만 존재하는 "내용물"(사진/설명/원산지 등). 같은 상품이 여러 회차에 걸려도 여기엔 한 번만 있고, 아래 `event_products`가 이 id를 재사용함. 삭제하려는 상품이 `event_products`에서 쓰이고 있으면 FK가 막음(에러코드 `23503`) |
 | `event_products` | id, event_id, product_id(→products), price, delivery_type, stock, visible | **이벤트별 상품 리스팅** — 옛 `products` 테이블이 하던 역할(이벤트에 속한 판매 정보)을 그대로 가져오되 내용은 `product_id`로 카탈로그를 참조. `price`/`delivery_type`/`stock`/`visible`은 리스팅마다 독립적이라, 같은 카탈로그 상품도 회차별로 다른 가격·재고·노출 여부를 가질 수 있음. `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `stock`이 null이면 재고 제한 없음, 값이 있으면 그 수량만큼만 판매되고 0이면 품절. `visible=false`면 고객 화면에서 이 리스팅만 숨김(카탈로그 상품 자체나 다른 회차 리스팅엔 영향 없음) — RLS도 `visible or is_admin()`으로 비노출 리스팅을 비관리자에게 숨김. 화면(`Product` 타입)에는 `products`와 조인한 평평한 모양으로 합쳐져서 전달됨(`catalogProductId`로 원본 카탈로그 id를 알 수 있음) |
-| `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, cancel_requested, cancel_reason, total | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용). `status`는 `wait`→`paid`→`confirmed`(발주확인)→`ship`→`done` 순서로 진행하고, `done` 이후 `refund_requested`/`refunded`가 곁가지로 붙을 수 있으며 `wait`/`paid` 단계에서는 고객이 직접 `cancelled`로 바꿀 수 있음(RLS/RPC로 서버에서도 강제). `cancel_requested`는 발주확인 이후 고객이 취소를 "요청"했는지 나타내는 플래그 — status는 그대로 두고(배송 준비 계속 진행) 관리자가 승인(cancelled로 전환)하거나 거절(플래그만 해제)할 때까지 대기. `cancel_reason`은 고객이 남긴 취소 사유(선택) |
+| `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, cancel_requested, cancel_reason, courier_code, tracking_number, total | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용). `status`는 `wait`→`paid`→`confirmed`(발주확인)→`ship`→`done` 순서로 진행하고, `done` 이후 `refund_requested`/`refunded`가 곁가지로 붙을 수 있으며 `wait`/`paid` 단계에서는 고객이 직접 `cancelled`로 바꿀 수 있음(RLS/RPC로 서버에서도 강제). `cancel_requested`는 발주확인 이후 고객이 취소를 "요청"했는지 나타내는 플래그 — status는 그대로 두고(배송 준비 계속 진행) 관리자가 승인(cancelled로 전환)하거나 거절(플래그만 해제)할 때까지 대기. `cancel_reason`은 고객이 남긴 취소 사유(선택). `courier_code`/`tracking_number`는 배송중(ship) 처리 시 관리자가 입력 — 스마트택배 API의 택배사 코드 기준(`types/index.ts`의 `COURIER_LABEL`), 문고리/사다드림 주문은 항상 null |
 | `order_items` | id, order_id, event_product_id(→event_products), product_name, price_snapshot, quantity | 주문 상품 스냅샷. `event_product_id`는 카탈로그 분리 이전엔 `product_id`였던 컬럼 — 가리키는 대상(리스팅 id)은 동일해서 주문/재고/취소 로직은 변경 없음. TS 쪽 `OrderItem.productId` 필드명은 그대로 유지(DB 컬럼명만 바뀜) |
 | `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
 | `store_settings` | id(boolean, 항상 true — 싱글턴 강제), bank_name, account_number, account_holder, updated_at | 무통장입금 안내용 계좌 정보. 매장 전체에 한 행만 존재. 조회는 게스트 포함 전체 공개, 수정은 관리자만 |

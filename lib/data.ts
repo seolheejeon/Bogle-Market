@@ -463,6 +463,8 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     status: "wait",
     cancelRequested: false,
     cancelReason: null,
+    courierCode: null,
+    trackingNumber: null,
     items: input.items,
     total: input.total,
     createdAt: new Date().toISOString(),
@@ -547,7 +549,11 @@ function isRestockingStatus(status: OrderStatus): boolean {
   return status === "cancelled" || status === "refunded";
 }
 
-export async function updateOrderStatus(orderId: string, status: OrderStatus): Promise<void> {
+export async function updateOrderStatus(
+  orderId: string,
+  status: OrderStatus,
+  shipping?: { courierCode: string; trackingNumber: string },
+): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     if (isRestockingStatus(status)) {
@@ -556,7 +562,12 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
         if (item.event_product_id) await supabase.rpc("increment_stock", { p_event_product_id: item.event_product_id, p_qty: item.quantity });
       }
     }
-    const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
+    const patch: Record<string, unknown> = { status };
+    if (shipping) {
+      patch.courier_code = shipping.courierCode;
+      patch.tracking_number = shipping.trackingNumber;
+    }
+    const { error } = await supabase.from("orders").update(patch).eq("id", orderId);
     if (error) throw error;
     return;
   }
@@ -565,7 +576,13 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
     const target = orders.find((o) => o.id === orderId);
     if (target) saveEvents(restoreProductStock(loadEvents(), target.items));
   }
-  saveOrders(orders.map((o) => (o.id === orderId ? { ...o, status } : o)));
+  saveOrders(
+    orders.map((o) =>
+      o.id === orderId
+        ? { ...o, status, ...(shipping ? { courierCode: shipping.courierCode, trackingNumber: shipping.trackingNumber } : {}) }
+        : o,
+    ),
+  );
 }
 
 // 고객 셀프취소 — 발주확인(confirmed) 이전 단계(wait/paid)에서만 가능. 회원은
@@ -883,6 +900,8 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     status: row.status,
     cancelRequested: row.cancel_requested ?? false,
     cancelReason: row.cancel_reason ?? null,
+    courierCode: row.courier_code ?? null,
+    trackingNumber: row.tracking_number ?? null,
     items,
     total: row.total,
     createdAt: row.created_at,

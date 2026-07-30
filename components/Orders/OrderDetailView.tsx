@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { listOrdersForProfile, lookupGuestOrders, getEvent, cancelOrder, requestCancellation, requestRefund } from "@/lib/data";
 import type { MarketEvent, Order, OrderStatus } from "@/types";
-import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL } from "@/types";
+import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL, COURIER_LABEL, COURIER_TRACKING_URL } from "@/types";
 import { formatDateTime, formatPrice, formatEventDateChip } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
@@ -171,6 +171,8 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
               </p>
             </div>
 
+            {order.courierCode && order.trackingNumber && <TrackingSection courierCode={order.courierCode} trackingNumber={order.trackingNumber} />}
+
             {actionError && <p className="mb-4 text-[12.5px] font-semibold text-red-600">{actionError}</p>}
 
             {canSelfCancel && (
@@ -256,6 +258,93 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+interface TrackingResult {
+  ok: boolean;
+  reason?: "not_configured" | "error";
+  message?: string;
+  statusText?: string;
+  itemName?: string;
+  estimate?: string;
+  events?: { time: string; location: string; description: string }[];
+}
+
+// 실시간 조회(스마트택배 API)가 되면 앱 안에서 바로 상태/타임라인을 보여주고,
+// 키 미설정이나 조회 실패 시엔 해당 택배사 공식 조회 페이지로 대신 안내한다.
+function TrackingSection({ courierCode, trackingNumber }: { courierCode: string; trackingNumber: string }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<TrackingResult | null>(null);
+  const courierLabel = COURIER_LABEL[courierCode] ?? "택배";
+  const fallbackUrl = COURIER_TRACKING_URL[courierCode]?.(trackingNumber);
+
+  async function check() {
+    setOpen(true);
+    if (result) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/tracking?courier=${encodeURIComponent(courierCode)}&invoice=${encodeURIComponent(trackingNumber)}`);
+      setResult(await res.json());
+    } catch {
+      setResult({ ok: false, reason: "error" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mb-4 rounded-[10px] border border-border p-3 text-[13px]">
+      <p className="mb-1">
+        <span className="text-text-muted">택배사</span> {courierLabel}
+      </p>
+      <p className="mb-2">
+        <span className="text-text-muted">송장번호</span> {trackingNumber}
+      </p>
+      {!open && (
+        <button onClick={check} className="w-full rounded-[9px] bg-accent py-2 text-[13px] font-bold text-white">
+          배송조회
+        </button>
+      )}
+      {open && loading && <p className="text-[12.5px] text-text-muted">배송 정보를 불러오는 중...</p>}
+      {open && !loading && result?.ok && (
+        <div>
+          <p className="mb-2 font-bold text-accent-dark">
+            {result.statusText}
+            {result.estimate ? ` · 도착예정 ${result.estimate}` : ""}
+          </p>
+          {result.events && result.events.length > 0 && (
+            <div className="flex flex-col gap-1.5 border-t border-border pt-2">
+              {result.events.map((e, i) => (
+                <div key={i} className="flex justify-between gap-2 text-[12px]">
+                  <span className="shrink-0 text-text-muted">{e.time}</span>
+                  <span className="flex-1 text-center">{e.description}</span>
+                  <span className="shrink-0 text-text-muted">{e.location}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {open && !loading && result && !result.ok && (
+        <div>
+          <p className="mb-2 text-[12.5px] text-text-muted">
+            {result.reason === "not_configured" ? "실시간 조회는 아직 준비 중이에요." : "배송 정보를 불러오지 못했어요."} 택배사 사이트에서 확인해 주세요.
+          </p>
+          {fallbackUrl && (
+            <a
+              href={fallbackUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full rounded-[9px] border border-border py-2 text-center text-[13px] font-bold text-accent-dark"
+            >
+              {courierLabel} 사이트에서 조회하기
+            </a>
+          )}
+        </div>
+      )}
     </div>
   );
 }
