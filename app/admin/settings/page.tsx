@@ -25,14 +25,19 @@ export default function AdminSettingsPage() {
       return;
     }
     setSaving(true);
-    await updateStoreSettings({
-      bankName: settings.bankName.trim(),
-      accountNumber: settings.accountNumber.trim(),
-      accountHolder: settings.accountHolder.trim(),
-    });
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
+    try {
+      await updateStoreSettings({
+        bankName: settings.bankName.trim(),
+        accountNumber: settings.accountNumber.trim(),
+        accountHolder: settings.accountHolder.trim(),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (loading) return <p className="text-sm text-text-muted">불러오는 중...</p>;

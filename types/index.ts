@@ -9,10 +9,12 @@ export type OrderStatus = "wait" | "paid" | "confirmed" | "ship" | "done" | "ref
 // (and a future `products.detail_blocks` jsonb column would store), so
 // swapping the dummy data for real admin-authored content later only means
 // changing where this array comes from, not how it's rendered.
+// images 블록은 urls 배열 길이(1~3)만큼 가로로 나란히 표시된다 — 스마트스토어
+// 상세페이지처럼 1열/2열/3열 레이아웃을 블록 단위로 자유롭게 섞어 쓸 수 있게.
 export type ProductDetailBlock =
   | { type: "heading"; text: string }
   | { type: "text"; text: string }
-  | { type: "image"; url: string; alt?: string };
+  | { type: "images"; urls: string[] };
 
 // 카탈로그 상품 — 사진/설명/원산지 등 "내용물"만 담고 있고 이벤트와 무관하게
 // 하나만 존재한다. "상품 관리"(`/admin/products`) 화면에서 검색·수정하는

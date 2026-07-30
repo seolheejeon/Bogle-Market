@@ -194,6 +194,7 @@ export async function listCatalogProducts(): Promise<CatalogProduct[]> {
 }
 
 export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): Promise<CatalogProduct> {
+  console.log(`[lib/data] createCatalogProduct 시작 (${isSupabaseConfigured ? "supabase" : "mock"} 모드)`);
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase
@@ -211,15 +212,21 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
       })
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      console.error("[lib/data] createCatalogProduct supabase insert 실패", error);
+      throw error;
+    }
+    console.log("[lib/data] createCatalogProduct supabase insert 완료");
     return mapSupabaseCatalogProduct(data);
   }
   const product: CatalogProduct = { ...input, id: genId("cat") };
   saveCatalogProducts([product, ...loadCatalogProducts()]);
+  console.log("[lib/data] createCatalogProduct mock 저장 완료");
   return product;
 }
 
 export async function updateCatalogProduct(catalogProductId: string, patch: Partial<Omit<CatalogProduct, "id">>): Promise<void> {
+  console.log(`[lib/data] updateCatalogProduct 시작 (${isSupabaseConfigured ? "supabase" : "mock"} 모드)`);
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     const row: Record<string, unknown> = {};
@@ -233,10 +240,15 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     if (patch.eat !== undefined) row.eat = patch.eat;
     if (patch.description !== undefined) row.description = patch.description;
     const { error } = await supabase.from("products").update(row).eq("id", catalogProductId);
-    if (error) throw error;
+    if (error) {
+      console.error("[lib/data] updateCatalogProduct supabase update 실패", error);
+      throw error;
+    }
+    console.log("[lib/data] updateCatalogProduct supabase update 완료");
     return;
   }
   saveCatalogProducts(loadCatalogProducts().map((c) => (c.id === catalogProductId ? { ...c, ...patch } : c)));
+  console.log("[lib/data] updateCatalogProduct mock 저장 완료");
 }
 
 // 사용 중인(어느 이벤트에라도 리스팅된) 카탈로그 상품은 삭제할 수 없다 —

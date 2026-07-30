@@ -1,8 +1,13 @@
 import type { ProductDetailBlock } from "@/types";
 
-// Renders an ordered list of detail blocks (heading / text / image), same
+const GRID_COLS_CLASS: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3" };
+
+// Renders an ordered list of detail blocks (heading / text / images), same
 // shape whether the blocks are dummy placeholder content or, later, content
-// authored by an admin.
+// authored by an admin. An "images" block lays its photos out side by side in
+// as many columns as it has photos (1~3) — e.g. a 3-photo block renders as a
+// 3-column row, letting admins mix single full-width shots with side-by-side
+// comparison rows the way a smart-store detail page would.
 export function ProductDetailContent({ blocks }: { blocks: ProductDetailBlock[] }) {
   if (blocks.length === 0) return null;
 
@@ -25,9 +30,25 @@ export function ProductDetailContent({ blocks }: { blocks: ProductDetailBlock[] 
               </p>
             );
           }
+          // A single photo keeps its natural height (full-width, uncropped) like
+          // before; 2~3 photos side by side get a shared square aspect so the row
+          // lines up evenly.
+          const multiColumn = block.urls.length > 1;
           return (
-            // eslint-disable-next-line @next/next/no-img-element -- source domain isn't known ahead of time (admin uploads later)
-            <img key={i} src={block.url} alt={block.alt ?? ""} loading="lazy" className="w-full rounded-xl object-cover" />
+            <div key={i} className={`grid gap-1.5 ${GRID_COLS_CLASS[block.urls.length] ?? "grid-cols-1"}`}>
+              {block.urls.map((url, j) =>
+                url ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- source domain isn't known ahead of time (admin uploads later)
+                  <img
+                    key={j}
+                    src={url}
+                    alt=""
+                    loading="lazy"
+                    className={`w-full rounded-xl object-cover ${multiColumn ? "aspect-square" : ""}`}
+                  />
+                ) : null,
+              )}
+            </div>
           );
         })}
       </div>
