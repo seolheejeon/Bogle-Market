@@ -37,6 +37,7 @@ import type {
   StoreSettings,
 } from "@/types";
 import { EMPTY_STORE_SETTINGS } from "@/types";
+import { isEventOrderable } from "@/lib/order-policy";
 
 // 이벤트 리스팅(EventProductSeed/event_products 행)과 카탈로그 상품을 합쳐서
 // 화면이 쓰는 평평한 Product로 만든다. mock/Supabase 두 모드 모두 최종적으로
@@ -407,7 +408,18 @@ export interface NewOrderInput {
   total: number;
 }
 
+// 사다드림/특가처럼 STRICT_DEADLINE 정책인 이벤트만 마감 후 주문을 막는다 — 문고리/
+// 택배(비특가)는 재고만으로 계속 제어되므로 여기서 걸리지 않는다(lib/order-policy.ts).
+async function assertEventOrderable(eventId: string): Promise<void> {
+  const event = await getEvent(eventId);
+  if (!event) throw new Error("이벤트를 찾을 수 없어요.");
+  if (!isEventOrderable(event)) {
+    throw new Error(`"${event.title}"은(는) 마감되어 더 이상 주문할 수 없어요.`);
+  }
+}
+
 export async function createOrder(input: NewOrderInput): Promise<Order> {
+  await assertEventOrderable(input.eventId);
   const number = orderNumber();
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;

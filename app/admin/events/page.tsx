@@ -33,10 +33,9 @@ export default function AdminEventsPage() {
     refresh();
   }
 
-  // "종료"는 마감시각을 지금으로 당겨서 고객 화면에 즉시 "마감"으로 표시되게
-  // 하는 정보성 조기종료다 — 배송방식별 판매 정책(사다드림/문고리/택배마다
-  // 마감 후 주문 허용 여부가 다름)은 아직 별도로 설계 중이라, 지금은 서버에서
-  // 새 주문을 강제로 막지는 않는다(그 부분은 정책 설계가 끝난 뒤 다시 적용).
+  // "종료"는 그냥 마감시각을 지금으로 당길 뿐, 그 이후 판단은 항상 배송방식별
+  // 정책(lib/order-policy.ts)을 그대로 따른다 — 사다드림/특가는 종료 즉시 주문이
+  // 막히지만, 문고리/택배(비특가)는 종료를 눌러도 재고가 남아있으면 계속 주문된다.
   async function onClose(event: MarketEvent) {
     if (!confirm(`"${event.title}"을(를) 지금 바로 종료할까요? 고객 화면에 마감으로 표시돼요.`)) return;
     await updateEvent(event.id, { deadlineAt: new Date().toISOString() });

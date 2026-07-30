@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { listEvents, createOrder, getDefaultAddress, updateAddress } from "@/lib/data";
 import { formatAddress, type MarketEvent, type Order, type PaymentMethod } from "@/types";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
+import { isEventOrderable } from "@/lib/order-policy";
 import { useCart } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { PAYMENT_METHODS } from "@/lib/payments";
@@ -104,6 +105,11 @@ export function CheckoutView() {
     const overStock = items.filter((i) => i.product.stock !== undefined && i.qty > i.product.stock);
     if (overStock.length > 0) {
       setError(`재고가 부족한 상품이 있어요: ${overStock.map((i) => `${i.product.name}(재고 ${i.product.stock}개)`).join(", ")}. 장바구니에서 수량을 줄여주세요.`);
+      return;
+    }
+    const closedGroups = groups.filter((g) => !isEventOrderable(g.event));
+    if (closedGroups.length > 0) {
+      setError(`마감되어 더 이상 주문할 수 없는 이벤트가 있어요: ${closedGroups.map((g) => g.event.title).join(", ")}. 장바구니에서 빼주세요.`);
       return;
     }
     setSubmitting(true);
