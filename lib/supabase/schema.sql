@@ -642,6 +642,13 @@ $$;
 -- 옵션값별 재고 차감/복구 — has_stock=false인 옵션값은 애초에 event_option_stock에
 -- 행이 없으므로 update가 그냥 0 rows에 적용되고 조용히 아무 일도 안 한다(재고
 -- 제한 없음과 동일한 동작).
+--
+-- has_stock=true인데도 행이 없는 경우(리스팅을 이벤트에 추가한 *이후*에 관리자가
+-- 뒤늦게 그 옵션값의 재고관리를 켠 경우 — addEventProduct의 자동 초기화는 추가
+-- 시점에만 한 번 실행되므로 이미 존재하는 리스팅엔 소급 적용되지 않음)에는 그냥
+-- 무시하지 않고, 카탈로그의 default_stock을 기준으로 행을 새로 만들면서 이번
+-- 차감분까지 한 번에 반영한다 — 그래야 "나중에 재고관리를 켠" 옵션값도 첫 주문부터
+-- 정상적으로 차감된다.
 create or replace function decrement_option_stock(p_event_product_id uuid, p_option_value_id uuid, p_qty integer)
 returns void
 language plpgsql
@@ -651,6 +658,14 @@ as $$
 begin
   update event_option_stock set stock = greatest(stock - p_qty, 0)
   where event_product_id = p_event_product_id and option_value_id = p_option_value_id;
+
+  if not found then
+    insert into event_option_stock (event_product_id, option_value_id, stock)
+    select p_event_product_id, p_option_value_id, greatest(coalesce(pov.default_stock, 0) - p_qty, 0)
+    from product_option_values pov
+    where pov.id = p_option_value_id and pov.has_stock
+    on conflict (event_product_id, option_value_id) do update set stock = excluded.stock;
+  end if;
 end;
 $$;
 
