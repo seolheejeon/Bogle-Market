@@ -9,9 +9,14 @@ import { isEventOrderable } from "@/lib/order-policy";
 import { useCart, type CartLine } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { unitPrice, maxQtyForSelection, optionSelectionLabel, buildOptionSnapshot } from "@/lib/product-options";
-import { PAYMENT_METHODS } from "@/lib/payments";
+import { PAYMENT_METHODS, allowedPaymentMethods } from "@/lib/payments";
+import { EVENT_TYPE_LABEL, type EventType } from "@/types";
 import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
+
+// 화면 곳곳에서 쓰는 순서(문고리 → 사다드림 → 택배)를 결제 방식 섹션에도
+// 그대로 맞춘다(components/Category/CategoryView.tsx의 TABS와 동일 순서).
+const DELIVERY_TYPE_ORDER: EventType[] = ["DOOR", "GROUP_BUY", "PARCEL"];
 
 export function CheckoutView() {
   const router = useRouter();
@@ -25,7 +30,10 @@ export function CheckoutView() {
   const [defaultAddressId, setDefaultAddressId] = useState<string | null>(null);
   const [saveAsDefault, setSaveAsDefault] = useState(false);
   const [pin, setPin] = useState("");
-  const [method, setMethod] = useState<PaymentMethod>("bank_transfer");
+  // 배송유형(문고리/사다드림/택배)마다 결제 가능 수단이 달라서(사다드림은
+  // 무통장입금만) 결제수단을 유형별로 따로 선택받는다 — 장바구니에 없는
+  // 유형은 굳이 채워둘 필요 없어 필요한 것만 담는 partial map으로 둔다.
+  const [methods, setMethods] = useState<Partial<Record<EventType, PaymentMethod>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,7 +82,9 @@ export function CheckoutView() {
   // 마감일/배송일이 다른 이벤트 상품이 장바구니에 같이 담겨 있을 수 있어서,
   // 이벤트별로 묶어 각각 별도의 주문으로 만든다 — 한 이벤트를 배송완료 처리해도
   // 다른 이벤트가 같이 딸려가지 않도록. (components/Cart/CartView.tsx도 같은
-  // 방식으로 이벤트별로 묶어서 보여준다)
+  // 방식으로 이벤트별로 묶어서 보여준다) 실질 배송유형이 서로 다른 상품은
+  // 애초에 다른 이벤트에 속하는 게 보통이라, 이벤트별 분리가 배송유형별
+  // 분리도 함께 만족시킨다.
   const groups = useMemo(() => {
     const byEvent = new Map<string, { event: MarketEvent; items: typeof items }>();
     for (const item of items) {
@@ -83,6 +93,26 @@ export function CheckoutView() {
     }
     return Array.from(byEvent.values());
   }, [items]);
+
+  // 상품별 deliveryType override(문고리 이벤트에 택배 전용 상품을 끼워파는
+  // 식)가 있을 수 있어 event.type을 그대로 쓰지 않고 이걸로 판정한다.
+  function deliveryTypeOf(item: (typeof items)[number]): EventType {
+    return item.product.deliveryType ?? item.event.type;
+  }
+
+  // 결제수단은 이벤트가 아니라 실질 배송유형 기준으로 제한되므로(사다드림은
+  // 무통장만) 장바구니 전체를 유형별로 다시 묶어서 결제수단 선택 UI와
+  // 기본값 계산에 쓴다.
+  const deliveryTypesPresent = useMemo(() => {
+    const present = new Set(items.map(deliveryTypeOf));
+    return DELIVERY_TYPE_ORDER.filter((t) => present.has(t));
+  }, [items]);
+
+  function methodFor(type: EventType): PaymentMethod {
+    const allowed = allowedPaymentMethods(type);
+    const chosen = methods[type];
+    return chosen && allowed.includes(chosen) ? chosen : allowed[0];
+  }
 
   async function placeOrder() {
     setError(null);
@@ -145,6 +175,9 @@ export function CheckoutView() {
       for (const group of groups) {
         const groupTotal = group.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
         const groupNeedsEntranceMethod = group.items.some((i) => (i.product.deliveryType ?? group.event.type) !== "PARCEL");
+        // 이벤트 하나는 실질 배송유형이 보통 하나로 통일돼 있으므로 대표로
+        // 첫 상품의 유형을 기준삼아 그 유형에 맞게 선택된 결제수단을 적용한다.
+        const groupType = group.items.length > 0 ? deliveryTypeOf(group.items[0]) : group.event.type;
         const order = await createOrder({
           eventId: group.event.id,
           batchId,
@@ -161,7 +194,7 @@ export function CheckoutView() {
             memo: address.memo.trim() || undefined,
           }),
           apartmentName: address.apartmentName || undefined,
-          paymentMethod: method,
+          paymentMethod: methodFor(groupType),
           items: group.items.map((i) => ({
             productId: i.product.id,
             productName: i.product.name,
@@ -227,25 +260,45 @@ export function CheckoutView() {
         {!profile && <p className="mb-4 text-[11.5px] text-text-muted">회원가입 없이 주문할 수 있어요. 주문 조회는 이름과 확인번호로 할 수 있어요.</p>}
 
         <p className="mb-2 text-[12.5px] font-bold text-text-muted">결제 방법</p>
-        <div className="mb-4 flex flex-col gap-2">
-          {PAYMENT_METHODS.map((m) => (
-            <button
-              key={m.value}
-              onClick={() => setMethod(m.value)}
-              className={`flex items-center gap-2 rounded-[9px] border px-3 py-2.5 text-left text-[13px] ${method === m.value ? "border-accent bg-accent-soft" : "border-border"}`}
-            >
-              <span>
-                {m.icon} {m.label}
-              </span>
-            </button>
-          ))}
-        </div>
-        <p className="-mt-2 mb-3 text-[11.5px] text-text-muted">{PAYMENT_METHODS.find((m) => m.value === method)?.help}</p>
-        {method === "bank_transfer" && (
-          <div className="mb-4">
-            <BankAccountInfo />
-          </div>
+        {deliveryTypesPresent.length > 1 && (
+          <p className="mb-3 rounded-[9px] bg-bg-sunken px-3 py-2.5 text-[12px] text-text-muted">
+            결제 방식이 다른 상품이 포함되어 있습니다. 주문이 배송 유형별로 각각 생성됩니다.
+          </p>
         )}
+        <div className="mb-4 flex flex-col gap-4">
+          {deliveryTypesPresent.map((type) => {
+            const selected = methodFor(type);
+            return (
+              <div key={type}>
+                {deliveryTypesPresent.length > 1 && (
+                  <p className="mb-1.5 text-[12px] font-bold text-accent-dark">{EVENT_TYPE_LABEL[type]}</p>
+                )}
+                <div className="flex flex-col gap-2">
+                  {allowedPaymentMethods(type).map((value) => {
+                    const m = PAYMENT_METHODS.find((pm) => pm.value === value)!;
+                    return (
+                      <button
+                        key={value}
+                        onClick={() => setMethods((prev) => ({ ...prev, [type]: value }))}
+                        className={`flex items-center gap-2 rounded-[9px] border px-3 py-2.5 text-left text-[13px] ${selected === value ? "border-accent bg-accent-soft" : "border-border"}`}
+                      >
+                        <span>
+                          {m.icon} {m.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11.5px] text-text-muted">{PAYMENT_METHODS.find((m) => m.value === selected)?.help}</p>
+                {selected === "bank_transfer" && (
+                  <div className="mt-2">
+                    <BankAccountInfo />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         <p className="mb-2 text-[12.5px] font-bold text-text-muted">주문 상품</p>
         {groups.length > 1 && (
