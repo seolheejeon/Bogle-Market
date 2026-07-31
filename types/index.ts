@@ -181,6 +181,9 @@ export interface EventProductSeed {
   costPrice?: number;
   deliveryType?: EventType;
   visible?: boolean;
+  // 이 이벤트 안에서 노출되는 순서(오름차순) — 이벤트마다 독립적. 관리자가
+  // ▲▼로 바꾸며, 새로 추가된 리스팅은 기존 최댓값+1로 맨 뒤에 붙는다.
+  sortOrder?: number;
   // 옵션 조합별 재고 스냅샷(comboKey -> stock) — event_option_stock 테이블의
   // mock 버전. 재고관리 그룹이 하나뿐이면 comboKey가 곧 그 값의 id라 예전과
   // 동일하게 동작하고, 두 개 이상이면 진짜 조합 키가 된다(lib/product-options.ts의

@@ -108,7 +108,10 @@ export async function listEvents(): Promise<MarketEvent[]> {
   const catalogMap = new Map(loadCatalogProducts().map((c) => [c.id, c]));
   return loadEvents().map((e) => ({
     ...e,
-    products: e.products.map((listing) => mergeListing(listing, catalogMap.get(listing.catalogProductId))),
+    products: e.products
+      .slice()
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+      .map((listing) => mergeListing(listing, catalogMap.get(listing.catalogProductId))),
   }));
 }
 
@@ -416,6 +419,9 @@ export interface NewEventProductInput {
 export async function addEventProduct(eventId: string, input: NewEventProductInput): Promise<Product> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
+    // 새 리스팅은 이 이벤트 안에서 항상 맨 뒤로 붙는다 — 기존 최댓값+1.
+    const { data: existing } = await supabase.from("event_products").select("sort_order").eq("event_id", eventId).order("sort_order", { ascending: false }).limit(1);
+    const nextSortOrder = (existing?.[0]?.sort_order ?? -1) + 1;
     const { data, error } = await supabase
       .from("event_products")
       .insert({
@@ -424,6 +430,7 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
         price: input.price,
         delivery_type: input.deliveryType ?? null,
         visible: input.visible ?? true,
+        sort_order: nextSortOrder,
       })
       .select("*, products(*)")
       .single();
@@ -457,6 +464,9 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
     const key = c.valueIds.join(",");
     optionStock[key] = input.optionStock?.[key] ?? c.defaultStock;
   }
+  const events = loadEvents();
+  const targetEvent = events.find((e) => e.id === eventId);
+  const nextSortOrder = Math.max(-1, ...(targetEvent?.products.map((p) => p.sortOrder ?? 0) ?? [-1])) + 1;
   const listing: EventProductSeed = {
     id: genId("lst"),
     eventId,
@@ -465,9 +475,10 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
     costPrice: input.costPrice,
     deliveryType: input.deliveryType,
     visible: input.visible ?? true,
+    sortOrder: nextSortOrder,
     optionStock: Object.keys(optionStock).length > 0 ? optionStock : undefined,
   };
-  saveEvents(loadEvents().map((e) => (e.id === eventId ? { ...e, products: [...e.products, listing] } : e)));
+  saveEvents(events.map((e) => (e.id === eventId ? { ...e, products: [...e.products, listing] } : e)));
   return mergeListing(listing, catalog);
 }
 
@@ -520,6 +531,26 @@ export async function updateEventOptionStock(eventProductId: string, valueIds: s
       ...e,
       products: e.products.map((p) => (p.id === eventProductId ? { ...p, optionStock: { ...p.optionStock, [key]: stock } } : p)),
     })),
+  );
+}
+
+// 이벤트 안 상품 노출 순서를 통째로 다시 정한다 — orderedEventProductIds의
+// 배열 순서 그대로 0,1,2...를 sort_order로 채운다. 관리자 화면의 ▲▼ 버튼이
+// 현재 화면 순서에서 두 개를 스왑한 새 배열을 통째로 넘기는 방식으로 쓴다.
+export async function reorderEventProducts(eventId: string, orderedEventProductIds: string[]): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    await Promise.all(
+      orderedEventProductIds.map((id, index) => supabase.from("event_products").update({ sort_order: index }).eq("id", id)),
+    );
+    return;
+  }
+  const sortOrderById = new Map(orderedEventProductIds.map((id, index) => [id, index]));
+  const events = loadEvents();
+  saveEvents(
+    events.map((e) =>
+      e.id === eventId ? { ...e, products: e.products.map((p) => (sortOrderById.has(p.id) ? { ...p, sortOrder: sortOrderById.get(p.id) } : p)) } : e,
+    ),
   );
 }
 
@@ -1379,7 +1410,11 @@ function mapSupabaseEvent(row: Record<string, any>): MarketEvent {
     deadlineAt: row.deadline_at,
     deliveryAt: row.delivery_at,
     notice: row.notice ?? "",
-    products: (row.event_products ?? []).map(mapSupabaseEventProduct),
+    // 이벤트 안에서의 노출 순서(sort_order) 오름차순 — 관리자가 ▲▼로 바꾼다.
+    products: (row.event_products ?? [])
+      .slice()
+      .sort((a: Record<string, any>, b: Record<string, any>) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map(mapSupabaseEventProduct),
   };
 }
 

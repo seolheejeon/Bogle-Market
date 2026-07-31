@@ -10,6 +10,7 @@ import {
   updateEventProduct,
   updateEventOptionStock,
   removeEventProduct,
+  reorderEventProducts,
   getEventProductCosts,
   getSoldQuantities,
 } from "@/lib/data";
@@ -55,6 +56,12 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
 
   if (event === undefined) return <p className="text-sm text-text-muted">불러오는 중...</p>;
   if (event === null) return <p className="text-sm text-text-muted">이벤트를 찾을 수 없어요.</p>;
+  // 아래 클로저(moveProduct)에서 쓰려고 새 const로 다시 담아둔다 — 위에서
+  // early-return으로 좁혀둔 타입은 컨트롤플로우 분석 결과라 중첩 함수 안까지
+  // 그대로 이어지지 않는다(state 변수라 나중에 다시 null이 될 수도 있다고
+  // 보수적으로 판단함). const로 한 번 더 담으면 그 시점의 좁혀진 타입이
+  // 고정돼 중첩 함수에서도 그대로 쓸 수 있다.
+  const currentEvent = event;
 
   async function saveEventFields(patch: Partial<MarketEvent>) {
     setSaveStatus("saving");
@@ -68,6 +75,17 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
       setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
       setSaveStatus("error");
     }
+  }
+
+  // 현재 화면 순서에서 두 상품의 자리를 바꾼 새 순서를 통째로 저장한다 —
+  // 이벤트별로 독립적인 순서라 이 이벤트의 리스팅 id만 다시 매긴다.
+  async function moveProduct(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= currentEvent.products.length) return;
+    const reordered = currentEvent.products.map((p) => p.id);
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    await reorderEventProducts(currentEvent.id, reordered);
+    refresh();
   }
 
   return (
@@ -131,7 +149,7 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
         <Link href="/admin/products" className="font-semibold text-accent-dark underline">
           상품 관리
         </Link>
-        에서 고치면 이 상품을 쓰는 모든 이벤트에 바로 반영돼요. 여기서는 이번 회차의 가격·재고·노출만 정해요.
+        에서 고치면 이 상품을 쓰는 모든 이벤트에 바로 반영돼요. 여기서는 이번 회차의 가격·노출·순서만 정해요.
       </p>
       {event.products.length > 0 && (
         <p className="mb-2 text-[12px] font-semibold text-accent-dark">
@@ -143,15 +161,30 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
         </p>
       )}
       <div className="mb-4 flex flex-col gap-2">
-        {event.products.map((p) => (
-          <EventProductRow
-            key={p.id}
-            product={p}
-            eventType={event.type}
-            costPrice={costsByListing[p.id]}
-            soldQty={soldByListing[p.id] ?? 0}
-            onSaved={refresh}
-          />
+        {event.products.map((p, i) => (
+          <div key={p.id} className="flex items-start gap-1.5">
+            <div className="flex shrink-0 flex-col gap-0.5 pt-2.5">
+              <button
+                onClick={() => moveProduct(i, -1)}
+                disabled={i === 0}
+                className="h-6 w-6 rounded-[6px] border border-border text-[11px] disabled:opacity-30"
+                aria-label="위로"
+              >
+                ▲
+              </button>
+              <button
+                onClick={() => moveProduct(i, 1)}
+                disabled={i === event.products.length - 1}
+                className="h-6 w-6 rounded-[6px] border border-border text-[11px] disabled:opacity-30"
+                aria-label="아래로"
+              >
+                ▼
+              </button>
+            </div>
+            <div className="min-w-0 flex-1">
+              <EventProductRow product={p} eventType={event.type} costPrice={costsByListing[p.id]} soldQty={soldByListing[p.id] ?? 0} onSaved={refresh} />
+            </div>
+          </div>
         ))}
         {event.products.length === 0 && <p className="text-[12.5px] text-text-muted">등록된 상품이 없어요.</p>}
       </div>

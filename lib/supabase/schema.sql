@@ -117,6 +117,10 @@ create table if not exists event_products (
   delivery_type text check (delivery_type in ('DOOR', 'GROUP_BUY', 'PARCEL')),
   -- false면 고객 화면에서 숨김(삭제 없이 판매만 잠시 중단). 기본은 true.
   visible boolean not null default true,
+  -- 이 이벤트 안에서 상품이 노출되는 순서(오름차순) — 이벤트마다 독립적으로
+  -- 관리자가 ▲▼로 바꿀 수 있다. 새로 추가되는 리스팅은 맨 뒤로 붙도록 그
+  -- 시점의 최댓값+1로 채워진다.
+  sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
 
