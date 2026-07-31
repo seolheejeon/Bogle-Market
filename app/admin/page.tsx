@@ -8,6 +8,7 @@ import type { EventType, MarketEvent, Order, OrderStatus } from "@/types";
 import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL, COURIER_OPTIONS, COURIER_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
+import { getAccessToken, sendPushToProfile } from "@/lib/push";
 
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", paid: "confirmed", confirmed: "ship", ship: "done" };
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = { wait: "입금확인", paid: "발주확인", confirmed: "배송시작", ship: "배송완료 처리" };
@@ -34,14 +35,19 @@ async function notifyStatusChange(
   if (!order.profileId || !notice) return;
   const prefix = eventTitle ? `[${eventTitle}] ` : "";
   const shippingSuffix = shipping ? ` (${COURIER_LABEL[shipping.courierCode] ?? "택배"} / ${shipping.trackingNumber})` : "";
+  const message = `${prefix}주문번호 ${order.orderNumber} ${notice.message}${shippingSuffix}`;
   await createNotification({
     title: notice.title,
-    message: `${prefix}주문번호 ${order.orderNumber} ${notice.message}${shippingSuffix}`,
+    message,
     icon: notice.icon,
     linkType: "ORDER",
     linkId: order.id,
     profileId: order.profileId,
   });
+  // 인앱 알림과 같은 내용을 웹 푸시로도 보낸다 — 그 회원이 이 알림 화면에서
+  // 미리 푸시를 켜둔 기기가 있을 때만 실제로 전달된다(없으면 조용히 0건).
+  const accessToken = await getAccessToken();
+  if (accessToken) void sendPushToProfile(order.profileId, { title: notice.title, body: message, url: `/orders/${order.id}` }, accessToken);
 }
 
 function isToday(iso: string): boolean {

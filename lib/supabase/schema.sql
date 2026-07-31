@@ -297,6 +297,28 @@ create table if not exists notifications (
   created_at timestamptz not null default now()
 );
 
+-- 웹 푸시(Web Push) 구독 — 브라우저의 PushManager.subscribe() 결과(endpoint +
+-- 공개키 2종)를 저장해뒀다가, 발송 시점에 이걸로 web-push 라이브러리가 실제
+-- 브라우저 푸시 서비스(FCM/Mozilla 등)에 요청을 보낸다. profile_id가 있으면
+-- 그 회원의 주문 상태 변경 알림(배송시작/완료 등)을 나중에 받을 수 있고,
+-- null이면 로그인 없이 구독한 기기 — 그 순간(예: 주문 완료 직후) 딱 한 번의
+-- 발송에만 쓰이고 그 뒤로는 다시 찾아갈 방법이 없다(guest_pin 같은 별도
+-- 식별자가 없어서). endpoint는 브라우저/기기별로 유일해서 재구독해도 같은
+-- 행을 덮어쓴다(on conflict). 구독/해제는 save_push_subscription/
+-- delete_push_subscription RPC로만 하고(다른 guest RPC들과 동일한 이유 —
+-- auth.uid()가 null인 비회원 요청은 평범한 RLS로 자기 것만 건드리게 만들기
+-- 까다롭다), 테이블 자체는 관리자만 조회 가능하게 잠근다. 발송 API는
+-- 서비스 롤 키로 RLS를 우회해서 이 정책과 무관하게 전체를 읽는다.
+create table if not exists push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid references profiles(id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  user_agent text,
+  created_at timestamptz not null default now()
+);
+
 -- 무통장입금 안내용 계좌 정보. 매장 전체에 하나뿐인 설정값이라 진짜 싱글턴으로
 -- 강제한다 — boolean PK는 값이 true 하나뿐이라 두 번째 행을 만들 수 없다.
 -- 최초 값은 관리자가 설정 화면에서 저장할 때 upsert로 생성된다.
@@ -497,6 +519,13 @@ create policy "read broadcast or own notifications" on notifications for select
 drop policy if exists "admins send notifications" on notifications;
 create policy "admins send notifications" on notifications for insert
   with check (is_admin());
+
+-- Push subscriptions: 구독/해제는 save_push_subscription/delete_push_subscription
+-- RPC로만 하고(SECURITY DEFINER라 이 정책들을 우회함), 테이블 직접 조회는
+-- 관리자만 — 발송 API(서비스 롤 키)는 RLS 자체를 건너뛰므로 이 정책과 무관하다.
+alter table push_subscriptions enable row level security;
+drop policy if exists "push subscriptions are admin-only readable" on push_subscriptions;
+create policy "push subscriptions are admin-only readable" on push_subscriptions for select using (is_admin());
 
 -- Store settings (입금 계좌 정보): everyone needs to read it at checkout,
 -- including guests, so select is public; only admins can write it.
@@ -817,6 +846,44 @@ declare
 begin
   update event_option_stock set stock = stock + p_qty
   where event_product_id = p_event_product_id and value_ids = v_ids;
+end;
+$$;
+
+-- 웹 푸시 구독 저장 — 로그인 상태면 p_profile_id를 함께 저장해서 나중에 그
+-- 회원 앞으로 오는 주문 상태 알림(배송시작/완료 등)을 이 기기로도 보낼 수
+-- 있고, 비로그인이면 null로 저장돼 그 순간 한 번(예: 주문 완료 직후)만 쓰인다.
+-- 같은 endpoint로 다시 구독하면(브라우저가 만료된 구독을 자동 갱신하는 경우
+-- 등) 새 값으로 덮어쓴다.
+create or replace function save_push_subscription(
+  p_profile_id uuid, p_endpoint text, p_p256dh text, p_auth text, p_user_agent text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_profile_id is not null and p_profile_id <> auth.uid() then
+    raise exception 'profile_id must match the authenticated user';
+  end if;
+  insert into push_subscriptions (profile_id, endpoint, p256dh, auth, user_agent)
+  values (p_profile_id, p_endpoint, p_p256dh, p_auth, p_user_agent)
+  on conflict (endpoint) do update set
+    profile_id = excluded.profile_id, p256dh = excluded.p256dh, auth = excluded.auth, user_agent = excluded.user_agent;
+end;
+$$;
+
+-- 푸시 구독 해제 — endpoint는 브라우저가 발급하는 사실상 유추 불가능한 값이라,
+-- guest_pin처럼 "이걸 아는 것 자체가 본인 기기라는 증거"로 취급해 별도
+-- 로그인 확인 없이 endpoint 일치만으로 삭제한다.
+create or replace function delete_push_subscription(p_endpoint text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from push_subscriptions where endpoint = p_endpoint;
 end;
 $$;
 

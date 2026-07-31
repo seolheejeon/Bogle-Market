@@ -103,6 +103,7 @@
 - **Supabase** (Postgres + Auth) — 연결 안 되어 있으면 브라우저 localStorage 기반 mock 모드로 자동 전환 (`lib/data.ts`가 두 모드를 모두 처리)
 - **Toss Payments** — 카드/카카오페이용으로 예정, 아직 실제 연동 전 (`lib/payments.ts`)
 - **Netlify** — 배포 대상, GitHub 연동 + 자동배포 연결됨 (`netlify.toml`, `@netlify/plugin-nextjs`)
+- **PWA + 웹 푸시** — 직접 작성한 서비스워커(`public/sw.js`, 프레임워크 플러그인 미사용) + `web-push`(VAPID 서명·발송) + `sharp`(devDependency, 아이콘 생성 스크립트 전용)
 - 마스코트: `public/images/bogle.png` (보글이)
 
 # 완료된 기능
@@ -412,6 +413,17 @@
 - `tsc`/`build` 통과 확인. 브라우저에서 최소주문수량 표시(200g/2개부터 주문 가능/냉동보관/에어프라이어)까지 실 운영 데이터로 확인함. 배송비 정책 3종/택배사 직접입력은 아직 이 마이그레이션이 적용 전이라 관리자 폼 저장은 마이그레이션 적용 후 진행 예정(아래 TODO 참고)
 - ⚠️ **배포 시 확인 필요**: 실제 Supabase 프로젝트에 `products.shipping_fee_type`/`shipping_fee_qty_unit` 컬럼 마이그레이션이 아직 미적용 — 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것. 실행 전까지는 상품 등록/수정 폼 저장이 에러로 실패함(읽기는 문제없이 동작)
 
+**PWA(Progressive Web App) + 웹 푸시**
+- 배경: 자주 방문하는 서비스라 네이티브 앱 대신 "홈 화면에 추가"로 앱처럼 쓸 수 있게 하고, 앱 설치 없이도 배송 소식을 브라우저 푸시로 받을 수 있게 해달라는 요청
+- **PWA 기본기**: `public/manifest.webmanifest`(이름/아이콘/배경색/테마색/`display: standalone`) + `app/layout.tsx`에 manifest·appleWebApp·themeColor 메타 연결. 아이콘은 마스코트 이미지(`public/images/bogle.png`)에서 `scripts/generate-pwa-icons.mjs`(sharp)로 192/512/마스커블 512/애플터치 180 네 가지를 생성(`public/icons/`) — 로고가 바뀌면 이 스크립트를 다시 돌리면 됨
+- **서비스워커**(`public/sw.js`): 페이지 이동(navigation) 요청만 오프라인 폴백 대상으로 삼아 `public/offline.html`을 캐시해뒀다가 네트워크 실패 시 보여줌 — 상품/주문처럼 항상 최신이어야 하는 데이터는 캐시하지 않음(오래된 정보가 보이는 사고 방지). 프로덕션 빌드에서만 등록(`components/PwaRegister.tsx`, `NODE_ENV==='production'` 가드) — 개발 모드에서 SW 캐시가 Turbopack HMR과 섞이는 걸 방지
+- **웹 푸시 발송 인프라**: `push_subscriptions` 테이블(브라우저 `PushSubscription`의 endpoint+공개키 저장) + `save_push_subscription`/`delete_push_subscription` RPC(guest_pin과 같은 논리로, endpoint 자체를 "이 기기라는 증거"로 취급해 로그인 없이도 자기 구독만 관리). `web-push` 라이브러리 + VAPID 키쌍으로 `app/api/push/send`가 실제 발송을 담당 — ① 방금 만든 구독 하나에 즉시 보내기(인증 불필요) ② 특정 회원에게(요청자의 액세스 토큰으로 `is_admin()`을 서버에서 다시 확인한 뒤 서비스 롤 키로 구독 조회) ③ 전체 발송, 세 가지 방식 지원. 발송 실패가 410/404(브라우저가 이미 구독 해지)면 그 자리에서 DB 구독도 같이 지움
+- **옵트인 UI**: `/notifications` 화면 상단에 "푸시 알림 받기" 토글 — 허용/차단/미설정 상태를 그대로 보여주고 눌러서 켜고 끌 수 있음
+- **발송 트리거 3곳**: (1) 체크아웃에서 주문 생성 성공 직후, 이미 이 기기가 푸시를 켜둔 상태면 로그인 여부와 무관하게 "주문이 접수됐어요" 즉시 발송(방금 만든 구독을 그 자리에서 바로 씀 — 비회원은 이 순간 아니면 다시 찾아 보낼 방법이 없음) (2) 관리자가 주문 상태를 바꿀 때(`app/admin/page.tsx`의 `notifyStatusChange`) 기존 인앱 알림과 같은 제목/내용으로 그 회원 앞 구독에 발송(입금확인/배송시작/배송완료/환불완료/취소) (3) 관리자 공지 발송(`/admin/notifications`)에 "웹 푸시로도 보내기" 체크박스(기본 켬) — 전체 발송
+- `tsc`/`build` 통과 확인. 프로덕션 빌드(`next start`)로 서비스워커 등록/manifest 서빙/오프라인 폴백 페이지/푸시 발송 API의 인증 거부 동작까지 브라우저에서 직접 확인함. 실제 알림 수신(권한 허용 후 발송→수신)은 이 환경(자동화 브라우저)에서 알림 권한을 허용할 수 없어 코드 경로 검증까지만 진행 — 실제 브라우저로 배포 후 확인 필요
+- 참고: "사다드림 픽업 완료"는 현재 `done` 상태 문구가 배송/픽업 구분 없이 "배송이 완료됐어요"로 공용인데, 이건 이번 작업 범위 밖의 기존 문구라 그대로 재사용함(인앱 알림도 원래 이렇게 표시돼왔음) — 배송방식별로 문구를 분리하고 싶으면 별도로 요청해줄 것
+- ⚠️ **배포 시 확인 필요**: (1) 실제 Supabase 프로젝트에 `push_subscriptions` 테이블 + `save_push_subscription`/`delete_push_subscription` RPC 마이그레이션 미적용 — 대화에서 안내한 SQL을 SQL 에디터에서 먼저 실행할 것 (2) Netlify 환경변수에 `NEXT_PUBLIC_VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`(대화에서 생성해 전달한 값)와 `SUPABASE_SERVICE_ROLE_KEY`(Supabase 프로젝트 설정에서 직접 복사) 설정 필요 — 없으면 푸시 발송 API가 계속 `not_configured`를 반환해 아무 알림도 안 나감(PWA 설치/오프라인 자체는 이 키들과 무관하게 정상 동작함)
+
 # 진행 중인 기능
 
 - **카드/카카오페이 결제**: Toss Payments 키가 없어서 지금은 무통장입금과 동일하게 관리자가 수동으로 확인하는 방식으로 대체 중
@@ -435,6 +447,7 @@
 - [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 옵션 조합별 재고 구조(`event_option_stock.value_ids`, `order_items.stock_value_ids`) + `event_products.sort_order` 마이그레이션 미적용 — 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [x] ~~실제 Supabase 프로젝트에 최소구매수량(`products.min_qty`) + 상품별 택배 배송비(`products.shipping_fee`/`free_shipping_threshold`/`courier_code`/`fulfillment_type`/`ships_at`, `orders.shipping_fee`) + `create_order` RPC 재정의 마이그레이션 미적용~~ → 실행 완료, 운영 환경에서 최소주문수량 표시까지 확인함
 - [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 배송비 정책 확장(`products.shipping_fee_type`/`shipping_fee_qty_unit`) 마이그레이션 미적용 — 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것. 실행 전까지는 상품 등록/수정 폼 저장이 에러로 실패함(읽기는 문제없이 동작)
+- [ ] ⚠️ **(배포 차단)** 실제 Supabase 프로젝트에 `push_subscriptions` 테이블 + `save_push_subscription`/`delete_push_subscription` RPC 마이그레이션 미적용, Netlify 환경변수(`NEXT_PUBLIC_VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`SUPABASE_SERVICE_ROLE_KEY`) 미설정 — 둘 다 해야 웹 푸시가 동작함(PWA 설치/오프라인은 이것들과 무관하게 이미 정상 동작). 대화에서 안내한 SQL과 키 값을 반영할 것
 - [ ] 스마트택배 API 키 발급 후 `SWEETTRACKER_API_KEY` 환경변수 설정 + `app/api/tracking/route.ts`의 응답 필드명/택배사 코드(`t_code`)를 실제 응답과 대조 확인 (지금은 키가 없어 항상 "준비 중" 폴백으로만 동작 확인함)
 - [ ] Toss Payments 실제 가맹점 키 연동 (카드/카카오페이 자동결제)
 - [ ] 인천 이음카드 온라인 결제 연동 방법 조사
@@ -473,6 +486,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
 | `store_settings` | id(boolean, 항상 true — 싱글턴 강제), bank_name, account_number, account_holder, updated_at | 무통장입금 안내용 계좌 정보. 매장 전체에 한 행만 존재. 조회는 게스트 포함 전체 공개, 수정은 관리자만 |
 | `banners` | id, image_url, link_type(PRODUCT/EVENT/URL/NONE), link_id, link_url, active, starts_at, ends_at, sort_order | 메인 홈 상단 배너. `link_type=PRODUCT`일 때 `link_id`는 카탈로그 상품(`products`) id — 리스팅이 아니라 카탈로그를 가리켜두고 클릭 시점에 가장 적합한 리스팅으로 해석함(`lib/banner-link.ts`). `active`+`starts_at`/`ends_at`로 노출 여부를 판단(`isBannerLive`), RLS는 활성 배너만 공개 조회(`active or is_admin()`) — 노출 기간 자체는 앱 코드에서 걸러짐. ⚠️ 실제 Supabase 프로젝트에는 아직 이 테이블이 없어서, 이 기능을 쓰려면 `schema.sql`을 다시 실행해야 함 |
+| `push_subscriptions` | id, profile_id(nullable, →profiles), endpoint(unique), p256dh, auth, user_agent, created_at | 브라우저 `PushSubscription`(웹 푸시 구독) 저장소. `profile_id`가 있으면 그 회원 앞 알림(배송시작/완료 등)을 나중에도 이 기기로 받을 수 있고, null이면 비로그인 기기 — "방금 만든 구독으로 즉시 한 번 보내기"(주문 완료) 외에는 다시 찾아 보낼 방법이 없음(guest_pin 같은 별도 식별자가 없어서). 테이블 직접 조회는 관리자만 가능하고(`is_admin()`), 구독 저장/해제는 아래 `save_push_subscription`/`delete_push_subscription` RPC로만 함 — 발송 API(`app/api/push/send`)는 서비스 롤 키로 RLS 자체를 우회해서 전체를 읽음 |
 
 - `is_admin()` — SECURITY DEFINER 함수. RLS 정책에서 `profiles`를 직접 서브쿼리하면 무한재귀가 나기 때문에 이 함수를 통해서만 관리자 여부를 확인
 - `is_username_taken(username)` / `is_phone_taken(phone)` — 회원가입 중복확인용 SECURITY DEFINER 함수. RLS상 남의 프로필은 못 보지만, "존재 여부"만 boolean으로 반환
@@ -481,6 +495,8 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 - `request_guest_cancel(order_id, name, pin, reason)` — 비회원의 발주확인 이후 취소 "요청"용 RPC. status는 안 건드리고 confirmed/ship일 때만 cancel_requested를 true로 세움
 - `decrement_stock(event_product_id, qty)` / `increment_stock(event_product_id, qty)` — 재고 차감/복구 RPC. 카탈로그 분리 이후 `event_products` 행을 대상으로 동작(파라미터명만 변경, 가리키는 대상은 그대로). `stock`이 null(재고 제한 없음)인 리스팅은 건드리지 않고, 차감은 0 밑으로 안 내려감
 - `decrement_option_stock(event_product_id, option_value_id, qty)` / `increment_option_stock(event_product_id, option_value_id, qty)` — 위와 같은 패턴의 옵션값 단위 재고 차감/복구 RPC. `event_option_stock`에 행이 없는 조합(재고 제한 없는 옵션값)은 그냥 0 rows에 적용되고 조용히 아무 일도 안 함
+- `save_push_subscription(profile_id, endpoint, p256dh, auth, user_agent)` — 웹 푸시 구독 저장/갱신 RPC. 같은 endpoint로 다시 구독하면 덮어씀(on conflict)
+- `delete_push_subscription(endpoint)` — 웹 푸시 구독 해제 RPC. endpoint는 브라우저가 발급하는 사실상 유추 불가능한 값이라 guest_pin처럼 그 값을 아는 것 자체를 본인 기기라는 증거로 취급해 로그인 확인 없이 삭제
 - 시드 데이터는 고정 UUID(`00000000-...`) 사용, `ON CONFLICT DO NOTHING`이라 재실행해도 안전
 
 # 관리자 기능 계획

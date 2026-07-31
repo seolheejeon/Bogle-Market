@@ -7,6 +7,54 @@ import { useAuth } from "@/lib/auth-context";
 import type { NotificationItem } from "@/types";
 import { formatDateTime } from "@/lib/format";
 import { getReadIds, getDismissedIds, markRead, markAllRead, dismiss, dismissAll, isWithinRetention } from "@/lib/notification-state";
+import { isPushSupported, getNotificationPermission, enablePush, disablePush } from "@/lib/push";
+
+function PushOptIn() {
+  const { profile } = useAuth();
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">("unsupported");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setPermission(getNotificationPermission());
+  }, []);
+
+  if (!isPushSupported()) return null;
+
+  async function toggle() {
+    setBusy(true);
+    try {
+      if (permission === "granted") {
+        await disablePush();
+        setPermission("default");
+      } else {
+        const sub = await enablePush(profile?.id ?? null);
+        setPermission(sub ? "granted" : getNotificationPermission());
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-[10px] bg-bg-sunken px-3.5 py-3">
+      <div className="min-w-0">
+        <p className="text-[12.5px] font-bold">푸시 알림</p>
+        <p className="mt-0.5 text-[11.5px] text-text-muted">
+          {permission === "granted" ? "이 기기로 알림을 받고 있어요." : permission === "denied" ? "브라우저 설정에서 알림이 차단돼 있어요." : "배송 소식을 앱처럼 바로 받아보세요."}
+        </p>
+      </div>
+      <button
+        onClick={toggle}
+        disabled={busy || permission === "denied"}
+        className={`shrink-0 rounded-full px-3.5 py-1.5 text-[12px] font-bold disabled:opacity-50 ${
+          permission === "granted" ? "border border-border text-text-muted" : "bg-accent text-white"
+        }`}
+      >
+        {permission === "granted" ? "끄기" : "받기"}
+      </button>
+    </div>
+  );
+}
 
 export default function NotificationsPage() {
   const router = useRouter();
@@ -69,6 +117,7 @@ export default function NotificationsPage() {
           </div>
         )}
       </div>
+      <PushOptIn />
       {items !== null && items.length === 0 && <p className="p-4 text-sm text-text-muted">알림이 없어요.</p>}
       <div>
         {items?.map((n) => {

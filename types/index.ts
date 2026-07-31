@@ -357,6 +357,23 @@ export interface NotificationItem {
   createdAt: string; // ISO
 }
 
+// 브라우저 PushSubscription을 서버로 넘길 때 쓰는 형태 — PushSubscription.toJSON()과
+// 동일한 모양이라 클라이언트에서 그대로 만들어 보낼 수 있다.
+export interface PushSubscriptionPayload {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
+// 앱 안 어디서 실제 웹 푸시를 보낼지 지정하는 최소한의 정보 —
+// app/api/push/send가 이 셋 중 하나를 받아 처리한다.
+export interface PushNotificationPayload {
+  title: string;
+  body: string;
+  url?: string;
+  icon?: string;
+  tag?: string;
+}
+
 export const NOTIFICATION_LINK_LABEL: Record<NotificationLinkType, string> = {
   PRODUCT: "상품",
   EVENT: "이벤트",

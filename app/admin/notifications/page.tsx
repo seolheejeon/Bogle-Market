@@ -7,6 +7,7 @@ import type { CatalogProduct, MarketEvent, NotificationLinkType } from "@/types"
 import { NOTIFICATION_LINK_LABEL } from "@/types";
 import { SearchPicker } from "@/components/admin/SearchPicker";
 import { ProductPhoto } from "@/components/ProductPhoto";
+import { getAccessToken, sendPushBroadcast } from "@/lib/push";
 
 const LINK_TYPES: NotificationLinkType[] = ["NONE", "PRODUCT", "EVENT", "ORDER"];
 
@@ -20,6 +21,7 @@ export default function AdminNotificationsPage() {
   const [selectedProduct, setSelectedProduct] = useState<CatalogProduct | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<MarketEvent | null>(null);
   const [orderId, setOrderId] = useState("");
+  const [pushToo, setPushToo] = useState(true);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +63,15 @@ export default function AdminNotificationsPage() {
     }
     setSending(true);
     await createNotification({ title: title.trim(), message: message.trim(), icon: icon || "📢", linkType, linkId, profileId: null });
+    if (pushToo) {
+      const accessToken = await getAccessToken();
+      if (accessToken) {
+        // 인앱 알림 클릭 시 이동 경로(NotificationsPage의 open())와 동일한 규칙.
+        const url =
+          linkType === "PRODUCT" && linkId ? `/product/${linkId}` : linkType === "EVENT" && linkId ? `/event/${linkId}` : linkType === "ORDER" && linkId ? `/orders/${linkId}` : "/notifications";
+        await sendPushBroadcast({ title: title.trim(), body: message.trim(), url }, accessToken);
+      }
+    }
     setSending(false);
     setSent(true);
     setTitle("");
@@ -142,6 +153,11 @@ export default function AdminNotificationsPage() {
             onChange={(e) => setOrderId(e.target.value)}
           />
         )}
+
+        <label className="flex items-center gap-2 text-[12.5px]">
+          <input type="checkbox" checked={pushToo} onChange={(e) => setPushToo(e.target.checked)} />
+          웹 푸시로도 보내기 (알림 화면에서 푸시를 켜둔 고객에게만 전달돼요)
+        </label>
 
         {error && <p className="text-[12px] font-semibold text-red-600">{error}</p>}
         {sent && <p className="text-[12px] font-semibold text-accent-dark">알림을 발송했어요.</p>}

@@ -10,6 +10,7 @@ import { useCart, type CartLine } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { unitPrice, maxQtyForSelection, optionSelectionLabel, buildOptionSnapshot, comboValueIds } from "@/lib/product-options";
 import { totalShippingFee } from "@/lib/shipping";
+import { getCurrentPushSubscription, sendPushToSelf } from "@/lib/push";
 import { PAYMENT_METHODS, allowedPaymentMethods } from "@/lib/payments";
 import { EVENT_TYPE_LABEL, type EventType } from "@/types";
 import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
@@ -230,6 +231,20 @@ export function CheckoutView() {
         createdOrders.push(order);
       }
       clear();
+      // 이미 이 기기에서 푸시를 켜뒀다면(알림 화면에서 미리 허용) 로그인 여부와
+      // 무관하게 방금 만든 주문들에 바로 알림을 보낸다 — 비회원은 로그인 세션이
+      // 없어서 이 순간 말고는 다시 찾아 보낼 방법이 없다. 페이지 이동을 늦추지
+      // 않도록 완료를 기다리지 않는다(실패해도 체크아웃 자체에는 영향 없음).
+      getCurrentPushSubscription().then((sub) => {
+        if (!sub) return;
+        for (const order of createdOrders) {
+          void sendPushToSelf(sub, {
+            title: "주문이 접수됐어요",
+            body: `주문번호 ${order.orderNumber} 입금 확인 후 순차로 진행돼요.`,
+            url: `/orders/${order.id}`,
+          });
+        }
+      });
       const first = createdOrders[0];
       if (profile) {
         router.push(`/orders/${first.id}`);
