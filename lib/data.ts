@@ -669,34 +669,39 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
   const number = orderNumber();
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    // id/created_at을 미리 만들어 직접 넘기고 .select()로 되읽지 않는다 — 게스트
-    // 주문(profile_id=null)은 "user reads own orders" 정책(profile_id = auth.uid())의
-    // NULL = NULL이 결코 true가 안 되는 SQL 특성 때문에, insert 자체는 성공해도
-    // PostgREST가 RETURNING 대상 행에 SELECT 정책을 적용하다 막혀 42501로 실패한다
-    // (INSERT policy와는 무관 — insert에 성공한 행을 "되읽으려는" 단계에서만 걸림).
-    // 회원 주문은 profile_id = auth.uid()가 참이라 원래도 문제없이 통과했었음.
+    // orders/order_items를 클라이언트에서 각각 insert하던 방식은 게스트 주문에서
+    // 항상 실패했다 — order_items의 INSERT 정책이 검사하는 "orders에 이 id가
+    // 있는지" 서브쿼리도 orders의 SELECT 정책(profile_id = auth.uid())을 그대로
+    // 타는데, 게스트 주문은 profile_id가 null이라 "NULL = auth.uid()(역시 null)"가
+    // SQL에서 true가 아니라서 서브쿼리가 방금 만든 자기 주문조차 못 봄 → RLS 위반
+    // 에러. SECURITY DEFINER RPC(create_order)로 이 둘을 한 번에 처리해서 이
+    // 문제를 근본적으로 피한다(schema.sql 참고).
     const id = crypto.randomUUID();
     const createdAt = new Date().toISOString();
-    const { error } = await supabase
-      .from("orders")
-      .insert({
-        id,
-        order_number: number,
-        event_id: input.eventId,
-        batch_id: input.batchId,
-        profile_id: input.profileId,
-        guest_name: input.guestName ?? null,
-        guest_phone: input.guestPhone ?? null,
-        guest_pin: input.guestPin ?? null,
-        recipient_name: input.recipientName,
-        recipient_phone: input.recipientPhone,
-        address_snapshot: input.addressSnapshot,
-        apartment_name: input.apartmentName || null,
-        payment_method: input.paymentMethod,
-        status: "wait",
-        total: input.total,
-        created_at: createdAt,
-      });
+    const { error } = await supabase.rpc("create_order", {
+      p_id: id,
+      p_order_number: number,
+      p_event_id: input.eventId,
+      p_batch_id: input.batchId,
+      p_profile_id: input.profileId,
+      p_guest_name: input.guestName ?? null,
+      p_guest_phone: input.guestPhone ?? null,
+      p_guest_pin: input.guestPin ?? null,
+      p_recipient_name: input.recipientName,
+      p_recipient_phone: input.recipientPhone,
+      p_address_snapshot: input.addressSnapshot,
+      p_apartment_name: input.apartmentName || null,
+      p_payment_method: input.paymentMethod,
+      p_total: input.total,
+      p_created_at: createdAt,
+      p_items: input.items.map((item) => ({
+        event_product_id: item.productId,
+        product_name: item.productName,
+        price_snapshot: item.price,
+        quantity: item.quantity,
+        options: item.options ?? [],
+      })),
+    });
     if (error) throw error;
     const orderRow = {
       id,
@@ -720,16 +725,6 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       total: input.total,
       created_at: createdAt,
     };
-    const itemRows = input.items.map((item) => ({
-      order_id: orderRow.id,
-      event_product_id: item.productId,
-      product_name: item.productName,
-      price_snapshot: item.price,
-      quantity: item.quantity,
-      options: item.options ?? [],
-    }));
-    const { error: itemError } = await supabase.from("order_items").insert(itemRows);
-    if (itemError) throw itemError;
     for (const item of input.items) {
       await supabase.rpc("decrement_stock", { p_event_product_id: item.productId, p_qty: item.quantity });
       for (const opt of item.options ?? []) {

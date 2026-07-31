@@ -523,6 +523,16 @@ begin
     where oi.order_id = v_cancelled_id
       and oi.event_product_id = ep.id
       and ep.stock is not null;
+
+    -- 옵션값별 재고도 리스팅 재고와 마찬가지로 복구한다 — 주문 아이템의
+    -- options 스냅샷에 담긴 optionValueId로 event_option_stock 행을 찾는다
+    -- (has_stock=false였던 옵션값은 애초에 행이 없어 조용히 무시됨).
+    update event_option_stock eos
+    set stock = eos.stock + oi.quantity
+    from order_items oi, jsonb_array_elements(oi.options) as opt
+    where oi.order_id = v_cancelled_id
+      and eos.event_product_id = oi.event_product_id
+      and eos.option_value_id = (opt->>'optionValueId')::uuid;
   end if;
 end;
 $$;
@@ -544,6 +554,64 @@ begin
     and lower(coalesce(guest_name, recipient_name)) = lower(p_name)
     and status in ('confirmed', 'ship')
     and cancel_requested = false;
+end;
+$$;
+
+-- 주문 생성(orders + order_items를 한 트랜잭션으로) — 클라이언트에서 각각
+-- insert하던 방식은 게스트 주문에서 항상 실패했다: order_items의 INSERT
+-- 정책(`exists (select 1 from orders where id = order_id)`)이 검사하는
+-- orders 서브쿼리도 orders의 SELECT 정책(profile_id = auth.uid())을 그대로
+-- 타는데, 게스트 주문은 profile_id가 null이라 auth.uid()(역시 null)와
+-- "NULL = NULL"이 SQL에서 true가 아니라서 서브쿼리가 방금 만든 자기 자신의
+-- 주문조차 "안 보이는" 것처럼 취급해 매번 막혔다. SECURITY DEFINER로 RLS를
+-- 완전히 우회해서 이 문제를 근본적으로 없앤다. 회원 주문의 profile_id
+-- 검증(자기 자신 것만 만들 수 있어야 함)은 기존 INSERT 정책이 하던 일을
+-- 함수 안에서 그대로 재현한다.
+create or replace function create_order(
+  p_id uuid,
+  p_order_number text,
+  p_event_id uuid,
+  p_batch_id uuid,
+  p_profile_id uuid,
+  p_guest_name text,
+  p_guest_phone text,
+  p_guest_pin text,
+  p_recipient_name text,
+  p_recipient_phone text,
+  p_address_snapshot text,
+  p_apartment_name text,
+  p_payment_method text,
+  p_total integer,
+  p_created_at timestamptz,
+  p_items jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_profile_id is not null and p_profile_id <> auth.uid() then
+    raise exception 'profile_id must match the authenticated user';
+  end if;
+
+  insert into orders (
+    id, order_number, event_id, batch_id, profile_id, guest_name, guest_phone, guest_pin,
+    recipient_name, recipient_phone, address_snapshot, apartment_name, payment_method, status, total, created_at
+  ) values (
+    p_id, p_order_number, p_event_id, p_batch_id, p_profile_id, p_guest_name, p_guest_phone, p_guest_pin,
+    p_recipient_name, p_recipient_phone, p_address_snapshot, p_apartment_name, p_payment_method, 'wait', p_total, p_created_at
+  );
+
+  insert into order_items (order_id, event_product_id, product_name, price_snapshot, quantity, options)
+  select
+    p_id,
+    nullif(i->>'event_product_id', '')::uuid,
+    i->>'product_name',
+    (i->>'price_snapshot')::integer,
+    (i->>'quantity')::integer,
+    coalesce(i->'options', '[]'::jsonb)
+  from jsonb_array_elements(p_items) as i;
 end;
 $$;
 
