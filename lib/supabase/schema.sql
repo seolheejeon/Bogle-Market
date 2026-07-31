@@ -79,6 +79,13 @@ create table if not exists products (
   -- 정보라(고객도 결국 event_products.price로 실제 판매가를 보게 됨) 다른
   -- 컬럼처럼 그냥 products에 둔다 — 원가와 달리 숨길 필요가 없다.
   base_price integer not null default 0 check (base_price >= 0),
+  -- 상품 중심 재고 — 이 상품을 쓰는 모든 이벤트 리스팅(event_products)이 이
+  -- 값 하나를 공유한다(리스팅마다 따로 재고를 갖던 예전 구조와 반대). null =
+  -- 재고 제한 없음(상시 판매). 한 이벤트에서 주문이 들어가면 이 값이 줄어들고,
+  -- 같은 상품을 파는 다른 이벤트에도 다음 조회부터 즉시 반영된다. 입력/수정은
+  -- "상품 관리"(/admin/products) 화면에서만 하고, 이벤트 관리 화면에서는
+  -- 손대지 않는다(Epic 1 Phase 3).
+  stock integer check (stock is null or stock >= 0),
   created_at timestamptz not null default now()
 );
 
@@ -93,10 +100,12 @@ create table if not exists product_costs (
 );
 
 -- 이벤트별 상품 등록(리스팅) — 카탈로그 상품 하나를 이번 회차에 어떤
--- 가격/재고/노출로 팔지 나타낸다. 장바구니/주문/재고는 전부 이 테이블의 id
--- 기준으로 돈다 — 같은 카탈로그 상품이 여러 이벤트에 동시에 걸려도 이벤트별로
--- 독립된 재고를 가져야 하기 때문. product_id는 삭제 방지(on delete restrict가
--- 기본 NO ACTION과 동일하게 동작) — 사용 중인 카탈로그 상품은 삭제가 막힌다.
+-- 가격/노출로 팔지 나타낸다. 재고는 여기 없다 — products.stock 하나를 이
+-- 상품을 쓰는 모든 리스팅이 공유해서, 같은 상품을 여러 이벤트에 걸어도
+-- 한쪽에서 주문이 들어가면 다른 회차 재고도 즉시 함께 줄어든다(Epic 1
+-- Phase 3, 예전엔 리스팅마다 독립 재고였음). product_id는 삭제 방지(on
+-- delete restrict가 기본 NO ACTION과 동일하게 동작) — 사용 중인 카탈로그
+-- 상품은 삭제가 막힌다.
 create table if not exists event_products (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references events(id) on delete cascade,
@@ -106,8 +115,6 @@ create table if not exists event_products (
   -- don't need to override it, but a few (e.g. a mostly-문고리 event with one
   -- 택배-only item) can.
   delivery_type text check (delivery_type in ('DOOR', 'GROUP_BUY', 'PARCEL')),
-  -- null = 재고 제한 없음(상시 판매). 정해두면 주문 시 차감되고, 취소/환불 시 복구된다.
-  stock integer check (stock is null or stock >= 0),
   -- false면 고객 화면에서 숨김(삭제 없이 판매만 잠시 중단). 기본은 true.
   visible boolean not null default true,
   created_at timestamptz not null default now()
@@ -554,12 +561,15 @@ begin
   returning id into v_cancelled_id;
 
   if v_cancelled_id is not null then
-    update event_products ep
-    set stock = ep.stock + oi.quantity
+    -- 재고는 리스팅이 아니라 카탈로그 상품(products.stock)에 있으므로
+    -- event_products를 거쳐 어느 상품인지 찾아 복구한다(Epic 1 Phase 3).
+    update products p
+    set stock = p.stock + oi.quantity
     from order_items oi
+    join event_products ep on ep.id = oi.event_product_id
     where oi.order_id = v_cancelled_id
-      and oi.event_product_id = ep.id
-      and ep.stock is not null;
+      and ep.product_id = p.id
+      and p.stock is not null;
 
     -- 옵션값별 재고도 리스팅 재고와 마찬가지로 복구한다 — 주문 아이템의
     -- options 스냅샷에 담긴 optionValueId로 event_option_stock 행을 찾는다
@@ -652,8 +662,12 @@ begin
 end;
 $$;
 
--- 재고 차감/복구: 주문 생성 시 차감, 취소/환불 시 복구. 리스팅(event_products)의
--- stock이 null인 경우(재고 제한 없음)는 그대로 null 유지. 0 밑으로는 안 내려감.
+-- 재고 차감/복구: 주문 생성 시 차감, 취소/환불 시 복구. 재고는 리스팅이 아니라
+-- 카탈로그 상품(products.stock)에서 관리되어 같은 상품을 파는 모든 이벤트가
+-- 하나의 재고를 실시간으로 공유한다(Epic 1 Phase 3) — 호출부는 그대로
+-- event_product_id(리스팅)를 넘기고, 이 함수가 그 리스팅이 가리키는
+-- product_id를 찾아 그 상품의 재고를 갱신한다. stock이 null인 경우(재고
+-- 제한 없음)는 그대로 null 유지. 0 밑으로는 안 내려감.
 create or replace function decrement_stock(p_event_product_id uuid, p_qty integer)
 returns void
 language plpgsql
@@ -661,7 +675,10 @@ security definer
 set search_path = public
 as $$
 begin
-  update event_products set stock = greatest(stock - p_qty, 0) where id = p_event_product_id and stock is not null;
+  update products
+  set stock = greatest(stock - p_qty, 0)
+  where id = (select product_id from event_products where id = p_event_product_id)
+    and stock is not null;
 end;
 $$;
 
@@ -672,7 +689,10 @@ security definer
 set search_path = public
 as $$
 begin
-  update event_products set stock = stock + p_qty where id = p_event_product_id and stock is not null;
+  update products
+  set stock = stock + p_qty
+  where id = (select product_id from event_products where id = p_event_product_id)
+    and stock is not null;
 end;
 $$;
 

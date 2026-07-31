@@ -3,7 +3,7 @@
 보글마켓 개발 진행상황과 주요 기획 결정을 기록하는 문서입니다.
 **기능이 완료되거나 기획이 바뀔 때마다 이 문서도 함께 업데이트합니다.**
 
-마지막 업데이트: 2026-07-31 (배송방식별 결제수단 제한 — 사다드림은 무통장입금만, 문고리/택배는 전체 허용, 혼합 장바구니는 결제수단을 배송유형 그룹별로 따로 선택)
+마지막 업데이트: 2026-07-31 (상품 중심 재고 구조 — 재고를 이벤트 리스팅이 아니라 카탈로그 상품 하나로 통합, 같은 상품을 파는 모든 이벤트가 재고를 실시간 공유, 재고 입력은 상품관리 화면에서만)
 
 ---
 
@@ -281,6 +281,16 @@
 - **주문 생성**: 이벤트별로 별도 주문을 만드는 기존 구조(마감일/배송일이 달라 배송완료 처리를 독립적으로 하기 위함)는 그대로 유지 — 서로 다른 배송유형은 통상 서로 다른 이벤트에 속하므로 이벤트별 분리가 배송유형별 분리도 함께 만족시킴. 각 이벤트-주문에는 그 이벤트의 실질 배송유형에 맞게 선택된 결제수단이 적용됨
 - 운영 환경에서 실제 이벤트 3종(문고리/사다드림/택배)을 한 장바구니에 담아 검증: 사다드림 섹션엔 무통장입금 버튼만 뜨는 것, 혼합 안내 배너가 뜨는 것, 문고리 섹션에서만 "카드 결제"로 바꿔도 사다드림/택배 선택엔 영향 없는 것, 무통장입금 선택 시에만 그 섹션 아래 계좌 정보가 뜨는 것 확인(주문 제출은 실행하지 않음 — 실 데이터 생성 방지)
 
+**상품 중심 재고 구조**
+- 배경: Epic 1의 3번째 항목. 예전엔 같은 상품을 여러 이벤트(예: 제육볶음을 8/1·8/2·8/3 문고리 세 회차)에 걸 때마다 재고를 매번 따로 입력해야 했고, 한 회차에서 주문이 들어가도 다른 회차 재고는 그대로 남아있어 실제 남은 물량과 화면상 재고가 서로 어긋날 수 있었음
+- **재고를 `event_products`(리스팅)에서 `products`(카탈로그)로 이동** — 이제 이 상품을 파는 모든 이벤트가 재고 하나를 실시간으로 공유한다. 한 이벤트에서 주문이 들어가면 그 즉시(다음 조회부터) 같은 상품을 쓰는 다른 회차의 재고도 함께 줄어듦. `event_products`엔 이제 가격/노출/배송방식만 남음
+- **재고 차감/복구 RPC(`decrement_stock`/`increment_stock`)는 그대로 리스팅 id(`event_product_id`)를 받되, 내부에서 그 리스팅이 가리키는 카탈로그 상품을 찾아 `products.stock`을 갱신**하도록 재작성 — 호출부(주문 생성/취소/환불 로직)는 코드 변경 없이 그대로 동작. `cancel_guest_order`의 재고 복구 로직도 동일하게 `event_products`를 거쳐 `products`를 갱신하도록 수정
+- **재고 입력/수정은 "상품 관리"(`/admin/products`)에서만** — 이벤트 관리 화면(`/admin/events/[id]`)의 리스팅 편집에서는 재고 입력란과 "품절 처리" 버튼을 완전히 제거하고, 재고 숫자만 읽기 전용으로 보여주며 상품 관리로 안내하는 링크를 넣음. 이벤트에 새 리스팅을 추가할 때도 재고를 물어보지 않음(카탈로그 상품의 재고를 자동으로 공유)
+- **상품 관리 화면에 "연결된 이벤트" 패널 추가** — 상품 목록에서 펼치면 이 상품이 걸려있는 이벤트 목록(배송유형·배송일·가격)을 보여주고, 회차별로 "연결 해제"(리스팅 제거) 가능. 드롭다운으로 아직 안 걸린 이벤트를 골라 가격만 입력하면 바로 그 회차에 추가할 수 있음
+- **기존 리스팅별 재고값 이관**: 마이그레이션에서 상품별로 기존 `event_products.stock` 중 **가장 큰 값**을 새 `products.stock`으로 채움(여러 회차에 걸려 있던 상품이라면 그중 재고가 가장 넉넉했던 회차 기준)
+- **옵션값별 재고(`event_option_stock`)는 이번 범위에서 제외** — 색상/사이즈 등 옵션 단위 재고는 지금처럼 이벤트 리스팅별로 독립 관리됨(공유 대상 아님)
+- ⚠️ **배포 시 확인 필요**: 실제 Supabase 프로젝트에는 아직 `products.stock` 컬럼이 없고 `event_products.stock`이 남아있음 — 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 먼저 실행해야 함(안 하면 재고가 있는 상품 주문 시 실제로는 차감되지 않는 등 데이터 불일치 발생)
+
 # 진행 중인 기능
 
 - **카드/카카오페이 결제**: Toss Payments 키가 없어서 지금은 무통장입금과 동일하게 관리자가 수동으로 확인하는 방식으로 대체 중
@@ -300,6 +310,7 @@
 - [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 `product_option_groups`/`product_option_values`/`event_option_stock`/`order_items.options` 마이그레이션 미적용 — 적용 전까지는 옵션이 없는 기존 상품은 그대로 동작하지만, 옵션 그룹을 추가하려고 하면 에러로 실패함(존재하지 않는 테이블/컬럼에 쓰려고 시도). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 `products.base_price`/`product_costs`/`event_product_costs` 마이그레이션 미적용 — 적용 전까지는 상품 등록·수정, 이벤트에 상품 추가가 에러로 실패함(존재하지 않는 컬럼/테이블에 쓰려고 시도). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 `events.status` 마이그레이션 미적용 — 적용 전까지는 관리자 이벤트 목록의 "종료"/"재시작" 클릭이 에러로 실패함(존재하지 않는 컬럼에 쓰려고 시도). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
+- [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 상품 중심 재고 구조(`products.stock` 추가, `event_products.stock` 제거, `decrement_stock`/`increment_stock`/`cancel_guest_order` 재작성) 마이그레이션 미적용 — 적용 전까지는 재고가 새 컬럼을 안 보고 있어 주문 시 실제로 차감되지 않음(조용한 데이터 불일치, 에러로 드러나지 않음 — 반드시 적용 후 배포할 것). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [ ] 스마트택배 API 키 발급 후 `SWEETTRACKER_API_KEY` 환경변수 설정 + `app/api/tracking/route.ts`의 응답 필드명/택배사 코드(`t_code`)를 실제 응답과 대조 확인 (지금은 키가 없어 항상 "준비 중" 폴백으로만 동작 확인함)
 - [ ] Toss Payments 실제 가맹점 키 연동 (카드/카카오페이 자동결제)
 - [ ] 인천 이음카드 온라인 결제 연동 방법 조사
@@ -326,9 +337,9 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `profiles` | id(=auth.users.id), username(unique), nickname, phone(unique), is_admin | 1:1 auth 연동. 이메일은 auth.users에만 있고 이 테이블엔 없음(사용자에게 절대 노출 안 함). `is_admin=true`가 관리자 |
 | `addresses` | id, profile_id, name, phone, zonecode, road_address, apartment_name, detail_address, entrance_method, memo, is_default | 회원 배송지. Daum 주소검색으로만 입력받음 — `road_address`/`zonecode`는 검색 결과 그대로, `apartment_name`은 검색 결과가 공동주택일 때만 채워지는 값(사용자가 입력하는 항목 아님, 관리자 아파트별 필터용), `detail_address`(동/호 등)만 사용자가 직접 입력. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, badge(NONE/SALE/HOT/NEW/RESERVE/DEADLINE), status(open/ended), deadline_at, delivery_at, notice | 공동구매 회차. `badge`는 예전엔 `is_flash`(boolean)였음 — `badge='SALE'`만 예외적으로 주문 마감 정책(`lib/order-policy.ts`)에 영향을 주고 나머지는 순수 노출용 뱃지. `status`는 관리자 "종료" 버튼이 세우는 값 — `deadline_at`과 별개로 배송방식 정책보다 항상 우선해서 주문을 막는다(`isEventOrderable`). ⚠️ 실제 Supabase 프로젝트는 아직 `is_flash` 컬럼 그대로라 마이그레이션 필요(TODO 참고) |
-| `products` | id, name, emoji, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, eat, description, base_price | **카탈로그 상품** — 이벤트와 무관하게 상품당 한 행만 존재하는 "내용물"(사진/설명/원산지 등). 같은 상품이 여러 회차에 걸려도 여기엔 한 번만 있고, 아래 `event_products`가 이 id를 재사용함. 삭제하려는 상품이 `event_products`에서 쓰이고 있으면 FK가 막음(에러코드 `23503`). `base_price`는 새 이벤트에 추가할 때 기본값으로 복사되는 기준 판매가(공개 정보) |
+| `products` | id, name, emoji, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, eat, description, base_price, stock | **카탈로그 상품** — 이벤트와 무관하게 상품당 한 행만 존재하는 "내용물"(사진/설명/원산지 등). 같은 상품이 여러 회차에 걸려도 여기엔 한 번만 있고, 아래 `event_products`가 이 id를 재사용함. 삭제하려는 상품이 `event_products`에서 쓰이고 있으면 FK가 막음(에러코드 `23503`). `base_price`는 새 이벤트에 추가할 때 기본값으로 복사되는 기준 판매가(공개 정보). `stock`은 이 상품을 파는 모든 이벤트가 공유하는 재고(Epic 1 Phase 3) — null이면 무제한, 값이 있으면 그 수량만큼만 판매되고 0이면 전 회차 동시 품절 |
 | `product_costs` | product_id(PK, →products), cost_price, updated_at | 카탈로그 상품의 **기준 원가** — `products`와 분리된 admin-only 테이블(RLS가 `is_admin()`으로만 select까지 걸림). 고객 화면이 쓰는 공개 쿼리에는 이 값이 절대 섞여 들어올 수 없음(같은 select에 join하지 않는 한 노출될 방법 자체가 없음) |
-| `event_products` | id, event_id, product_id(→products), price, delivery_type, stock, visible | **이벤트별 상품 리스팅** — 옛 `products` 테이블이 하던 역할(이벤트에 속한 판매 정보)을 그대로 가져오되 내용은 `product_id`로 카탈로그를 참조. `price`/`delivery_type`/`stock`/`visible`은 리스팅마다 독립적이라, 같은 카탈로그 상품도 회차별로 다른 가격·재고·노출 여부를 가질 수 있음. `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `stock`이 null이면 재고 제한 없음, 값이 있으면 그 수량만큼만 판매되고 0이면 품절. `visible=false`면 고객 화면에서 이 리스팅만 숨김(카탈로그 상품 자체나 다른 회차 리스팅엔 영향 없음) — RLS도 `visible or is_admin()`으로 비노출 리스팅을 비관리자에게 숨김. 화면(`Product` 타입)에는 `products`와 조인한 평평한 모양으로 합쳐져서 전달됨(`catalogProductId`로 원본 카탈로그 id를 알 수 있음) |
+| `event_products` | id, event_id, product_id(→products), price, delivery_type, visible | **이벤트별 상품 리스팅** — 옛 `products` 테이블이 하던 역할(이벤트에 속한 판매 정보)을 그대로 가져오되 내용은 `product_id`로 카탈로그를 참조. `price`/`delivery_type`/`visible`은 리스팅마다 독립적이라, 같은 카탈로그 상품도 회차별로 다른 가격·노출 여부를 가질 수 있음(재고는 없음 — `products.stock` 참고, Epic 1 Phase 3 전엔 여기 있었음). `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `visible=false`면 고객 화면에서 이 리스팅만 숨김(카탈로그 상품 자체나 다른 회차 리스팅엔 영향 없음) — RLS도 `visible or is_admin()`으로 비노출 리스팅을 비관리자에게 숨김. 화면(`Product` 타입)에는 `products`와 조인한 평평한 모양으로 합쳐져서 전달됨(`catalogProductId`로 원본 카탈로그 id를 알 수 있음) |
 | `event_product_costs` | event_product_id(PK, →event_products), cost_price | 이벤트 리스팅의 **원가 스냅샷** — 상품을 이 이벤트에 추가한 시점의 `product_costs.cost_price`를 복사해두고, 이후 카탈로그 원가가 바뀌어도 유지됨(`event_products.price`가 이미 하는 스냅샷 방식과 동일). `product_costs`와 마찬가지로 admin-only RLS |
 | `product_option_groups` | id, product_id(→products), name, required, multi, sort_order | 카탈로그 상품의 **옵션 그룹**(색상/사이즈/중량/추가옵션 등) — origin/weight처럼 카탈로그 전용 값이라 이 상품을 파는 모든 이벤트가 그대로 공유하고 회차별로 달라지지 않음. `required`는 반드시 하나 이상 골라야 담을 수 있는지, `multi`는 여러 값 동시 선택 가능 여부. 공개 조회(고객도 옵션 목록 자체는 봐야 하니까) |
 | `product_option_values` | id, group_id(→product_option_groups), name, price_delta, has_stock, default_stock, sort_order | 그룹에 속한 선택지 하나(예: 색상 그룹의 "빨강"). `price_delta`는 이 값을 고르면 기준가에 더해지는 금액(음수 가능). `has_stock=false`면 재고 제한이 없다는 뜻이라 `event_option_stock`에 행을 아예 안 만듦. `default_stock`은 새 이벤트에 리스팅을 추가할 때 `event_option_stock`의 초기값으로만 쓰이고, 이후로는 서로 독립적으로 움직임 |

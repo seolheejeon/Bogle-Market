@@ -179,7 +179,6 @@ function EventProductRow({
   const [price, setPrice] = useState(String(product.price));
   const [costPriceInput, setCostPriceInput] = useState(costPrice !== undefined ? String(costPrice) : "");
   const [deliveryType, setDeliveryType] = useState<EventType>(product.deliveryType ?? eventType);
-  const [stock, setStock] = useState(product.stock !== undefined ? String(product.stock) : "");
   const [visible, setVisible] = useState(product.visible !== false);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -197,7 +196,6 @@ function EventProductRow({
         price: Number(price) || 0,
         costPrice: costPriceInput.trim() === "" ? 0 : Math.max(0, Number(costPriceInput) || 0),
         deliveryType,
-        stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
         visible,
       });
       setEditing(false);
@@ -217,22 +215,13 @@ function EventProductRow({
       alert(e instanceof Error ? e.message : "제거 중 오류가 발생했어요.");
     }
   }
-  // 노출 스위치/품절 처리는 편집 화면을 열지 않고 목록에서 바로 한 번에 끝낸다.
+  // 노출 스위치는 편집 화면을 열지 않고 목록에서 바로 한 번에 끝낸다. 재고는
+  // 여기서 손대지 않는다 — 상품관리(/admin/products)의 공유 재고 하나로
+  // 관리되므로 품절 처리도 거기서 한다.
   async function toggleVisible() {
     setBusy(true);
     try {
       await updateEventProduct(product.id, { visible: !(product.visible !== false) });
-      onSaved();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function toggleSoldout() {
-    setBusy(true);
-    try {
-      await updateEventProduct(product.id, { stock: product.stock === 0 ? undefined : 0 });
       onSaved();
     } catch (e) {
       alert(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
@@ -255,7 +244,8 @@ function EventProductRow({
           </p>
           <p className="text-[12px] text-text-muted">
             {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
-            {product.stock !== undefined && ` · 재고 ${product.stock}개`}
+            {product.stock !== undefined && ` · 재고 ${product.stock}개(상품관리 공유)`}
+            {isSoldout && <span className="ml-1 font-bold text-red-600">품절</span>}
           </p>
           <p className="text-[11.5px] text-text-muted">
             원가 {formatPrice(costPrice ?? 0)} · 개당 예상수익 {formatPrice(profitPerItem)} · 판매 {soldQty}개 · 누적 예상수익 {formatPrice(totalProfit)}
@@ -273,15 +263,8 @@ function EventProductRow({
           <button onClick={toggleVisible} disabled={busy} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50">
             {isVisible ? "숨기기" : "노출"}
           </button>
-          <button
-            onClick={toggleSoldout}
-            disabled={busy}
-            className={`rounded-[7px] border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50 ${isSoldout ? "border-red-200 bg-red-50 text-red-600" : "border-border"}`}
-          >
-            {isSoldout ? "품절중" : "품절 처리"}
-          </button>
           <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
-            가격/원가/재고 수정
+            가격/원가 수정
           </button>
           <button onClick={remove} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold text-red-600">
             제거
@@ -330,17 +313,13 @@ function EventProductRow({
           value={costPriceInput}
           onChange={(e) => setCostPriceInput(e.target.value)}
         />
-        <input
-          className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-          placeholder="재고(비우면 무제한)"
-          type="number"
-          min={0}
-          value={stock}
-          onChange={(e) => setStock(e.target.value)}
-        />
       </div>
       <p className="-mt-1.5 text-[11px] text-text-muted">
-        2+1/묶음 판매 등으로 이 회차만 가격·원가가 다르면 여기서 바꾸면 돼요 — 상품 관리의 기준값은 그대로 유지돼요.
+        2+1/묶음 판매 등으로 이 회차만 가격·원가가 다르면 여기서 바꾸면 돼요 — 상품 관리의 기준값은 그대로 유지돼요. 재고는{" "}
+        <Link href="/admin/products" className="font-semibold text-accent-dark underline">
+          상품 관리
+        </Link>
+        에서 이 상품을 파는 모든 회차가 함께 봐요.
       </p>
       <label className="flex items-center gap-2 text-[12.5px] text-text-muted">
         <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
@@ -419,8 +398,9 @@ function OptionStockField({
 }
 
 // 새 상품을 처음부터 만드는 게 아니라, 카탈로그에서 검색해 골라 이번
-// 이벤트의 가격/재고/노출만 정하고 바로 추가한다("상품은 하나, 이벤트에서
-// 재사용" — 이벤트 안에서 상품을 새로 만들지 않는다).
+// 이벤트의 가격/노출만 정하고 바로 추가한다("상품은 하나, 이벤트에서
+// 재사용" — 이벤트 안에서 상품을 새로 만들지 않는다). 재고는 카탈로그
+// 상품에 이미 있어 여기서 따로 정할 게 없다.
 function AddExistingProductForm({
   eventId,
   eventType,
@@ -437,7 +417,6 @@ function AddExistingProductForm({
   const [selected, setSelected] = useState<CatalogProduct | null>(null);
   const [price, setPrice] = useState("");
   const [costPrice, setCostPrice] = useState("");
-  const [stock, setStock] = useState("");
   const [visible, setVisible] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -458,7 +437,6 @@ function AddExistingProductForm({
     setSelected(c);
     setPrice(c.basePrice !== undefined ? String(c.basePrice) : "");
     setCostPrice(c.costPrice !== undefined ? String(c.costPrice) : "");
-    setStock("");
     setVisible(true);
   }
 
@@ -472,7 +450,6 @@ function AddExistingProductForm({
         price: Number(price) || 0,
         costPrice: costPrice.trim() === "" ? undefined : Math.max(0, Number(costPrice) || 0),
         deliveryType: eventType,
-        stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
         visible,
       });
       setSelected(null);
@@ -544,16 +521,14 @@ function AddExistingProductForm({
               value={costPrice}
               onChange={(e) => setCostPrice(e.target.value)}
             />
-            <input
-              className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-              placeholder="재고(비우면 무제한)"
-              type="number"
-              min={0}
-              value={stock}
-              onChange={(e) => setStock(e.target.value)}
-            />
           </div>
-          <p className="-mt-1.5 text-[11px] text-text-muted">가격·원가는 상품의 기준값이 자동으로 채워져요. 2+1/묶음 판매처럼 이 회차만 다르면 바꿔서 추가하세요.</p>
+          <p className="-mt-1.5 text-[11px] text-text-muted">
+            가격·원가는 상품의 기준값이 자동으로 채워져요. 2+1/묶음 판매처럼 이 회차만 다르면 바꿔서 추가하세요. 재고는{" "}
+            <Link href="/admin/products" className="font-semibold text-accent-dark underline">
+              상품 관리
+            </Link>
+            의 재고를 그대로 공유해요.
+          </p>
           <label className="flex items-center gap-2 text-[12.5px] text-text-muted">
             <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
             고객 화면에 노출

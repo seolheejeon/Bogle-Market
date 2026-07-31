@@ -72,6 +72,12 @@ export interface CatalogProduct {
   // 온다. listCatalogProducts()가 관리자 화면에서만 호출되기 때문에 이 타입에
   // 같이 둬도 고객 화면에는 절대 노출되지 않는다.
   costPrice?: number;
+  // 상품 중심 재고 — 이 상품을 쓰는 모든 이벤트 리스팅이 이 값 하나를
+  // 공유한다. undefined = 재고 제한 없음(상시 판매). 한 이벤트에서 주문이
+  // 들어가면 이 값이 줄고, 같은 상품을 파는 다른 이벤트에도 즉시 반영된다.
+  // 입력/수정은 "상품 관리"(/admin/products)에서만 하고, 이벤트 관리
+  // 화면(리스팅)에는 재고 입력란이 없다(Epic 1 Phase 3).
+  stock?: number;
   // 색상/사이즈/중량/추가옵션 등 — 신발/의류/식품/과일/묶음상품 어디든 같은
   // 구조로 표현하기 위한 유연한 옵션 그룹 목록. 정렬 순서(sortOrder)대로 온다.
   optionGroups?: ProductOptionGroup[];
@@ -102,8 +108,9 @@ export interface Product {
   eat?: string;
   description?: string;
   detailBlocks?: ProductDetailBlock[];
-  // undefined = 재고 제한 없음(상시 판매). 정해두면 그 수량만큼만 주문 가능하고,
-  // 0이 되면 품절 처리된다.
+  // 카탈로그 상품(CatalogProduct.stock)에서 그대로 내려오는 공유 재고값 —
+  // 이 리스팅만의 독립된 값이 아니라, 같은 상품을 쓰는 다른 이벤트와 실시간
+  // 공유된다. undefined = 재고 제한 없음. 0이 되면 품절 처리된다.
   stock?: number;
   // false면 고객 화면(그리드/이벤트 상세 등)에서 숨김 — 상품은 남겨두되 잠시
   // 판매만 중단하고 싶을 때(예: 다음 회차 준비 중) 삭제 없이 끄는 용도.
@@ -146,8 +153,9 @@ export interface MarketEvent {
 }
 
 // mock 모드 로컬스토리지에 이벤트와 함께 내장되는 "리스팅 원본" — 카탈로그
-// 내용(name/photos/description 등)은 없고 이 이벤트에서의 가격/재고/노출/
-// 배송방식 오버라이드만 담는다. lib/data.ts가 이 원본을 카탈로그 상품과
+// 내용(name/photos/description 등)은 없고 이 이벤트에서의 가격/노출/배송방식
+// 오버라이드만 담는다(재고는 카탈로그 상품 쪽에 있다 — CatalogProduct.stock).
+// lib/data.ts가 이 원본을 카탈로그 상품과
 // 조인해서 화면이 쓰는 평평한 Product로 합쳐준다 — Supabase 모드에서
 // event_products·products 테이블을 조인한 것과 같은 결과를 mock에서도
 // 내기 위함(두 모드가 항상 같은 방식으로 동작하도록).
@@ -163,7 +171,6 @@ export interface EventProductSeed {
   // event_product_costs라는 별도 admin-only 테이블에 저장된다.
   costPrice?: number;
   deliveryType?: EventType;
-  stock?: number;
   visible?: boolean;
   // 옵션값별 재고 스냅샷(optionValueId -> stock) — event_option_stock 테이블의
   // mock 버전. 카탈로그 옵션값의 defaultStock을 이 이벤트에 추가한 시점에

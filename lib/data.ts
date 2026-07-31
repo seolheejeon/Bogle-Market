@@ -64,7 +64,8 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     eat: catalog?.eat,
     description: catalog?.description,
     detailBlocks: catalog?.detailBlocks,
-    stock: listing.stock,
+    // 카탈로그 상품의 공유 재고를 그대로 내려준다 — 리스팅 자체엔 재고가 없다.
+    stock: catalog?.stock,
     visible: listing.visible,
     optionGroups: mergeOptionStock(catalog?.optionGroups, listing.optionStock),
   };
@@ -159,10 +160,10 @@ export async function updateEvent(id: string, patch: Partial<Omit<MarketEvent, "
 }
 
 // 같은 이벤트를 다음 회차로 복제 — 카탈로그 상품은 그대로 재사용하고(새로
-// 안 늘어남), 리스팅(가격/재고/노출/배송방식)만 복사한다. 회차마다 바뀌는
+// 안 늘어남), 리스팅(가격/노출/배송방식)만 복사한다. 회차마다 바뀌는
 // 제목/마감/배송일만 새로 받는다("이벤트 복제" UX의 핵심은 이 세 값만
-// 입력하면 끝나는 것). 재고는 원본 값을 그대로 복사하므로 새 회차의 실제
-// 재고에 맞게 admin이 따로 조정해야 한다.
+// 입력하면 끝나는 것). 재고는 카탈로그 상품 쪽에 이미 있어 복제할 게 없다 —
+// 새 리스팅도 자동으로 같은 공유 재고를 본다.
 export async function duplicateEvent(eventId: string, overrides: { title: string; deadlineAt: string; deliveryAt: string }): Promise<MarketEvent> {
   const source = await getEvent(eventId);
   if (!source) throw new Error("이벤트를 찾을 수 없어요.");
@@ -193,7 +194,6 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
       price: p.price,
       costPrice: costs[p.id],
       deliveryType: p.deliveryType,
-      stock: p.stock,
       visible: p.visible,
       optionStock: Object.keys(optionStock).length > 0 ? optionStock : undefined,
     });
@@ -250,6 +250,7 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
         eat: input.eat,
         description: input.description,
         base_price: input.basePrice ?? 0,
+        stock: input.stock ?? null,
       })
       .select()
       .single();
@@ -293,6 +294,10 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     if (patch.eat !== undefined) row.eat = patch.eat;
     if (patch.description !== undefined) row.description = patch.description;
     if (patch.basePrice !== undefined) row.base_price = patch.basePrice;
+    // "stock" in patch (아닌 !== undefined)로 확인 — 재고 한도를 다시
+    // "무제한"으로 비우는 것도 유효한 값 변경이라, patch.stock이 undefined인
+    // 채로 명시적으로 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
+    if ("stock" in patch) row.stock = patch.stock ?? null;
     if (Object.keys(row).length > 0) {
       const { error } = await supabase.from("products").update(row).eq("id", catalogProductId);
       if (error) {
@@ -391,7 +396,8 @@ async function fetchOptionGroupsForProduct(supabase: ReturnType<typeof getSupaba
 }
 
 // ---------- 이벤트별 상품 등록(리스팅) ----------
-// 카탈로그 상품 하나를 이번 이벤트에 어떤 가격/재고/노출로 팔지 나타낸다.
+// 카탈로그 상품 하나를 이번 이벤트에 어떤 가격/노출로 팔지 나타낸다. 재고는
+// 여기서 정하지 않는다 — 상품 자체(카탈로그)의 재고를 그대로 공유한다.
 
 export interface NewEventProductInput {
   catalogProductId: string;
@@ -401,7 +407,6 @@ export interface NewEventProductInput {
   // 미리 값을 바꿔 넘기면 된다. undefined면 원가를 기록하지 않는다(0으로 남음).
   costPrice?: number;
   deliveryType?: EventType;
-  stock?: number;
   visible?: boolean;
   // 옵션값별 초기 재고(optionValueId -> stock)를 명시적으로 주면 카탈로그의
   // 기본 재고(defaultStock) 대신 이 값으로 event_option_stock을 초기화한다 —
@@ -420,7 +425,6 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
         product_id: input.catalogProductId,
         price: input.price,
         delivery_type: input.deliveryType ?? null,
-        stock: input.stock ?? null,
         visible: input.visible ?? true,
       })
       .select("*, products(*)")
@@ -463,7 +467,6 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
     price: input.price,
     costPrice: input.costPrice,
     deliveryType: input.deliveryType,
-    stock: input.stock,
     visible: input.visible ?? true,
     optionStock: Object.keys(optionStock).length > 0 ? optionStock : undefined,
   };
@@ -475,7 +478,6 @@ export interface EventProductPatch {
   price?: number;
   costPrice?: number;
   deliveryType?: EventType;
-  stock?: number;
   visible?: boolean;
 }
 
@@ -485,10 +487,6 @@ export async function updateEventProduct(eventProductId: string, patch: EventPro
     const row: Record<string, unknown> = {};
     if (patch.price !== undefined) row.price = patch.price;
     if (patch.deliveryType !== undefined) row.delivery_type = patch.deliveryType ?? null;
-    // "stock" in patch (아닌 !== undefined)로 확인 — 재고 한도를 다시 "무제한"으로
-    // 비우는 것도 유효한 값 변경이라, patch.stock이 undefined인 채로 명시적으로
-    // 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
-    if ("stock" in patch) row.stock = patch.stock ?? null;
     if (patch.visible !== undefined) row.visible = patch.visible;
     if (Object.keys(row).length > 0) {
       const { error } = await supabase.from("event_products").update(row).eq("id", eventProductId);
@@ -764,48 +762,64 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
   return order;
 }
 
-// 리스팅(event_products) 재고와 그 안의 옵션값별 재고(event_option_stock의
-// mock 버전인 optionStock)를 합쳐서 주문 수량만큼 차감/복구하는 공통 로직.
-// sign=1이면 차감(0 밑으로는 안 내려감), sign=-1이면 복구.
-function applyStockDelta(events: MarketEventSeed[], items: OrderItem[], sign: 1 | -1): MarketEventSeed[] {
-  const deltaByProduct = new Map(items.map((i) => [i.productId, i.quantity]));
-  const optionDeltaByProduct = new Map<string, Record<string, number>>();
+// 카탈로그 상품(products.stock의 mock 버전)의 공유 재고와 리스팅의 옵션값별
+// 재고(event_option_stock의 mock 버전인 optionStock)를 합쳐서 주문 수량만큼
+// 차감/복구하는 공통 로직. sign=1이면 차감(0 밑으로는 안 내려감), sign=-1이면
+// 복구. items의 productId는 리스팅 id라 카탈로그 상품 id로 먼저 옮겨 담아야
+// 한다 — 같은 카탈로그 상품을 쓰는 리스팅이 여러 이벤트에 걸쳐 있어도(Epic 1
+// Phase 3) 결국 재고 하나를 같이 줄이고 늘려야 하기 때문.
+function applyStockDelta(events: MarketEventSeed[], items: OrderItem[], sign: 1 | -1): { events: MarketEventSeed[]; catalog: CatalogProduct[] } {
+  const catalogIdByListing = new Map<string, string>();
+  for (const e of events) for (const p of e.products) catalogIdByListing.set(p.id, p.catalogProductId);
+
+  const deltaByCatalog = new Map<string, number>();
+  const optionDeltaByListing = new Map<string, Record<string, number>>();
   for (const i of items) {
+    const catalogId = catalogIdByListing.get(i.productId);
+    if (catalogId) deltaByCatalog.set(catalogId, (deltaByCatalog.get(catalogId) ?? 0) + i.quantity);
     if (!i.options || i.options.length === 0) continue;
-    const map = optionDeltaByProduct.get(i.productId) ?? {};
+    const map = optionDeltaByListing.get(i.productId) ?? {};
     for (const opt of i.options) map[opt.optionValueId] = (map[opt.optionValueId] ?? 0) + i.quantity;
-    optionDeltaByProduct.set(i.productId, map);
+    optionDeltaByListing.set(i.productId, map);
   }
-  return events.map((e) => ({
+
+  const nextEvents = events.map((e) => ({
     ...e,
     products: e.products.map((p) => {
-      const qty = deltaByProduct.get(p.id);
-      const optionDelta = optionDeltaByProduct.get(p.id);
-      let next = p;
-      if (qty && next.stock !== undefined) {
-        next = { ...next, stock: sign > 0 ? Math.max(0, next.stock - qty) : next.stock + qty };
+      const optionDelta = optionDeltaByListing.get(p.id);
+      if (!optionDelta || !p.optionStock) return p;
+      const optionStock = { ...p.optionStock };
+      for (const [optionValueId, q] of Object.entries(optionDelta)) {
+        if (optionStock[optionValueId] === undefined) continue;
+        optionStock[optionValueId] = sign > 0 ? Math.max(0, optionStock[optionValueId] - q) : optionStock[optionValueId] + q;
       }
-      if (optionDelta && next.optionStock) {
-        const optionStock = { ...next.optionStock };
-        for (const [optionValueId, q] of Object.entries(optionDelta)) {
-          if (optionStock[optionValueId] === undefined) continue;
-          optionStock[optionValueId] = sign > 0 ? Math.max(0, optionStock[optionValueId] - q) : optionStock[optionValueId] + q;
-        }
-        next = { ...next, optionStock };
-      }
-      return next;
+      return { ...p, optionStock };
     }),
   }));
+
+  const nextCatalog = loadCatalogProducts().map((c) => {
+    const qty = deltaByCatalog.get(c.id);
+    if (!qty || c.stock === undefined) return c;
+    return { ...c, stock: sign > 0 ? Math.max(0, c.stock - qty) : c.stock + qty };
+  });
+
+  return { events: nextEvents, catalog: nextCatalog };
 }
 
-// 재고가 있는 리스팅(stock이 정해진 리스팅)만 골라 주문 수량만큼 차감한다(0
-// 밑으로는 안 내려감). stock이 undefined인 리스팅(재고 제한 없음)은 그대로 둔다.
+// 재고가 있는 카탈로그 상품(stock이 정해진 상품)만 골라 주문 수량만큼
+// 차감한다(0 밑으로는 안 내려감). stock이 undefined인 상품(재고 제한 없음)은
+// 그대로 둔다. 카탈로그 저장은 이 함수 안에서 바로 처리하고(부수효과), 이벤트
+// 쪽은 옵션재고 변경분만 반영해 호출부가 그대로 saveEvents에 넘기면 된다.
 function decrementProductStock(events: MarketEventSeed[], items: OrderItem[]): MarketEventSeed[] {
-  return applyStockDelta(events, items, 1);
+  const { events: nextEvents, catalog } = applyStockDelta(events, items, 1);
+  saveCatalogProducts(catalog);
+  return nextEvents;
 }
 
 function restoreProductStock(events: MarketEventSeed[], items: OrderItem[]): MarketEventSeed[] {
-  return applyStockDelta(events, items, -1);
+  const { events: nextEvents, catalog } = applyStockDelta(events, items, -1);
+  saveCatalogProducts(catalog);
+  return nextEvents;
 }
 
 export async function listOrdersForProfile(profileId: string): Promise<Order[]> {
@@ -1298,6 +1312,7 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     description: row.description ?? undefined,
     detailBlocks: row.detail_blocks && row.detail_blocks.length > 0 ? row.detail_blocks : undefined,
     basePrice: row.base_price ?? 0,
+    stock: row.stock ?? undefined,
     // product_costs는 1:1 관계라 PostgREST가 보통 객체로 embed하지만, 관계
     // 감지 방식에 따라 배열로 올 수도 있어 양쪽 다 방어적으로 처리한다.
     // RLS상 비관리자에게는 이 값 자체가 null로 오므로 costPrice가 그냥
@@ -1326,7 +1341,8 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     eat: catalog.eat ?? undefined,
     description: catalog.description ?? undefined,
     detailBlocks: catalog.detail_blocks && catalog.detail_blocks.length > 0 ? catalog.detail_blocks : undefined,
-    stock: row.stock ?? undefined,
+    // 카탈로그 상품(products.stock)의 공유 재고를 그대로 내려준다.
+    stock: catalog.stock ?? undefined,
     visible: row.visible ?? true,
     optionGroups: mergeSupabaseOptionStock(mapSupabaseOptionGroups(catalog.product_option_groups), row.event_option_stock),
   };
