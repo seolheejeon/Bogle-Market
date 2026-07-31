@@ -8,7 +8,7 @@ import { formatPrice, formatEventDateChip } from "@/lib/format";
 import { isEventOrderable } from "@/lib/order-policy";
 import { useCart, type CartLine } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
-import { unitPrice, maxQtyForSelection, optionSelectionLabel, buildOptionSnapshot } from "@/lib/product-options";
+import { unitPrice, maxQtyForSelection, optionSelectionLabel, buildOptionSnapshot, comboValueIds } from "@/lib/product-options";
 import { PAYMENT_METHODS, allowedPaymentMethods } from "@/lib/payments";
 import { EVENT_TYPE_LABEL, type EventType } from "@/types";
 import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
@@ -202,6 +202,7 @@ export function CheckoutView() {
             price: unitPrice(i.product, i.line.optionValueIds),
             quantity: i.line.qty,
             options: buildOptionSnapshot(i.product, i.line.optionValueIds),
+            stockComboValueIds: comboValueIds(i.product, i.line.optionValueIds).length > 0 ? comboValueIds(i.product, i.line.optionValueIds) : undefined,
           })),
           total: groupTotal,
         });

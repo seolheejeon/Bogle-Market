@@ -43,6 +43,7 @@ import type {
 } from "@/types";
 import { EMPTY_STORE_SETTINGS } from "@/types";
 import { isEventOrderable } from "@/lib/order-policy";
+import { generateStockCombos, comboValueIds } from "@/lib/product-options";
 
 // 이벤트 리스팅(EventProductSeed/event_products 행)과 카탈로그 상품을 합쳐서
 // 화면이 쓰는 평평한 Product로 만든다. mock/Supabase 두 모드 모두 최종적으로
@@ -68,6 +69,8 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     stock: catalog?.stock,
     visible: listing.visible,
     optionGroups: mergeOptionStock(catalog?.optionGroups, listing.optionStock),
+    // listing.optionStock은 이미 comboKey -> stock 맵이라 그대로 내려주면 된다.
+    optionStockByCombo: listing.optionStock,
   };
 }
 
@@ -181,21 +184,15 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
   // 마스터(카탈로그) 기준 원가가 아니라, 이 회차에서 실제로 쓰던 값을 이어받음.
   const costs = await getEventProductCosts(source.products.map((p) => p.id));
   for (const p of source.products) {
-    // 옵션값별 재고도 가격/원가와 마찬가지로 "원본 회차에서 실제로 쓰던 값"을
+    // 옵션 조합 재고도 가격/원가와 마찬가지로 "원본 회차에서 실제로 쓰던 값"을
     // 그대로 이어받는다 — 카탈로그의 기본 재고로 새로 초기화하지 않는다.
-    const optionStock: Record<string, number> = {};
-    for (const g of p.optionGroups ?? []) {
-      for (const v of g.values) {
-        if (v.hasStock && v.stock !== undefined) optionStock[v.id] = v.stock;
-      }
-    }
     await addEventProduct(created.id, {
       catalogProductId: p.catalogProductId,
       price: p.price,
       costPrice: costs[p.id],
       deliveryType: p.deliveryType,
       visible: p.visible,
-      optionStock: Object.keys(optionStock).length > 0 ? optionStock : undefined,
+      optionStock: p.optionStockByCombo,
     });
   }
   const full = await getEvent(created.id);
@@ -408,10 +405,11 @@ export interface NewEventProductInput {
   costPrice?: number;
   deliveryType?: EventType;
   visible?: boolean;
-  // 옵션값별 초기 재고(optionValueId -> stock)를 명시적으로 주면 카탈로그의
-  // 기본 재고(defaultStock) 대신 이 값으로 event_option_stock을 초기화한다 —
-  // duplicateEvent가 원본 회차의 실제 재고를 그대로 이어받을 때 쓰는 용도.
-  // 안 주면(보통의 "이벤트에 상품 추가" 흐름) 카탈로그 기본값으로 채워진다.
+  // 옵션 조합별 초기 재고(comboKey -> stock)를 명시적으로 주면 카탈로그
+  // 기본값(각 조합을 구성하는 값들의 defaultStock 중 최솟값) 대신 이 값으로
+  // event_option_stock을 초기화한다 — duplicateEvent가 원본 회차의 실제
+  // 재고를 그대로 이어받을 때 쓰는 용도. 안 주면(보통의 "이벤트에 상품 추가"
+  // 흐름) 카탈로그 기본값으로 채워진다.
   optionStock?: Record<string, number>;
 }
 
@@ -435,11 +433,11 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
       if (costError) throw costError;
     }
     const catalogGroups = await fetchOptionGroupsForProduct(supabase, input.catalogProductId);
-    const optionStockRows = catalogGroups.flatMap((g) =>
-      g.values
-        .filter((v) => v.hasStock)
-        .map((v) => ({ event_product_id: data.id, option_value_id: v.id, stock: input.optionStock?.[v.id] ?? v.defaultStock ?? 0 })),
-    );
+    const optionStockRows = generateStockCombos(catalogGroups).map((c) => ({
+      event_product_id: data.id,
+      value_ids: c.valueIds,
+      stock: input.optionStock?.[c.valueIds.join(",")] ?? c.defaultStock,
+    }));
     if (optionStockRows.length > 0) {
       const { error: stockError } = await supabase.from("event_option_stock").insert(optionStockRows);
       if (stockError) throw stockError;
@@ -455,10 +453,9 @@ export async function addEventProduct(eventId: string, input: NewEventProductInp
   const catalog = loadCatalogProducts().find((c) => c.id === input.catalogProductId);
   if (!catalog) throw new Error("상품을 찾을 수 없어요.");
   const optionStock: Record<string, number> = {};
-  for (const g of catalog.optionGroups ?? []) {
-    for (const v of g.values) {
-      if (v.hasStock) optionStock[v.id] = input.optionStock?.[v.id] ?? v.defaultStock ?? 0;
-    }
+  for (const c of generateStockCombos(catalog.optionGroups ?? [])) {
+    const key = c.valueIds.join(",");
+    optionStock[key] = input.optionStock?.[key] ?? c.defaultStock;
   }
   const listing: EventProductSeed = {
     id: genId("lst"),
@@ -502,21 +499,26 @@ export async function updateEventProduct(eventProductId: string, patch: EventPro
   saveEvents(events.map((e) => ({ ...e, products: e.products.map((p) => (p.id === eventProductId ? { ...p, ...patch } : p)) })));
 }
 
-// 리스팅의 옵션값 하나의 재고를 직접 고쳐쓴다(관리자가 "이 회차엔 빨강이
+// 리스팅의 옵션 조합 하나의 재고를 직접 고쳐쓴다(관리자가 "이 회차엔 블랙+260이
 // 5개밖에 없어" 하고 조정하는 용도) — event_option_stock 스냅샷만 바뀌고
-// 카탈로그의 기본 재고(defaultStock)는 그대로 둔다.
-export async function updateEventOptionStock(eventProductId: string, optionValueId: string, stock: number): Promise<void> {
+// 카탈로그의 기본 재고(defaultStock)는 그대로 둔다. valueIds는 재고관리
+// 대상 그룹이 하나뿐이면 길이 1(그 값 자체), 두 개 이상이면 진짜 조합이다.
+export async function updateEventOptionStock(eventProductId: string, valueIds: string[], stock: number): Promise<void> {
+  const sortedIds = [...valueIds].sort();
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { error } = await supabase.from("event_option_stock").upsert({ event_product_id: eventProductId, option_value_id: optionValueId, stock });
+    const { error } = await supabase
+      .from("event_option_stock")
+      .upsert({ event_product_id: eventProductId, value_ids: sortedIds, stock }, { onConflict: "event_product_id,value_ids" });
     if (error) throw error;
     return;
   }
+  const key = sortedIds.join(",");
   const events = loadEvents();
   saveEvents(
     events.map((e) => ({
       ...e,
-      products: e.products.map((p) => (p.id === eventProductId ? { ...p, optionStock: { ...p.optionStock, [optionValueId]: stock } } : p)),
+      products: e.products.map((p) => (p.id === eventProductId ? { ...p, optionStock: { ...p.optionStock, [key]: stock } } : p)),
     })),
   );
 }
@@ -701,6 +703,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
         price_snapshot: item.price,
         quantity: item.quantity,
         options: item.options ?? [],
+        stock_value_ids: item.stockComboValueIds ?? [],
       })),
     });
     if (error) throw error;
@@ -728,8 +731,8 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     };
     for (const item of input.items) {
       await supabase.rpc("decrement_stock", { p_event_product_id: item.productId, p_qty: item.quantity });
-      for (const opt of item.options ?? []) {
-        await supabase.rpc("decrement_option_stock", { p_event_product_id: item.productId, p_option_value_id: opt.optionValueId, p_qty: item.quantity });
+      if (item.stockComboValueIds && item.stockComboValueIds.length > 0) {
+        await supabase.rpc("decrement_option_stock", { p_event_product_id: item.productId, p_value_ids: item.stockComboValueIds, p_qty: item.quantity });
       }
     }
     return mapSupabaseOrder(orderRow, input.items);
@@ -773,25 +776,29 @@ function applyStockDelta(events: MarketEventSeed[], items: OrderItem[], sign: 1 
   for (const e of events) for (const p of e.products) catalogIdByListing.set(p.id, p.catalogProductId);
 
   const deltaByCatalog = new Map<string, number>();
-  const optionDeltaByListing = new Map<string, Record<string, number>>();
+  // 리스팅 id -> (comboKey -> 수량). comboKey는 주문 시점에 이미 정렬해
+  // 저장해둔 stockComboValueIds를 그대로 이어붙인 것(재고관리 대상이 없으면
+  // 건너뜀 — 무제한 조합은 애초에 optionStock에 키가 없음).
+  const comboDeltaByListing = new Map<string, Record<string, number>>();
   for (const i of items) {
     const catalogId = catalogIdByListing.get(i.productId);
     if (catalogId) deltaByCatalog.set(catalogId, (deltaByCatalog.get(catalogId) ?? 0) + i.quantity);
-    if (!i.options || i.options.length === 0) continue;
-    const map = optionDeltaByListing.get(i.productId) ?? {};
-    for (const opt of i.options) map[opt.optionValueId] = (map[opt.optionValueId] ?? 0) + i.quantity;
-    optionDeltaByListing.set(i.productId, map);
+    if (!i.stockComboValueIds || i.stockComboValueIds.length === 0) continue;
+    const key = i.stockComboValueIds.join(",");
+    const map = comboDeltaByListing.get(i.productId) ?? {};
+    map[key] = (map[key] ?? 0) + i.quantity;
+    comboDeltaByListing.set(i.productId, map);
   }
 
   const nextEvents = events.map((e) => ({
     ...e,
     products: e.products.map((p) => {
-      const optionDelta = optionDeltaByListing.get(p.id);
-      if (!optionDelta || !p.optionStock) return p;
+      const comboDelta = comboDeltaByListing.get(p.id);
+      if (!comboDelta || !p.optionStock) return p;
       const optionStock = { ...p.optionStock };
-      for (const [optionValueId, q] of Object.entries(optionDelta)) {
-        if (optionStock[optionValueId] === undefined) continue;
-        optionStock[optionValueId] = sign > 0 ? Math.max(0, optionStock[optionValueId] - q) : optionStock[optionValueId] + q;
+      for (const [key, q] of Object.entries(comboDelta)) {
+        if (optionStock[key] === undefined) continue;
+        optionStock[key] = sign > 0 ? Math.max(0, optionStock[key] - q) : optionStock[key] + q;
       }
       return { ...p, optionStock };
     }),
@@ -877,12 +884,12 @@ export async function updateOrderStatus(
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     if (isRestockingStatus(status)) {
-      const { data: itemRows } = await supabase.from("order_items").select("event_product_id, quantity, options").eq("order_id", orderId);
+      const { data: itemRows } = await supabase.from("order_items").select("event_product_id, quantity, stock_value_ids").eq("order_id", orderId);
       for (const item of itemRows ?? []) {
         if (!item.event_product_id) continue;
         await supabase.rpc("increment_stock", { p_event_product_id: item.event_product_id, p_qty: item.quantity });
-        for (const opt of item.options ?? []) {
-          await supabase.rpc("increment_option_stock", { p_event_product_id: item.event_product_id, p_option_value_id: opt.optionValueId, p_qty: item.quantity });
+        if (item.stock_value_ids && item.stock_value_ids.length > 0) {
+          await supabase.rpc("increment_option_stock", { p_event_product_id: item.event_product_id, p_value_ids: item.stock_value_ids, p_qty: item.quantity });
         }
       }
     }
@@ -1284,12 +1291,25 @@ function mapSupabaseOptionGroups(rows: Record<string, any>[] | undefined): Produ
     .sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
-// 이벤트 리스팅의 event_option_stock 행들을 optionValueId -> stock 맵으로.
+// 이벤트 리스팅의 event_option_stock 행들을 comboKey(value_ids를 정렬해 이은
+// 문자열) -> stock 맵으로. 재고관리 그룹이 하나뿐이면 comboKey가 그 값의
+// id와 같아서, 값 하나 = 조합 하나였던 예전과 동일하게 동작한다.
 function eventOptionStockMap(rows: Record<string, any>[] | undefined): Map<string, number> {
-  return new Map((rows ?? []).map((r) => [r.option_value_id, r.stock]));
+  return new Map((rows ?? []).map((r) => [((r.value_ids ?? []) as string[]).slice().sort().join(","), r.stock]));
 }
 
-// 카탈로그 옵션 그룹(구조)에 특정 리스팅의 event_option_stock 값을 채워 넣는다.
+// 이 리스팅의 옵션 조합별 재고를 그대로 Product.optionStockByCombo로 쓸 수
+// 있는 평범한 객체로.
+function optionStockByComboFromRows(rows: Record<string, any>[] | undefined): Record<string, number> | undefined {
+  const map = eventOptionStockMap(rows);
+  if (map.size === 0) return undefined;
+  return Object.fromEntries(map);
+}
+
+// 카탈로그 옵션 그룹(구조)에 특정 리스팅의 event_option_stock 값을 채워 넣는다
+// — 재고관리 그룹이 하나뿐인 경우의 편의 표시용(값 하나 = 조합 하나라 정확함).
+// 두 개 이상이면 이 stock은 정확하지 않을 수 있어 화면에서 참고용으로만 써야
+// 한다(실제 판단은 Product.optionStockByCombo로).
 function mergeSupabaseOptionStock(groups: ProductOptionGroup[] | undefined, stockRows: Record<string, any>[] | undefined): ProductOptionGroup[] | undefined {
   if (!groups) return undefined;
   const stockMap = eventOptionStockMap(stockRows);
@@ -1345,6 +1365,7 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     stock: catalog.stock ?? undefined,
     visible: row.visible ?? true,
     optionGroups: mergeSupabaseOptionStock(mapSupabaseOptionGroups(catalog.product_option_groups), row.event_option_stock),
+    optionStockByCombo: optionStockByComboFromRows(row.event_option_stock),
   };
 }
 
@@ -1370,6 +1391,7 @@ function mapSupabaseOrderItem(row: Record<string, any>): OrderItem {
     price: row.price_snapshot,
     quantity: row.quantity,
     options: row.options && row.options.length > 0 ? row.options : undefined,
+    stockComboValueIds: row.stock_value_ids && row.stock_value_ids.length > 0 ? row.stock_value_ids : undefined,
   };
 }
 

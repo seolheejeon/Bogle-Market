@@ -12,7 +12,7 @@ import { ProductDetailContent } from "@/components/Product/ProductDetailContent"
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
 import { ProductPhoto, isPhotoUrl } from "@/components/ProductPhoto";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
-import { unitPrice, maxQtyForSelection, validateOptionSelection } from "@/lib/product-options";
+import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 
 // A small clone of the product photo flies from the "담기" button to the
@@ -121,9 +121,21 @@ export function ProductDetailView({ productId }: { productId: string }) {
   const closed = !isEventOrderable(event);
   const maxQty = maxQtyForSelection(product, selectedOptionValueIds);
   const remaining = maxQty !== undefined ? Math.max(0, maxQty - inCart) : undefined;
+  // 필수 옵션이 여러 개인 상품은 전부 고르기 전까지 수량 조절/담기 자체를
+  // 막는다 — 예전엔 옵션을 안 고르고도 수량은 올릴 수 있었다가 "담기"를
+  // 눌러야만 에러가 떴는데, 그보다 먼저 막는 게 더 명확하다.
+  const selectionIncomplete = validateOptionSelection(product, selectedOptionValueIds) !== null;
+  const comboSoldOut = !selectionIncomplete && maxQty !== undefined && maxQty <= 0;
+  // 재고관리 그룹이 2개 이상이면 값 하나만으로는 품절 여부를 알 수 없다(조합
+  // 전체를 봐야 함) — 이 경우 버튼별 품절 표시 대신 위 comboSoldOut으로만
+  // 안내한다. 그룹이 1개(또는 0개)일 때만 예전처럼 버튼에 바로 표시한다.
+  const showPerButtonStock = stockTrackedGroupCount(product) <= 1;
 
   function selectOption(group: ProductOptionGroup, value: ProductOptionValue) {
     setOptionError(null);
+    // 옵션 조합이 바뀌면 이전 조합 기준으로 고른 수량은 의미가 없어져서(재고
+    // 한도도 조합마다 다름) 항상 1개로 되돌린다 — 일반적인 쇼핑몰 UX.
+    setQty(1);
     setSelected((prev) => {
       const current = prev[group.id] ?? [];
       if (group.multi) {
@@ -210,7 +222,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
                 <div className="flex flex-wrap gap-1.5">
                   {g.values.map((v) => {
                     const isSelected = (selected[g.id] ?? []).includes(v.id);
-                    const valueSoldOut = v.hasStock && (v.stock ?? 0) <= 0;
+                    const valueSoldOut = showPerButtonStock && v.hasStock && (v.stock ?? 0) <= 0;
                     return (
                       <button
                         key={v.id}
@@ -269,6 +281,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
             <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">마감된 이벤트라 더 이상 주문할 수 없어요.</p>
           ) : soldOut ? (
             <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">품절된 상품이에요.</p>
+          ) : selectionIncomplete ? (
+            <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">옵션을 모두 선택해 주세요.</p>
+          ) : comboSoldOut ? (
+            <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">선택하신 옵션 조합은 품절이에요.</p>
           ) : (
             <div className="mb-2.5 flex items-center justify-center gap-4">
               <button
@@ -293,10 +309,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
           <button
             ref={addButtonRef}
             className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40"
-            disabled={soldOut || closed}
+            disabled={soldOut || closed || selectionIncomplete || comboSoldOut}
             onClick={addToCart}
           >
-            {closed ? "마감" : soldOut ? "품절" : "장바구니 담기"}
+            {closed ? "마감" : soldOut || comboSoldOut ? "품절" : selectionIncomplete ? "옵션 선택" : "장바구니 담기"}
           </button>
         </div>
       </div>

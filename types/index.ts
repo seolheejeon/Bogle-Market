@@ -116,8 +116,17 @@ export interface Product {
   // 판매만 중단하고 싶을 때(예: 다음 회차 준비 중) 삭제 없이 끄는 용도.
   visible?: boolean;
   // 색상/사이즈/중량/추가옵션 등 — 그룹 구조(required/multi/이름)는 카탈로그와
-  // 동일하지만, 각 값의 stock은 이 리스팅(event_option_stock) 기준으로 온다.
+  // 동일하지만, 재고관리(hasStock) 대상 값의 stock은 이 리스팅(event_option_stock)
+  // 기준으로 온다. 재고관리 그룹이 하나뿐이면 이 stock이 곧 그 값 하나의 재고고,
+  // 두 개 이상이면 단순 표시값일 뿐 실제 재고 판단은 optionStockByCombo를 쓴다.
   optionGroups?: ProductOptionGroup[];
+  // 재고관리(hasStock) 대상 옵션값들의 "조합" 단위 재고 — 키는 선택된 값들
+  // 중 hasStock=true인 것만 골라 id 오름차순 정렬 후 콤마로 이은 문자열
+  // (lib/product-options.ts의 comboKey). 재고관리 그룹이 하나뿐이면 값 하나가
+  // 곧 조합이라 키가 그 값의 id와 같고, 두 개 이상이면 진짜 조합(예: "블랙
+  // id,260 id")이 된다 — 예전엔 값 하나하나의 재고를 각각 차감해서, 색상+사이즈처럼
+  // 옵션이 2개 이상일 때 서로 다른 조합끼리 재고가 잘못 간섭하는 문제가 있었다.
+  optionStockByCombo?: Record<string, number>;
 }
 
 // 이벤트 카드에 붙는 판매용 뱃지 — 배송방식 뱃지(EventTypeBadge)와는 별개로
@@ -172,10 +181,12 @@ export interface EventProductSeed {
   costPrice?: number;
   deliveryType?: EventType;
   visible?: boolean;
-  // 옵션값별 재고 스냅샷(optionValueId -> stock) — event_option_stock 테이블의
-  // mock 버전. 카탈로그 옵션값의 defaultStock을 이 이벤트에 추가한 시점에
-  // 복사해두고, 이후로는 이 값만 독립적으로 차감/복구된다. hasStock=false인
-  // 옵션값은 여기 키가 없음(재고 제한 없음).
+  // 옵션 조합별 재고 스냅샷(comboKey -> stock) — event_option_stock 테이블의
+  // mock 버전. 재고관리 그룹이 하나뿐이면 comboKey가 곧 그 값의 id라 예전과
+  // 동일하게 동작하고, 두 개 이상이면 진짜 조합 키가 된다(lib/product-options.ts의
+  // comboKey/generateStockCombos). 이 이벤트에 추가한 시점에 카탈로그 기준
+  // defaultStock으로 조합별 초기값을 채워두고, 이후로는 이 값만 독립적으로
+  // 차감/복구된다. 재고관리 대상이 아닌 조합은 여기 키가 없음(재고 제한 없음).
   optionStock?: Record<string, number>;
 }
 
@@ -226,10 +237,10 @@ export interface Profile {
 
 // 주문 시점에 고른 옵션 하나의 스냅샷 — 화면에 보여주는 이름/가격조정은
 // 카탈로그가 나중에 바뀌거나 삭제돼도 영향받지 않도록 값 자체로 복사해
-// 저장한다(price_snapshot과 동일한 이유). optionValueId는 화면에 표시되진
-// 않지만 취소/환불 시 어느 옵션값의 재고(event_option_stock)를 복구해야
-// 하는지 찾는 키로 쓴다 — 카탈로그에서 그 옵션값이 나중에 지워지면 복구
-// 대상 행도 이미 cascade로 같이 사라진 상태라 그냥 조용히 무시된다.
+// 저장한다(price_snapshot과 동일한 이유). optionValueId는 표시엔 안 쓰이지만
+// 값이 나중에 지워졌는지 등을 추적할 여지로 남겨둔다 — 실제 재고 복구는
+// OrderItem.stockComboValueIds를 쓴다(이 값 하나만으로는 어떤 값들이
+// 재고관리 대상이었는지 order 시점 기준으로 알 수 없어서 분리했다).
 export interface OrderItemOption {
   optionValueId: string;
   groupName: string;
@@ -246,6 +257,13 @@ export interface OrderItem {
   // 이 주문 라인에서 고른 옵션들의 스냅샷(단가 price에 이미 priceDelta가
   // 반영돼 있음 — options는 표시용). 옵션이 없는 상품은 빈 배열이거나 undefined.
   options?: OrderItemOption[];
+  // 주문 시점에 계산해둔 "재고 조합 키"용 옵션값 id 배열(정렬됨) — 선택된
+  // 옵션 중 재고관리(hasStock) 대상만 골라 담아, 취소/환불 시 이 배열
+  // 그대로로 event_option_stock의 어느 조합 행을 복구할지 찾는다. 주문 이후
+  // 카탈로그의 hasStock 설정이 바뀌어도(그룹 삭제 등) 차감 때 쓴 키와 항상
+  // 똑같은 값으로 복구할 수 있도록 카탈로그를 다시 보지 않고 이 스냅샷만 쓴다.
+  // 재고관리 대상 값을 하나도 안 골랐으면 undefined.
+  stockComboValueIds?: string[];
 }
 
 export interface Order {

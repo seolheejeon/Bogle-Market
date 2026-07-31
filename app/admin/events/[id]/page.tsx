@@ -13,9 +13,10 @@ import {
   getEventProductCosts,
   getSoldQuantities,
 } from "@/lib/data";
-import type { CatalogProduct, EventType, MarketEvent, Product, ProductOptionValue } from "@/types";
+import type { CatalogProduct, EventType, MarketEvent, Product } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice, toDateInputValue, dateInputValueToIso } from "@/lib/format";
+import { generateStockCombos } from "@/lib/product-options";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { EventBadgePicker } from "@/components/admin/EventBadgePicker";
 
@@ -250,14 +251,21 @@ function EventProductRow({
           <p className="text-[11.5px] text-text-muted">
             원가 {formatPrice(costPrice ?? 0)} · 개당 예상수익 {formatPrice(profitPerItem)} · 판매 {soldQty}개 · 누적 예상수익 {formatPrice(totalProfit)}
           </p>
-          {(product.optionGroups ?? []).some((g) => g.values.some((v) => v.hasStock)) && (
-            <p className="truncate text-[11.5px] text-text-muted">
-              옵션재고{" "}
-              {product
-                .optionGroups!.flatMap((g) => g.values.filter((v) => v.hasStock).map((v) => `${v.name} ${v.stock ?? 0}개`))
-                .join(", ")}
-            </p>
-          )}
+          {(() => {
+            const combos = generateStockCombos(product.optionGroups ?? []);
+            if (combos.length === 0) return null;
+            return (
+              <p className="truncate text-[11.5px] text-text-muted">
+                {combos[0].valueIds.length > 1 ? "옵션조합재고" : "옵션재고"}{" "}
+                {combos
+                  .map((c) => {
+                    const key = c.valueIds.join(",");
+                    return `${comboLabel(product, c.valueIds)} ${product.optionStockByCombo?.[key] ?? c.defaultStock}개`;
+                  })
+                  .join(", ")}
+              </p>
+            );
+          })()}
         </div>
         <div className="flex flex-wrap justify-end gap-1.5">
           <button onClick={toggleVisible} disabled={busy} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50">
@@ -325,18 +333,32 @@ function EventProductRow({
         <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
         고객 화면에 노출
       </label>
-      {(product.optionGroups ?? []).some((g) => g.values.some((v) => v.hasStock)) && (
-        <div>
-          <p className="mb-1 text-[11.5px] font-bold text-text-muted">옵션별 재고 (이 회차만 — 바로 저장돼요)</p>
-          <div className="flex flex-col gap-1.5">
-            {product.optionGroups!.flatMap((g) =>
-              g.values
-                .filter((v) => v.hasStock)
-                .map((v) => <OptionStockField key={v.id} eventProductId={product.id} groupName={g.name} value={v} onSaved={onSaved} />),
-            )}
+      {(() => {
+        const combos = generateStockCombos(product.optionGroups ?? []);
+        if (combos.length === 0) return null;
+        return (
+          <div>
+            <p className="mb-1 text-[11.5px] font-bold text-text-muted">
+              {combos[0].valueIds.length > 1 ? "옵션 조합별 재고" : "옵션별 재고"} (이 회차만 — 바로 저장돼요)
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {combos.map((c) => {
+                const key = c.valueIds.join(",");
+                return (
+                  <OptionStockField
+                    key={key}
+                    eventProductId={product.id}
+                    valueIds={c.valueIds}
+                    label={comboLabel(product, c.valueIds)}
+                    currentStock={product.optionStockByCombo?.[key] ?? c.defaultStock}
+                    onSaved={onSaved}
+                  />
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {error && <p className="text-[11.5px] font-semibold text-red-600">{error}</p>}
       <div className="flex gap-2">
         <button onClick={save} disabled={saving} className="rounded-[7px] bg-accent px-2.5 py-1.5 text-[12px] font-bold text-white">
@@ -350,27 +372,44 @@ function EventProductRow({
   );
 }
 
-// 옵션값 하나의 이번 회차 재고 — 다른 필드처럼 "저장" 버튼을 기다리지 않고
+// 옵션값 id들을 "색상: 블랙 · 사이즈: 260" 같은 표시용 문자열로.
+function comboLabel(product: Product, valueIds: string[]): string {
+  const groups = product.optionGroups ?? [];
+  return valueIds
+    .map((id) => {
+      for (const g of groups) {
+        const v = g.values.find((x) => x.id === id);
+        if (v) return `${g.name}: ${v.name}`;
+      }
+      return id;
+    })
+    .join(" · ");
+}
+
+// 옵션 조합 하나의 이번 회차 재고 — 다른 필드처럼 "저장" 버튼을 기다리지 않고
 // blur 즉시 저장한다(event_option_stock 스냅샷만 바뀌고 카탈로그 기본
-// 재고는 그대로 유지됨).
+// 재고는 그대로 유지됨). valueIds가 1개면 예전처럼 값 하나의 재고, 2개
+// 이상이면 그 조합(예: 블랙+260) 전체의 재고다.
 function OptionStockField({
   eventProductId,
-  groupName,
-  value,
+  valueIds,
+  label,
+  currentStock,
   onSaved,
 }: {
   eventProductId: string;
-  groupName: string;
-  value: ProductOptionValue;
+  valueIds: string[];
+  label: string;
+  currentStock: number;
   onSaved: () => void;
 }) {
-  const [stock, setStock] = useState(String(value.stock ?? 0));
+  const [stock, setStock] = useState(String(currentStock));
   const [saving, setSaving] = useState(false);
 
   async function save() {
     setSaving(true);
     try {
-      await updateEventOptionStock(eventProductId, value.id, Math.max(0, Number(stock) || 0));
+      await updateEventOptionStock(eventProductId, valueIds, Math.max(0, Number(stock) || 0));
       onSaved();
     } catch (e) {
       alert(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
@@ -381,9 +420,7 @@ function OptionStockField({
 
   return (
     <label className="flex items-center gap-2 text-[12px] text-text-muted">
-      <span className="w-32 shrink-0 truncate">
-        {groupName} · {value.name}
-      </span>
+      <span className="w-40 shrink-0 truncate">{label}</span>
       <input
         className="w-20 rounded-[6px] border border-border bg-bg-card px-2 py-1 text-[12.5px]"
         type="number"
@@ -391,7 +428,7 @@ function OptionStockField({
         disabled={saving}
         value={stock}
         onChange={(e) => setStock(e.target.value)}
-        onBlur={() => stock !== String(value.stock ?? 0) && save()}
+        onBlur={() => stock !== String(currentStock) && save()}
       />
     </label>
   );

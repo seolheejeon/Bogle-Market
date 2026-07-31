@@ -159,16 +159,26 @@ create table if not exists product_option_values (
   created_at timestamptz not null default now()
 );
 
--- 이벤트 리스팅별 옵션 재고 스냅샷 — event_products.stock과 같은 이유로 분리한다:
--- 같은 카탈로그 옵션값이라도 이벤트마다 독립된 재고를 가져야 하기 때문. 리스팅을
--- 이벤트에 추가하는 시점에 product_option_values.default_stock을 복사해
--- 초기화하고, 이후로는 이 값만 주문 시 차감/취소·환불 시 복구된다(has_stock=false인
--- 옵션값은 애초에 행이 없음 = 재고 제한 없음).
+-- 이벤트 리스팅별 "옵션 조합" 재고 스냅샷 — event_products.stock과 같은 이유로
+-- 분리한다: 같은 카탈로그 옵션값이라도 이벤트마다 독립된 재고를 가져야 하기
+-- 때문. value_ids는 재고관리(has_stock=true) 대상 옵션값 id들을 오름차순
+-- 정렬해 담은 배열이다 — 재고관리 그룹이 하나뿐이면 배열 길이가 항상 1이라
+-- 예전(옵션값 하나 = 재고 하나)과 동일하게 동작하고, 두 개 이상이면 진짜
+-- 조합(예: [블랙id, 260id])이 된다. 예전엔 값 하나하나의 재고를 각각
+-- 차감해서, 옵션이 2개 이상일 때 서로 다른 조합끼리 재고가 잘못 간섭했다
+-- (예: 블랙+260 주문이 블랙+270 재고까지 깎음). value_ids는 여러 값을
+-- 가리키므로 단일 컬럼 FK를 못 걸어 has_stock=false로 옵션값이 지워져도
+-- 자동 정리는 안 된다(정리 안 돼도 그냥 안 쓰이는 행으로 남을 뿐 문제 없음).
+-- 리스팅을 이벤트에 추가하는 시점에 각 조합을 구성하는 옵션값들의
+-- default_stock 중 최솟값으로 초기화하고, 이후로는 이 값만 주문 시
+-- 차감/취소·환불 시 복구된다(재고관리 대상이 아닌 조합은 애초에 행이 없음 =
+-- 재고 제한 없음).
 create table if not exists event_option_stock (
+  id uuid primary key default gen_random_uuid(),
   event_product_id uuid not null references event_products(id) on delete cascade,
-  option_value_id uuid not null references product_option_values(id) on delete cascade,
+  value_ids uuid[] not null,
   stock integer not null check (stock >= 0),
-  primary key (event_product_id, option_value_id)
+  unique (event_product_id, value_ids)
 );
 
 -- 주문은 정확히 하나의 이벤트에만 속한다 — 장바구니에 마감일/배송일이 다른
@@ -230,7 +240,14 @@ create table if not exists order_items (
   -- product_option_groups/values가 나중에 바뀌거나 삭제돼도 과거 주문 내역
   -- 표시는 영향받지 않도록 값 자체를 복사해 저장한다. 예:
   -- [{"groupName":"색상","valueName":"빨강","priceDelta":0}, ...]
-  options jsonb not null default '[]'::jsonb
+  options jsonb not null default '[]'::jsonb,
+  -- 주문 시점에 계산해둔 "재고 조합 키" — options 중 재고관리(has_stock)
+  -- 대상이었던 값들만 정렬해 담아, 취소/환불 시 event_option_stock의 어느
+  -- 조합 행을 복구할지 이 배열 그대로 찾는다. 나중에 카탈로그의 has_stock
+  -- 설정이 바뀌어도(그룹 삭제 등) 차감 때 쓴 키와 항상 똑같이 복구할 수
+  -- 있도록 카탈로그를 다시 보지 않고 이 스냅샷만 쓴다. 재고관리 대상 값을
+  -- 하나도 안 골랐으면 null.
+  stock_value_ids uuid[]
 );
 
 -- profile_id null = broadcast to everyone (admin announcements, flash sales,
@@ -571,15 +588,16 @@ begin
       and ep.product_id = p.id
       and p.stock is not null;
 
-    -- 옵션값별 재고도 리스팅 재고와 마찬가지로 복구한다 — 주문 아이템의
-    -- options 스냅샷에 담긴 optionValueId로 event_option_stock 행을 찾는다
-    -- (has_stock=false였던 옵션값은 애초에 행이 없어 조용히 무시됨).
+    -- 옵션 조합 재고도 리스팅 재고와 마찬가지로 복구한다 — 주문 시점에 이미
+    -- 정규화해 저장해둔 stock_value_ids를 그대로 키로 써서 어느 조합 행인지
+    -- 찾는다(카탈로그의 has_stock 설정이 그 사이 바뀌었어도 영향받지 않음).
     update event_option_stock eos
     set stock = eos.stock + oi.quantity
-    from order_items oi, jsonb_array_elements(oi.options) as opt
+    from order_items oi
     where oi.order_id = v_cancelled_id
       and eos.event_product_id = oi.event_product_id
-      and eos.option_value_id = (opt->>'optionValueId')::uuid;
+      and eos.value_ids = oi.stock_value_ids
+      and oi.stock_value_ids is not null;
   end if;
 end;
 $$;
@@ -650,14 +668,15 @@ begin
     p_recipient_name, p_recipient_phone, p_address_snapshot, p_apartment_name, p_payment_method, 'wait', p_total, p_created_at
   );
 
-  insert into order_items (order_id, event_product_id, product_name, price_snapshot, quantity, options)
+  insert into order_items (order_id, event_product_id, product_name, price_snapshot, quantity, options, stock_value_ids)
   select
     p_id,
     nullif(i->>'event_product_id', '')::uuid,
     i->>'product_name',
     (i->>'price_snapshot')::integer,
     (i->>'quantity')::integer,
-    coalesce(i->'options', '[]'::jsonb)
+    coalesce(i->'options', '[]'::jsonb),
+    (select array_agg(x::uuid) from jsonb_array_elements_text(coalesce(i->'stock_value_ids', '[]'::jsonb)) x)
   from jsonb_array_elements(p_items) as i;
 end;
 $$;
@@ -696,45 +715,56 @@ begin
 end;
 $$;
 
--- 옵션값별 재고 차감/복구 — has_stock=false인 옵션값은 애초에 event_option_stock에
--- 행이 없으므로 update가 그냥 0 rows에 적용되고 조용히 아무 일도 안 한다(재고
--- 제한 없음과 동일한 동작).
+-- 옵션 "조합" 재고 차감/복구 — p_value_ids는 재고관리(has_stock) 대상 값들의
+-- id 배열이다(정렬 여부와 무관하게 함수 안에서 항상 오름차순으로 다시
+-- 정규화해서 비교/저장하므로 호출부가 정렬을 안 해도 안전하다). 재고관리
+-- 대상 값을 하나도 안 고른 주문(p_value_ids가 비었거나 null)은 애초에
+-- 아무 일도 안 한다(재고 제한 없음과 동일한 동작).
 --
--- has_stock=true인데도 행이 없는 경우(리스팅을 이벤트에 추가한 *이후*에 관리자가
--- 뒤늦게 그 옵션값의 재고관리를 켠 경우 — addEventProduct의 자동 초기화는 추가
--- 시점에만 한 번 실행되므로 이미 존재하는 리스팅엔 소급 적용되지 않음)에는 그냥
--- 무시하지 않고, 카탈로그의 default_stock을 기준으로 행을 새로 만들면서 이번
--- 차감분까지 한 번에 반영한다 — 그래야 "나중에 재고관리를 켠" 옵션값도 첫 주문부터
--- 정상적으로 차감된다.
-create or replace function decrement_option_stock(p_event_product_id uuid, p_option_value_id uuid, p_qty integer)
+-- 해당 조합에 대한 행이 아직 없는 경우(리스팅을 이벤트에 추가한 *이후*에
+-- 관리자가 뒤늦게 재고관리를 켰거나, 처음 나오는 조합인 경우 —
+-- addEventProduct의 자동 초기화는 추가 시점에만 한 번 실행되므로 이미
+-- 존재하는 리스팅엔 소급 적용되지 않음)에는 그냥 무시하지 않고, 조합을
+-- 구성하는 값들의 카탈로그 default_stock 중 최솟값을 기준으로 행을 새로
+-- 만들면서 이번 차감분까지 한 번에 반영한다.
+create or replace function decrement_option_stock(p_event_product_id uuid, p_value_ids uuid[], p_qty integer)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_ids uuid[] := (select array_agg(x order by x) from unnest(p_value_ids) x);
 begin
+  if v_ids is null or array_length(v_ids, 1) is null then
+    return;
+  end if;
+
   update event_option_stock set stock = greatest(stock - p_qty, 0)
-  where event_product_id = p_event_product_id and option_value_id = p_option_value_id;
+  where event_product_id = p_event_product_id and value_ids = v_ids;
 
   if not found then
-    insert into event_option_stock (event_product_id, option_value_id, stock)
-    select p_event_product_id, p_option_value_id, greatest(coalesce(pov.default_stock, 0) - p_qty, 0)
+    insert into event_option_stock (event_product_id, value_ids, stock)
+    select p_event_product_id, v_ids, greatest(coalesce(min(pov.default_stock), 0) - p_qty, 0)
     from product_option_values pov
-    where pov.id = p_option_value_id and pov.has_stock
-    on conflict (event_product_id, option_value_id) do update set stock = excluded.stock;
+    where pov.id = any(v_ids) and pov.has_stock
+    having count(*) > 0
+    on conflict (event_product_id, value_ids) do update set stock = excluded.stock;
   end if;
 end;
 $$;
 
-create or replace function increment_option_stock(p_event_product_id uuid, p_option_value_id uuid, p_qty integer)
+create or replace function increment_option_stock(p_event_product_id uuid, p_value_ids uuid[], p_qty integer)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_ids uuid[] := (select array_agg(x order by x) from unnest(p_value_ids) x);
 begin
   update event_option_stock set stock = stock + p_qty
-  where event_product_id = p_event_product_id and option_value_id = p_option_value_id;
+  where event_product_id = p_event_product_id and value_ids = v_ids;
 end;
 $$;
 
