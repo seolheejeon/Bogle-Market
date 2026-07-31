@@ -69,7 +69,9 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     stock: catalog?.stock,
     minQty: catalog?.minQty,
     shippingFee: catalog?.shippingFee,
+    shippingFeeType: catalog?.shippingFeeType,
     freeShippingThreshold: catalog?.freeShippingThreshold,
+    shippingFeeQtyUnit: catalog?.shippingFeeQtyUnit,
     courierCode: catalog?.courierCode,
     fulfillmentType: catalog?.fulfillmentType,
     shipsAt: catalog?.shipsAt,
@@ -259,7 +261,9 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
         stock: input.stock ?? null,
         min_qty: input.minQty ?? 1,
         shipping_fee: input.shippingFee ?? 0,
+        shipping_fee_type: input.shippingFeeType ?? "fixed",
         free_shipping_threshold: input.freeShippingThreshold ?? 0,
+        shipping_fee_qty_unit: input.shippingFeeQtyUnit ?? null,
         courier_code: input.courierCode ?? null,
         fulfillment_type: input.fulfillmentType ?? "same_day",
         ships_at: input.shipsAt ?? null,
@@ -312,7 +316,9 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     if ("stock" in patch) row.stock = patch.stock ?? null;
     if (patch.minQty !== undefined) row.min_qty = patch.minQty;
     if (patch.shippingFee !== undefined) row.shipping_fee = patch.shippingFee;
+    if (patch.shippingFeeType !== undefined) row.shipping_fee_type = patch.shippingFeeType;
     if (patch.freeShippingThreshold !== undefined) row.free_shipping_threshold = patch.freeShippingThreshold;
+    if ("shippingFeeQtyUnit" in patch) row.shipping_fee_qty_unit = patch.shippingFeeQtyUnit ?? null;
     if ("courierCode" in patch) row.courier_code = patch.courierCode ?? null;
     if (patch.fulfillmentType !== undefined) row.fulfillment_type = patch.fulfillmentType;
     if ("shipsAt" in patch) row.ships_at = patch.shipsAt ?? null;
@@ -1411,7 +1417,9 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     stock: row.stock ?? undefined,
     minQty: row.min_qty ?? 1,
     shippingFee: row.shipping_fee ?? 0,
+    shippingFeeType: row.shipping_fee_type ?? "fixed",
     freeShippingThreshold: row.free_shipping_threshold ?? 0,
+    shippingFeeQtyUnit: row.shipping_fee_qty_unit ?? undefined,
     courierCode: row.courier_code ?? undefined,
     fulfillmentType: row.fulfillment_type ?? "same_day",
     shipsAt: row.ships_at ?? undefined,
@@ -1447,7 +1455,9 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     stock: catalog.stock ?? undefined,
     minQty: catalog.min_qty ?? 1,
     shippingFee: catalog.shipping_fee ?? 0,
+    shippingFeeType: catalog.shipping_fee_type ?? "fixed",
     freeShippingThreshold: catalog.free_shipping_threshold ?? 0,
+    shippingFeeQtyUnit: catalog.shipping_fee_qty_unit ?? undefined,
     courierCode: catalog.courier_code ?? undefined,
     fulfillmentType: catalog.fulfillment_type ?? "same_day",
     shipsAt: catalog.ships_at ?? undefined,

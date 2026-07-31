@@ -3,8 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { listCatalogProducts, createCatalogProduct, updateCatalogProduct, deleteCatalogProduct, listEvents, addEventProduct, removeEventProduct } from "@/lib/data";
-import type { CatalogProduct, FulfillmentType, MarketEvent, ProductDetailBlock, ProductOptionGroup } from "@/types";
-import { EVENT_TYPE_LABEL, COURIER_OPTIONS, FULFILLMENT_TYPE_LABEL } from "@/types";
+import type { CatalogProduct, FulfillmentType, MarketEvent, ProductDetailBlock, ProductOptionGroup, ShippingFeeType } from "@/types";
+import { EVENT_TYPE_LABEL, COURIER_OPTIONS, FULFILLMENT_TYPE_LABEL, SHIPPING_FEE_TYPE_LABEL } from "@/types";
+
+// 택배사 select에서 기본 목록(COURIER_OPTIONS)에 없는 값을 직접 입력할 때 쓰는
+// select 값 — 실제 저장값(courierCode)에는 절대 안 들어가고, 이 값이 select에
+// 뜨면 텍스트 인풋을 같이 보여주는 용도로만 쓴다.
+const CUSTOM_COURIER = "__custom__";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { PhotoUploader } from "@/components/admin/PhotoUploader";
 import { DetailBlockEditor } from "@/components/admin/DetailBlockEditor";
@@ -150,11 +155,22 @@ function CatalogProductForm({
   const [costPrice, setCostPrice] = useState(initial?.costPrice !== undefined ? String(initial.costPrice) : "");
   const [stock, setStock] = useState(initial?.stock !== undefined ? String(initial.stock) : "");
   const [minQty, setMinQty] = useState(initial?.minQty !== undefined ? String(initial.minQty) : "1");
+  const [shippingFeeType, setShippingFeeType] = useState<ShippingFeeType>(initial?.shippingFeeType ?? "fixed");
   const [shippingFee, setShippingFee] = useState(initial?.shippingFee !== undefined ? String(initial.shippingFee) : "");
   const [freeShippingThreshold, setFreeShippingThreshold] = useState(
     initial?.freeShippingThreshold !== undefined ? String(initial.freeShippingThreshold) : "",
   );
-  const [courierCode, setCourierCode] = useState(initial?.courierCode ?? "");
+  const [shippingFeeQtyUnit, setShippingFeeQtyUnit] = useState(initial?.shippingFeeQtyUnit !== undefined ? String(initial.shippingFeeQtyUnit) : "");
+  const isKnownCourier = (code: string) => COURIER_OPTIONS.some((c) => c.code === code);
+  const [courierSelect, setCourierSelect] = useState(() => {
+    const code = initial?.courierCode ?? "";
+    if (code === "") return "";
+    return isKnownCourier(code) ? code : CUSTOM_COURIER;
+  });
+  const [customCourier, setCustomCourier] = useState(() => {
+    const code = initial?.courierCode ?? "";
+    return code !== "" && !isKnownCourier(code) ? code : "";
+  });
   const [fulfillmentType, setFulfillmentType] = useState<FulfillmentType>(initial?.fulfillmentType ?? "same_day");
   const [shipsAt, setShipsAt] = useState(initial?.shipsAt ?? "");
   const [origin, setOrigin] = useState(initial?.origin ?? "");
@@ -187,8 +203,10 @@ function CatalogProductForm({
         stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
         minQty: minQty.trim() === "" ? 1 : Math.max(1, Number(minQty) || 1),
         shippingFee: shippingFee.trim() === "" ? 0 : Math.max(0, Number(shippingFee) || 0),
+        shippingFeeType,
         freeShippingThreshold: freeShippingThreshold.trim() === "" ? 0 : Math.max(0, Number(freeShippingThreshold) || 0),
-        courierCode: courierCode || undefined,
+        shippingFeeQtyUnit: shippingFeeType === "per_quantity" && shippingFeeQtyUnit.trim() !== "" ? Math.max(1, Number(shippingFeeQtyUnit) || 1) : undefined,
+        courierCode: courierSelect === CUSTOM_COURIER ? customCourier.trim() || undefined : courierSelect || undefined,
         fulfillmentType,
         shipsAt: fulfillmentType === "scheduled" && shipsAt ? shipsAt : undefined,
         origin: origin || undefined,
@@ -279,6 +297,14 @@ function CatalogProductForm({
 
       <div className="rounded-[9px] border border-border p-3">
         <p className="mb-2 text-[12px] font-bold text-text-muted">택배 배송비 (택배로 팔 때만 적용돼요)</p>
+        <div className="mb-2 flex flex-wrap gap-3">
+          {(Object.keys(SHIPPING_FEE_TYPE_LABEL) as ShippingFeeType[]).map((t) => (
+            <label key={t} className="flex items-center gap-1.5 text-[12.5px]">
+              <input type="radio" name="shippingFeeType" checked={shippingFeeType === t} onChange={() => setShippingFeeType(t)} />
+              {SHIPPING_FEE_TYPE_LABEL[t]}
+            </label>
+          ))}
+        </div>
         <div className="flex flex-wrap gap-2">
           <label className="min-w-[110px] flex-1 text-[11.5px] font-semibold text-text-muted">
             배송비
@@ -291,23 +317,38 @@ function CatalogProductForm({
               onChange={(e) => setShippingFee(e.target.value)}
             />
           </label>
-          <label className="min-w-[140px] flex-1 text-[11.5px] font-semibold text-text-muted">
-            무료배송 기준금액 <span className="font-normal">(0이면 미사용)</span>
-            <input
-              className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-              placeholder="0"
-              type="number"
-              min={0}
-              value={freeShippingThreshold}
-              onChange={(e) => setFreeShippingThreshold(e.target.value)}
-            />
-          </label>
+          {shippingFeeType === "free_threshold" && (
+            <label className="min-w-[140px] flex-1 text-[11.5px] font-semibold text-text-muted">
+              무료배송 기준금액 <span className="font-normal">(0이면 미사용)</span>
+              <input
+                className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                placeholder="0"
+                type="number"
+                min={0}
+                value={freeShippingThreshold}
+                onChange={(e) => setFreeShippingThreshold(e.target.value)}
+              />
+            </label>
+          )}
+          {shippingFeeType === "per_quantity" && (
+            <label className="min-w-[140px] flex-1 text-[11.5px] font-semibold text-text-muted">
+              몇 개마다 부과 <span className="font-normal">(예: 5)</span>
+              <input
+                className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                placeholder="5"
+                type="number"
+                min={1}
+                value={shippingFeeQtyUnit}
+                onChange={(e) => setShippingFeeQtyUnit(e.target.value)}
+              />
+            </label>
+          )}
           <label className="min-w-[110px] flex-1 text-[11.5px] font-semibold text-text-muted">
             택배사
             <select
               className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-              value={courierCode}
-              onChange={(e) => setCourierCode(e.target.value)}
+              value={courierSelect}
+              onChange={(e) => setCourierSelect(e.target.value)}
             >
               <option value="">선택 안 함</option>
               {COURIER_OPTIONS.map((c) => (
@@ -315,9 +356,27 @@ function CatalogProductForm({
                   {c.label}
                 </option>
               ))}
+              <option value={CUSTOM_COURIER}>직접 입력</option>
             </select>
           </label>
+          {courierSelect === CUSTOM_COURIER && (
+            <label className="min-w-[110px] flex-1 text-[11.5px] font-semibold text-text-muted">
+              택배사명 직접 입력
+              <input
+                className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                placeholder="예: 대신택배"
+                value={customCourier}
+                onChange={(e) => setCustomCourier(e.target.value)}
+              />
+            </label>
+          )}
         </div>
+        {shippingFeeType === "per_quantity" && (
+          <p className="mt-1.5 text-[11px] text-text-muted">
+            {shippingFeeQtyUnit || "N"}개마다 배송비 1회 부과돼요 (예: {shippingFeeQtyUnit || "5"}개 단위, 배송비 {shippingFee || "0"}원이면 {Number(shippingFeeQtyUnit || 5) * 2}개 주문 시 배송비{" "}
+            {Number(shippingFee || 0) * 2}원)
+          </p>
+        )}
         <p className="mt-2 mb-1.5 text-[11.5px] font-bold text-text-muted">출고 방식</p>
         <div className="flex flex-wrap gap-3">
           {(Object.keys(FULFILLMENT_TYPE_LABEL) as FulfillmentType[]).map((ft) => (

@@ -90,12 +90,21 @@ create table if not exists products (
   -- 등에서 수량을 줄여도 이 밑으로는 못 내려간다(완전히 빼려면 삭제해야 함).
   min_qty integer not null default 1 check (min_qty >= 1),
   -- 택배 배송비 — 상품(카탈로그) 단위로 관리한다(리스팅/이벤트 단위가 아님).
-  -- 같은 상품이 여러 이벤트에 걸려도 배송비 정책은 하나. free_shipping_threshold가
-  -- 0이면 무료배송 미사용, 0보다 크면 이 상품의 장바구니 내 소계가 그 금액
-  -- 이상일 때 배송비가 0원이 된다. courier_code는 COURIER_OPTIONS(types/index.ts)
-  -- 코드값. fulfillment_type이 'scheduled'일 때만 ships_at이 의미를 가진다.
+  -- 같은 상품이 여러 이벤트에 걸려도 배송비 정책은 하나. shipping_fee_type이
+  -- 실제로 어떻게 부과할지를 정하고, 나머지 세 컬럼은 그 정책에 필요한 값만
+  -- 골라서 쓴다: 'fixed'는 shipping_fee만, 'free_threshold'는 shipping_fee +
+  -- free_shipping_threshold(주문 내 이 상품 소계가 이 금액 이상이면 0원),
+  -- 'per_quantity'는 shipping_fee + shipping_fee_qty_unit(이 수량마다 배송비를
+  -- 한 번씩 더 부과 — 예: 5개마다 4,000원이면 12개 주문 시 ceil(12/5)*4000).
+  -- courier_code는 기본 목록(COURIER_OPTIONS, types/index.ts)의 코드값이거나
+  -- 관리자가 목록에 없는 택배사를 직접 입력한 자유 텍스트일 수 있다 — 이 값은
+  -- 상품 상세 화면 안내용일 뿐, 실제 송장 조회(주문의 courier_code/스마트택배
+  -- API)와는 무관해서 자유 텍스트를 허용해도 안전하다. fulfillment_type이
+  -- 'scheduled'일 때만 ships_at이 의미를 가진다.
   shipping_fee integer not null default 0 check (shipping_fee >= 0),
+  shipping_fee_type text not null default 'fixed' check (shipping_fee_type in ('fixed', 'free_threshold', 'per_quantity')),
   free_shipping_threshold integer not null default 0 check (free_shipping_threshold >= 0),
+  shipping_fee_qty_unit integer check (shipping_fee_qty_unit is null or shipping_fee_qty_unit >= 1),
   courier_code text,
   fulfillment_type text not null default 'same_day' check (fulfillment_type in ('same_day', 'rolling', 'scheduled')),
   ships_at date,

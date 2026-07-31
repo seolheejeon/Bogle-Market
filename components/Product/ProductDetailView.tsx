@@ -418,7 +418,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
                 </span>
                 <span>
                   {(product.shippingFee ?? 0) > 0 ? `배송비 ${formatPrice(product.shippingFee ?? 0)}` : "배송비 무료"}
-                  {(product.freeShippingThreshold ?? 0) > 0 && ` · ${formatPrice(product.freeShippingThreshold ?? 0)} 이상 무료배송`}
+                  {product.shippingFeeType === "free_threshold" &&
+                    (product.freeShippingThreshold ?? 0) > 0 &&
+                    ` · ${formatPrice(product.freeShippingThreshold ?? 0)} 이상 무료배송`}
+                  {product.shippingFeeType === "per_quantity" && (product.shippingFeeQtyUnit ?? 0) > 0 && ` (${product.shippingFeeQtyUnit}개마다 부과)`}
                 </span>
               </div>
             </div>
@@ -428,6 +431,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
           {[
             ["원산지", product.origin],
             ["중량", product.weight],
+            ["최소주문수량", (product.minQty ?? 1) > 1 ? `${product.minQty}개부터 주문 가능` : undefined],
             ["보관법", product.storage],
             ["조리법", product.eat],
           ]

@@ -43,7 +43,7 @@ export function CartView() {
     fee: totalShippingFee(
       g.items
         .filter((i) => (i.product.deliveryType ?? g.event.type) === "PARCEL")
-        .map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty })),
+        .map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty, qty: i.line.qty })),
     ),
   }));
   const totalShipping = shippingByEvent.reduce((sum, g) => sum + g.fee, 0);

@@ -106,7 +106,7 @@ export function CheckoutView() {
   // 사다드림 이벤트는 items에 PARCEL 상품이 없으니 자연히 0이 된다.
   function groupShippingFee(group: { event: MarketEvent; items: typeof items }): number {
     const parcelItems = group.items.filter((i) => deliveryTypeOf(i) === "PARCEL");
-    return totalShippingFee(parcelItems.map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty })));
+    return totalShippingFee(parcelItems.map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty, qty: i.line.qty })));
   }
 
   const totalShippingAll = groups.reduce((sum, g) => sum + groupShippingFee(g), 0);

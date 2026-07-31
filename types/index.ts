@@ -82,11 +82,18 @@ export interface CatalogProduct {
   // 이 수량으로 시작하고, 장바구니 등에서 이 밑으로는 못 내려간다.
   minQty?: number;
   // 택배 배송비 — 상품(카탈로그) 단위로 관리한다. 없으면 0(배송비 없음).
+  // 실제로 어떻게 부과되는지는 shippingFeeType이 정한다.
   shippingFee?: number;
-  // 이 상품의 장바구니 내 소계가 이 금액 이상이면 배송비가 0원이 된다. 0(또는
-  // 없음)이면 무료배송 미사용.
+  // 배송비 정책 — 없으면 "fixed"(고정 배송비)와 동일하게 취급한다.
+  shippingFeeType?: ShippingFeeType;
+  // shippingFeeType이 "free_threshold"일 때만 의미 있음 — 이 상품의 주문 내
+  // 소계가 이 금액 이상이면 배송비가 0원이 된다. 0(또는 없음)이면 무료배송 미사용.
   freeShippingThreshold?: number;
-  // COURIER_OPTIONS의 code값. 택배가 아니거나 아직 안 정했으면 undefined.
+  // shippingFeeType이 "per_quantity"일 때만 의미 있음 — 이 수량마다 배송비를
+  // 한 번씩 더 부과한다(예: 5개마다 부과).
+  shippingFeeQtyUnit?: number;
+  // COURIER_OPTIONS의 code값이거나, 목록에 없는 택배사를 관리자가 직접 입력한
+  // 자유 텍스트. 택배가 아니거나 아직 안 정했으면 undefined.
   courierCode?: string;
   fulfillmentType?: FulfillmentType;
   // fulfillmentType이 "scheduled"일 때만 의미 있는 출고예정일(YYYY-MM-DD).
@@ -129,7 +136,9 @@ export interface Product {
   // 않는다(origin/weight와 동일한 성격).
   minQty?: number;
   shippingFee?: number;
+  shippingFeeType?: ShippingFeeType;
   freeShippingThreshold?: number;
+  shippingFeeQtyUnit?: number;
   courierCode?: string;
   fulfillmentType?: FulfillmentType;
   shipsAt?: string;
@@ -360,6 +369,21 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   card: "카드 결제",
   kakaopay: "카카오페이",
   incheon_eum: "인천 이음카드",
+};
+
+// 택배 배송비 부과 방식 — 상품(카탈로그) 단위 설정.
+// "fixed": 항상 shippingFee만큼 고정 부과.
+// "free_threshold": shippingFee를 부과하되, 이 상품의 주문 내 소계가
+//   freeShippingThreshold 이상이면 0원(공동구매 대량 주문 시 무료배송 혜택).
+// "per_quantity": shippingFeeQtyUnit개마다 shippingFee를 한 번씩 더 부과
+//   (예: 5세트마다 배송비 1회 — 박스 단위 발송처럼 수량에 비례해 배송 건수가
+//   느는 상품에 씀).
+export type ShippingFeeType = "fixed" | "free_threshold" | "per_quantity";
+
+export const SHIPPING_FEE_TYPE_LABEL: Record<ShippingFeeType, string> = {
+  fixed: "고정 배송비",
+  free_threshold: "금액별 무료배송",
+  per_quantity: "수량별 배송비",
 };
 
 // 택배 상품의 출고 방식 — 상품(카탈로그) 단위 설정. "scheduled"일 때만
