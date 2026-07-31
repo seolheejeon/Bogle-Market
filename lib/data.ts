@@ -669,9 +669,18 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
   const number = orderNumber();
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { data: orderRow, error } = await supabase
+    // id/created_at을 미리 만들어 직접 넘기고 .select()로 되읽지 않는다 — 게스트
+    // 주문(profile_id=null)은 "user reads own orders" 정책(profile_id = auth.uid())의
+    // NULL = NULL이 결코 true가 안 되는 SQL 특성 때문에, insert 자체는 성공해도
+    // PostgREST가 RETURNING 대상 행에 SELECT 정책을 적용하다 막혀 42501로 실패한다
+    // (INSERT policy와는 무관 — insert에 성공한 행을 "되읽으려는" 단계에서만 걸림).
+    // 회원 주문은 profile_id = auth.uid()가 참이라 원래도 문제없이 통과했었음.
+    const id = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const { error } = await supabase
       .from("orders")
       .insert({
+        id,
         order_number: number,
         event_id: input.eventId,
         batch_id: input.batchId,
@@ -686,10 +695,31 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
         payment_method: input.paymentMethod,
         status: "wait",
         total: input.total,
-      })
-      .select()
-      .single();
+        created_at: createdAt,
+      });
     if (error) throw error;
+    const orderRow = {
+      id,
+      order_number: number,
+      event_id: input.eventId,
+      batch_id: input.batchId,
+      profile_id: input.profileId,
+      guest_name: input.guestName ?? null,
+      guest_phone: input.guestPhone ?? null,
+      guest_pin: input.guestPin ?? null,
+      recipient_name: input.recipientName,
+      recipient_phone: input.recipientPhone,
+      address_snapshot: input.addressSnapshot,
+      apartment_name: input.apartmentName || null,
+      payment_method: input.paymentMethod,
+      status: "wait",
+      cancel_requested: false,
+      cancel_reason: null,
+      courier_code: null,
+      tracking_number: null,
+      total: input.total,
+      created_at: createdAt,
+    };
     const itemRows = input.items.map((item) => ({
       order_id: orderRow.id,
       event_product_id: item.productId,
