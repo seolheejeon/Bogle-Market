@@ -833,15 +833,13 @@ export async function listAllOrders(): Promise<Order[]> {
 export async function lookupGuestOrders(name: string, pin: string): Promise<Order[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
+    // RPC가 order_items까지 jsonb로 같이 실어 반환한다 — 별도로 order_items를
+    // select하면 게스트 주문은 RLS 때문에 항상 빈 배열만 돌아온다(schema.sql의
+    // lookup_guest_orders 주석 참고).
     const { data, error } = await supabase.rpc("lookup_guest_orders", { p_name: name, p_pin: pin });
     if (error) throw error;
     const rows = data ?? [];
-    return Promise.all(
-      rows.map(async (row: Record<string, any>) => {
-        const { data: items } = await supabase.from("order_items").select("*").eq("order_id", row.id);
-        return mapSupabaseOrder(row, (items ?? []).map(mapSupabaseOrderItem));
-      }),
-    );
+    return rows.map((row: Record<string, any>) => mapSupabaseOrder(row, (row.items ?? []).map(mapSupabaseOrderItem)));
   }
   const nameLower = name.trim().toLowerCase();
   return loadOrders()

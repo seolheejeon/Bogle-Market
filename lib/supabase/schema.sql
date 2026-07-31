@@ -483,16 +483,47 @@ $$;
 -- auth required. Returns every order under that name+PIN (a guest may have
 -- placed more than one), unlike the old order-number lookup which only ever
 -- matched a single order.
+-- order_items를 jsonb로 같이 실어서 반환한다 — 예전엔 이 함수가 orders 행만
+-- 반환하고 클라이언트가 order_items를 별도로 select했는데, order_items의
+-- SELECT 정책(`exists (select 1 from orders where id=order_id and
+-- profile_id=auth.uid())`)이 게스트 주문(profile_id가 null, auth.uid()도 null이라
+-- 결코 매치 안 됨)을 절대 통과 못 해서 게스트는 자기 주문의 상품 목록을 영원히
+-- 빈 배열로만 보게 되는 버그가 있었다(체크아웃 직후 리다이렉트되는 주문상세,
+-- 마이페이지의 비회원 주문조회 둘 다 영향받음). SECURITY DEFINER인 이 함수
+-- 안에서 order_items까지 함께 조회해 RLS를 우회한다.
 create or replace function lookup_guest_orders(p_name text, p_pin text)
-returns setof orders
+returns table (
+  id uuid, order_number text, event_id uuid, batch_id uuid, profile_id uuid,
+  guest_name text, guest_phone text, guest_pin text, recipient_name text, recipient_phone text,
+  address_snapshot text, apartment_name text, payment_method text, status text,
+  cancel_requested boolean, cancel_reason text, courier_code text, tracking_number text,
+  total integer, created_at timestamptz, items jsonb
+)
 language sql
 security definer
 set search_path = public
 as $$
-  select * from orders
-  where guest_pin = p_pin
-    and lower(coalesce(guest_name, recipient_name)) = lower(p_name)
-  order by created_at desc;
+  select
+    o.id, o.order_number, o.event_id, o.batch_id, o.profile_id,
+    o.guest_name, o.guest_phone, o.guest_pin, o.recipient_name, o.recipient_phone,
+    o.address_snapshot, o.apartment_name, o.payment_method, o.status,
+    o.cancel_requested, o.cancel_reason, o.courier_code, o.tracking_number,
+    o.total, o.created_at,
+    coalesce(
+      (select jsonb_agg(jsonb_build_object(
+        'event_product_id', oi.event_product_id,
+        'product_name', oi.product_name,
+        'price_snapshot', oi.price_snapshot,
+        'quantity', oi.quantity,
+        'options', oi.options
+      ) order by oi.id)
+      from order_items oi where oi.order_id = o.id),
+      '[]'::jsonb
+    ) as items
+  from orders o
+  where o.guest_pin = p_pin
+    and lower(coalesce(o.guest_name, o.recipient_name)) = lower(p_name)
+  order by o.created_at desc;
 $$;
 
 -- 게스트 주문 셀프취소: 이름+PIN이 맞고, 아직 발주확인 전(wait/paid) 단계일
