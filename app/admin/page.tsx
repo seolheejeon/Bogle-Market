@@ -165,7 +165,8 @@ export default function AdminHomePage() {
       { key: "cancel_requested", label: "취소 요청", count: orders.filter((o) => o.cancelRequested).length },
       { key: "refund_requested", label: "반품/환불 요청", count: orders.filter((o) => o.status === "refund_requested").length },
       { key: "soldout", label: "품절 상품", count: soldoutCount, href: "/admin/events" },
-      { key: "events", label: "진행중 이벤트", count: events.length, href: "/admin/events" },
+      { key: "events", label: "진행중 이벤트", count: events.filter((e) => e.status !== "ended").length, href: "/admin/events" },
+      { key: "events_ended", label: "종료 이벤트", count: events.filter((e) => e.status === "ended").length, href: "/admin/events" },
     ];
   }, [orders, events, eventById]);
 

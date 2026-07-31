@@ -14,10 +14,13 @@ function toLocalInputValue(d: Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+type StatusFilter = "all" | "open" | "ended";
+
 export default function AdminEventsPage() {
   const [events, setEvents] = useState<MarketEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<StatusFilter>("all");
 
   function refresh() {
     listEvents().then((e) => {
@@ -34,14 +37,35 @@ export default function AdminEventsPage() {
     refresh();
   }
 
-  // "종료"는 그냥 마감시각을 지금으로 당길 뿐, 그 이후 판단은 항상 배송방식별
-  // 정책(lib/order-policy.ts)을 그대로 따른다 — 사다드림/특가는 종료 즉시 주문이
-  // 막히지만, 문고리/택배(비특가)는 종료를 눌러도 재고가 남아있으면 계속 주문된다.
+  // 종료는 deadlineAt과 무관하게 별도 상태(status)로 관리한다 — 배송방식별
+  // 마감 정책(lib/order-policy.ts)보다 항상 우선해서 문고리/택배도 예외 없이
+  // 즉시 주문이 막힌다. 배송일 당일까지는 고객 화면에 "마감"으로 조회만
+  // 가능하고, 배송일 다음날 00:00부터 고객 화면에서 완전히 숨겨진다.
   async function onClose(event: MarketEvent) {
-    if (!confirm(`"${event.title}"을(를) 지금 바로 종료할까요? 고객 화면에 마감으로 표시돼요.`)) return;
-    await updateEvent(event.id, { deadlineAt: new Date().toISOString() });
+    if (!confirm(`"${event.title}"을(를) 지금 바로 종료할까요? 종료되면 고객 화면에서 즉시 주문이 막혀요.`)) return;
+    await updateEvent(event.id, { status: "ended" });
     refresh();
   }
+
+  async function onRestart(event: MarketEvent) {
+    if (!confirm(`"${event.title}"을(를) 다시 진행중으로 되돌릴까요?`)) return;
+    await updateEvent(event.id, { status: "open" });
+    refresh();
+  }
+
+  const openEvents = events.filter((e) => e.status !== "ended");
+  const endedEvents = events
+    .filter((e) => e.status === "ended")
+    .sort((a, b) => new Date(b.deliveryAt).getTime() - new Date(a.deliveryAt).getTime());
+  // 진행중을 항상 먼저, 종료는 항상 하단에 — 필터가 "전체"일 때만 이 순서가 보임.
+  const sorted = [...openEvents, ...endedEvents];
+  const visible = filter === "all" ? sorted : filter === "open" ? openEvents : endedEvents;
+
+  const FILTERS: { key: StatusFilter; label: string; count: number }[] = [
+    { key: "all", label: "전체", count: events.length },
+    { key: "open", label: "진행중", count: openEvents.length },
+    { key: "ended", label: "종료", count: endedEvents.length },
+  ];
 
   return (
     <div>
@@ -51,45 +75,68 @@ export default function AdminEventsPage() {
           + 새 이벤트
         </Link>
       </div>
+      <div className="mb-3 flex gap-1.5">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold ${
+              filter === f.key ? "bg-accent text-white" : "bg-bg-sunken text-text-muted"
+            }`}
+          >
+            {f.label} {f.count}
+          </button>
+        ))}
+      </div>
       {loading && <p className="text-sm text-text-muted">불러오는 중...</p>}
       <div className="flex flex-col gap-2">
-        {events.map((e) => (
-          <div key={e.id} className="rounded-xl border border-border p-3.5">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="rounded-md bg-bg-sunken px-1.5 py-0.5 text-[11px] font-bold text-text-muted">{EVENT_TYPE_LABEL[e.type]}</span>
-                  <EventBadgeTag badge={e.badge} />
-                  <span className="text-[14px] font-bold">{e.title}</span>
+        {visible.map((e) => {
+          const ended = e.status === "ended";
+          return (
+            <div key={e.id} className={`rounded-xl border border-border p-3.5 ${ended ? "opacity-60 grayscale-[0.4]" : ""}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="rounded-md bg-bg-sunken px-1.5 py-0.5 text-[11px] font-bold text-text-muted">{EVENT_TYPE_LABEL[e.type]}</span>
+                    <EventBadgeTag badge={e.badge} />
+                    {ended && <span className="rounded-md bg-text-muted px-1.5 py-0.5 text-[10.5px] font-bold text-white">종료됨</span>}
+                    <span className="text-[14px] font-bold">{e.title}</span>
+                  </div>
+                  <p className="mt-1 text-[12px] text-text-muted">
+                    상품 {e.products.length}개 · 마감 {formatDateTime(e.deadlineAt)}
+                  </p>
                 </div>
-                <p className="mt-1 text-[12px] text-text-muted">
-                  상품 {e.products.length}개 · 마감 {formatDateTime(e.deadlineAt)}
-                </p>
+                <div className="flex flex-wrap justify-end gap-1.5">
+                  <Link href={`/admin?event=${e.id}`} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold">
+                    주문보기
+                  </Link>
+                  <Link href={`/admin/events/${e.id}`} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold">
+                    수정
+                  </Link>
+                  <button
+                    onClick={() => setDuplicatingId(duplicatingId === e.id ? null : e.id)}
+                    className="rounded-[8px] bg-accent px-3 py-1.5 text-[12.5px] font-bold text-white"
+                  >
+                    복제
+                  </button>
+                  {ended ? (
+                    <button onClick={() => onRestart(e)} className="rounded-[8px] border border-accent px-3 py-1.5 text-[12.5px] font-semibold text-accent-dark">
+                      재시작
+                    </button>
+                  ) : (
+                    <button onClick={() => onClose(e)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold text-red-600">
+                      종료
+                    </button>
+                  )}
+                  <button onClick={() => onDelete(e.id)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold text-red-600">
+                    삭제
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-wrap justify-end gap-1.5">
-                <Link href={`/admin?event=${e.id}`} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold">
-                  주문보기
-                </Link>
-                <Link href={`/admin/events/${e.id}`} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold">
-                  수정
-                </Link>
-                <button
-                  onClick={() => setDuplicatingId(duplicatingId === e.id ? null : e.id)}
-                  className="rounded-[8px] bg-accent px-3 py-1.5 text-[12.5px] font-bold text-white"
-                >
-                  복제
-                </button>
-                <button onClick={() => onClose(e)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold text-red-600">
-                  종료
-                </button>
-                <button onClick={() => onDelete(e.id)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold text-red-600">
-                  삭제
-                </button>
-              </div>
+              {duplicatingId === e.id && <DuplicateForm event={e} onDone={() => setDuplicatingId(null)} onCreated={refresh} />}
             </div>
-            {duplicatingId === e.id && <DuplicateForm event={e} onDone={() => setDuplicatingId(null)} onCreated={refresh} />}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

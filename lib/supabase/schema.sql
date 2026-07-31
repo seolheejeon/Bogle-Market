@@ -51,6 +51,12 @@ create table if not exists events (
   deadline_at timestamptz not null,
   delivery_at timestamptz not null,
   notice text not null default '',
+  -- 관리자가 "종료" 버튼으로 세우는 명시적 상태 — deadline_at과는 별개로,
+  -- 배송방식별 마감 정책(lib/order-policy.ts의 STRICT/SOFT/ALWAYS_OPEN)보다
+  -- 항상 우선해서 주문을 막는다. 'ended'가 되면 배송일 당일까지는 고객 화면에
+  -- "마감"으로만 노출되고, 배송일 다음날 00:00부터는 고객 화면에서 완전히
+  -- 숨겨진다(관리자 화면에는 계속 남아 "재시작"으로 되돌릴 수 있음).
+  status text not null default 'open' check (status in ('open', 'ended')),
   created_at timestamptz not null default now()
 );
 

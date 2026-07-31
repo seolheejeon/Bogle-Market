@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { listEvents } from "@/lib/data";
+import { isEventOrderable, isEventVisibleToCustomers } from "@/lib/order-policy";
 import type { EventType, MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
@@ -27,8 +28,14 @@ export function CategoryView({ initialType }: { initialType?: EventType }) {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(urlEventId);
 
   useEffect(() => {
-    // 노출 꺼둔 상품은 카테고리 그리드에 안 보이게 걸러둔다.
-    listEvents().then((all) => setEvents(all.map((e) => ({ ...e, products: e.products.filter((p) => p.visible !== false) }))));
+    // 노출 꺼둔 상품은 카테고리 그리드에 안 보이게 걸러두고, 종료된 지 하루
+    // 지난 이벤트도 함께 걸러낸다(isEventVisibleToCustomers) — 종료 당일까지는
+    // 계속 보이되 QtyControl이 "마감"으로 표시하고 담기를 막는다.
+    listEvents().then((all) =>
+      setEvents(
+        all.filter(isEventVisibleToCustomers).map((e) => ({ ...e, products: e.products.filter((p) => p.visible !== false) })),
+      ),
+    );
   }, []);
 
   const eventsForType = useMemo(
@@ -54,7 +61,10 @@ export function CategoryView({ initialType }: { initialType?: EventType }) {
   }, [eventsForType, isDateless]);
 
   const selectedEvent = !isDateless ? (eventsForType.find((e) => e.id === selectedEventId) ?? null) : null;
-  const parcelProducts = useMemo(() => (isDateless ? eventsForType.flatMap((e) => e.products) : []), [isDateless, eventsForType]);
+  const parcelProducts = useMemo(
+    () => (isDateless ? eventsForType.flatMap((e) => e.products.map((p) => ({ product: p, closed: !isEventOrderable(e) }))) : []),
+    [isDateless, eventsForType],
+  );
 
   // 지금 선택 상태를 URL에도 그대로 반영해둔다(history를 새로 쌓지 않도록 replace) —
   // 상품 상세로 갔다가 브라우저 "뒤로"로 돌아오면 이 URL 그대로 복귀하므로 탭/날짜
@@ -115,7 +125,7 @@ export function CategoryView({ initialType }: { initialType?: EventType }) {
           ) : (
             <div className="grid grid-cols-2 gap-x-2 gap-y-2.5">
               {selectedEvent.products.map((p) => (
-                <ProductGridCard key={p.id} product={p} />
+                <ProductGridCard key={p.id} product={p} closed={!isEventOrderable(selectedEvent)} />
               ))}
             </div>
           )}
@@ -125,8 +135,8 @@ export function CategoryView({ initialType }: { initialType?: EventType }) {
       {isDateless && parcelProducts.length > 0 && (
         <div className="p-4 pt-3">
           <div className="grid grid-cols-2 gap-x-2 gap-y-2.5">
-            {parcelProducts.map((p) => (
-              <ProductGridCard key={p.id} product={p} />
+            {parcelProducts.map(({ product, closed }) => (
+              <ProductGridCard key={product.id} product={product} closed={closed} />
             ))}
           </div>
         </div>

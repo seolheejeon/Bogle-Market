@@ -146,6 +146,7 @@ export async function updateEvent(id: string, patch: Partial<Omit<MarketEvent, "
     if (patch.type !== undefined) row.type = patch.type;
     if (patch.title !== undefined) row.title = patch.title;
     if (patch.badge !== undefined) row.badge = patch.badge;
+    if (patch.status !== undefined) row.status = patch.status;
     if (patch.deadlineAt !== undefined) row.deadline_at = patch.deadlineAt;
     if (patch.deliveryAt !== undefined) row.delivery_at = patch.deliveryAt;
     if (patch.notice !== undefined) row.notice = patch.notice;
@@ -169,6 +170,8 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
     type: source.type,
     title: overrides.title,
     badge: source.badge,
+    // 원본이 종료 상태였어도 복제본은 항상 새 회차로 진행중 시작.
+    status: "open",
     deadlineAt: overrides.deadlineAt,
     deliveryAt: overrides.deliveryAt,
     notice: source.notice,
@@ -1335,6 +1338,7 @@ function mapSupabaseEvent(row: Record<string, any>): MarketEvent {
     type: row.type,
     title: row.title,
     badge: row.badge ?? "NONE",
+    status: row.status ?? "open",
     deadlineAt: row.deadline_at,
     deliveryAt: row.delivery_at,
     notice: row.notice ?? "",

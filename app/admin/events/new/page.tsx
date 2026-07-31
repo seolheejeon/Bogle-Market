@@ -35,6 +35,7 @@ export default function NewEventPage() {
         type,
         title: title.trim(),
         badge,
+        status: "open",
         deadlineAt: new Date(deadlineAt).toISOString(),
         deliveryAt: dateInputValueToIso(deliveryAt),
         notice,

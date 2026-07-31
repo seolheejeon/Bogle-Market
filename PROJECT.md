@@ -3,7 +3,7 @@
 보글마켓 개발 진행상황과 주요 기획 결정을 기록하는 문서입니다.
 **기능이 완료되거나 기획이 바뀔 때마다 이 문서도 함께 업데이트합니다.**
 
-마지막 업데이트: 2026-07-30 (유연한 상품 옵션 시스템 — 색상/사이즈/중량/추가옵션 등 다중 옵션 그룹 + 옵션값별 가격조정/재고, 장바구니를 옵션조합별 라인으로 재설계)
+마지막 업데이트: 2026-07-31 (이벤트 종료 기능 수정 — "종료"가 실제로 주문을 막도록 명시적 status 상태 도입, 고객 화면 자동 숨김/마감 처리, 관리자 필터·정렬·시각구분)
 
 ---
 
@@ -265,6 +265,15 @@
 - 브라우저로 검증(mock 모드): 유정란 20구에 "중량"(필수/단일) 그룹을 만들어 10구(-2,000원, 재고관리 5개)/20구(가격조정 없음, 재고 무제한) 두 값 등록 → 이미 그 상품이 걸려있던 기존 이벤트 리스팅도 카탈로그 기본재고(5개)로 자동 인식되는 것 확인. 리스팅 화면에서 옵션 재고를 3개로 직접 수정 → 저장됨 확인. 상품 상세에서 옵션 선택 없이 담기 시도 시 "중량을(를) 선택해 주세요." 메시지, "10구" 선택 시 가격이 7,900→5,900원으로 즉시 반영되는 것 확인. 10구 1개+20구 1개를 각각 장바구니에 담아 두 개의 별도 줄(수량이 안 합쳐짐)로 보이는 것, 체크아웃/주문상세/관리자 주문목록 전부 "유정란 20구(10구)"/"유정란 20구(20구)"로 구분 표시되는 것 확인. 주문 생성 후 10구 옵션재고가 3→2로 차감, 주문 취소 후 2→3으로 복구되는 것까지 확인
 - ⚠️ **배포 시 확인 필요**: 실제 Supabase 프로젝트에는 아직 `product_option_groups`/`product_option_values`/`event_option_stock` 테이블과 `order_items.options` 컬럼, `decrement_option_stock`/`increment_option_stock` 함수가 없음 — 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 먼저 실행해야 함(안 하면 옵션이 없는 기존 상품은 그대로 동작하지만, 옵션을 추가하려고 하면 에러로 실패함)
 
+**이벤트 종료 기능 수정**
+- 배경: 운영 테스트 중 관리자가 "종료" 버튼을 눌러도 실제로는 고객 화면에서 계속 주문이 가능하고, 대시보드 "진행중 이벤트" 개수도 줄지 않는 문제가 발견됨. 원인은 "종료" 버튼이 `deadlineAt`(마감시각)만 현재로 당길 뿐 별도의 상태값이 없었고, 문고리(`SOFT_DEADLINE`)·택배(`ALWAYS_OPEN`) 배송방식은 마감 시각이 지나도 재고만 있으면 계속 주문을 받는 정책이었기 때문 — "종료"가 배송방식 정책보다 우선하는 명시적 신호가 아예 없었음
+- **`events.status`(`open`/`ended`) 컬럼 신규 도입** — `deadlineAt`은 그대로 두고 완전히 별도로 관리. `isEventOrderable()`(`lib/order-policy.ts`) 맨 앞에서 `status === "ended"`면 배송방식 정책과 무관하게 무조건 주문을 막도록 최우선 거부권을 줌
+- **고객 화면 노출 정책**: 신규 `isEventVisibleToCustomers()` — 종료 당일부터 배송일까지는 "마감" 상태로 계속 조회는 가능하되 주문 버튼만 비활성화되고, **배송일 다음날 00:00부터는 홈/카테고리 목록에서 자동으로 완전히 숨김**. `HomeView`/`CategoryView`가 이벤트 목록을 불러올 때 이 필터를 적용하고, `ProductGridCard`는 `closed` prop을 받아 마감된 이벤트의 상품에 "마감" 뱃지를 표시(담기/옵션선택 버튼 대신)
+- **관리자 이벤트 목록**(`/admin/events`): "종료" 버튼은 이제 `status`만 바꾸고(`deadlineAt`은 안 건드림), 이미 종료된 이벤트는 버튼이 "재시작"으로 바뀜(다시 누르면 종료 팝업이 뜨는 문제도 이걸로 자연히 해결됨). 전체/진행중/종료 필터 탭(각 개수 표시) 추가, 종료 이벤트는 항상 목록 하단으로 정렬, 회색 처리 + "종료됨" 뱃지로 시각적 구분
+- **관리자 대시보드**(`/admin`): "진행중 이벤트" 타일이 `status !== "ended"` 기준으로 정확히 집계되도록 수정(기존엔 전체 개수를 그대로 썼음), "종료 이벤트" 타일 신규 추가
+- 검증: `npx tsc --noEmit`, `npm run build` 모두 통과 확인. 브라우저를 통한 인터랙티브 검증은 로컬 개발 서버(`localhost:3000`)가 실제 운영 Supabase에 연결되어 있는 것으로 확인되어(모의 모드가 아님) 진행하지 않음 — 실 데이터 훼손 위험 때문에 회원가입 테스트를 중단하고 서버를 종료함. 배포 후 게스트 주문 흐름 등 안전한 방법으로 운영 환경에서 재검증 필요
+- ⚠️ **배포 시 확인 필요**: 실제 Supabase 프로젝트에는 아직 `events.status` 컬럼이 없음 — 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 먼저 실행해야 함(안 하면 "종료"/"재시작" 클릭 시 에러로 실패함)
+
 # 진행 중인 기능
 
 - **카드/카카오페이 결제**: Toss Payments 키가 없어서 지금은 무통장입금과 동일하게 관리자가 수동으로 확인하는 방식으로 대체 중
@@ -275,7 +284,7 @@
 2026-07-29에 실제 주문 플로우를 고객·관리자 양쪽에서 처음부터 끝까지 진행하며 전체 점검을 했다. 발견한 항목을 공동구매 운영 효율 기준으로 우선순위를 매겨 정리한다 (계좌 안내, 이벤트-주문 구조 개선, 발주확인/셀프취소/반품환불/재고제한, 이벤트별 판매 정책 항목은 완료해서 위 "완료된 기능"으로 이동함).
 
 **보통 — 정확도/신뢰성 개선**
-- [ ] 대시보드 "진행 중 이벤트" 수치가 마감된 이벤트까지 포함해서 부정확
+- [x] ~~대시보드 "진행 중 이벤트" 수치가 마감된 이벤트까지 포함해서 부정확~~ → 이벤트 종료 기능 수정으로 해결(위 "완료된 기능" 참고)
 - [ ] 대시보드 "오늘 매출"이 입금대기(미확인) 주문까지 합산 — 실제 입금액과 괴리
 - [ ] 비회원 "이름+PIN" 조회가 같은 이름+같은 PIN을 쓰는 타인과 주문이 섞일 여지 있음 (설계 당시 인지된 트레이드오프, 경미하지만 남아있는 리스크)
 - [ ] 재고 차감(`decrement_stock`)이 부족분을 그냥 0으로 클램프할 뿐 거부하지 않음 — 동시에 여러 명이 마지막 재고를 주문하면 이론적으로 재고 이상으로 판매될 수 있음(이벤트별 판매 정책 작업 중 확인, 지금 규모에선 발생 확률 낮은 레이스 컨디션이라 별도 항목으로만 남김)
@@ -283,6 +292,7 @@
 **기존에 알려져 있던 항목**
 - [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 `product_option_groups`/`product_option_values`/`event_option_stock`/`order_items.options` 마이그레이션 미적용 — 적용 전까지는 옵션이 없는 기존 상품은 그대로 동작하지만, 옵션 그룹을 추가하려고 하면 에러로 실패함(존재하지 않는 테이블/컬럼에 쓰려고 시도). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 `products.base_price`/`product_costs`/`event_product_costs` 마이그레이션 미적용 — 적용 전까지는 상품 등록·수정, 이벤트에 상품 추가가 에러로 실패함(존재하지 않는 컬럼/테이블에 쓰려고 시도). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
+- [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 `events.status` 마이그레이션 미적용 — 적용 전까지는 관리자 이벤트 목록의 "종료"/"재시작" 클릭이 에러로 실패함(존재하지 않는 컬럼에 쓰려고 시도). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [ ] 스마트택배 API 키 발급 후 `SWEETTRACKER_API_KEY` 환경변수 설정 + `app/api/tracking/route.ts`의 응답 필드명/택배사 코드(`t_code`)를 실제 응답과 대조 확인 (지금은 키가 없어 항상 "준비 중" 폴백으로만 동작 확인함)
 - [ ] Toss Payments 실제 가맹점 키 연동 (카드/카카오페이 자동결제)
 - [ ] 인천 이음카드 온라인 결제 연동 방법 조사
@@ -308,7 +318,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | --- | --- | --- |
 | `profiles` | id(=auth.users.id), username(unique), nickname, phone(unique), is_admin | 1:1 auth 연동. 이메일은 auth.users에만 있고 이 테이블엔 없음(사용자에게 절대 노출 안 함). `is_admin=true`가 관리자 |
 | `addresses` | id, profile_id, name, phone, zonecode, road_address, apartment_name, detail_address, entrance_method, memo, is_default | 회원 배송지. Daum 주소검색으로만 입력받음 — `road_address`/`zonecode`는 검색 결과 그대로, `apartment_name`은 검색 결과가 공동주택일 때만 채워지는 값(사용자가 입력하는 항목 아님, 관리자 아파트별 필터용), `detail_address`(동/호 등)만 사용자가 직접 입력. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
-| `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, badge(NONE/SALE/HOT/NEW/RESERVE/DEADLINE), deadline_at, delivery_at, notice | 공동구매 회차. `badge`는 예전엔 `is_flash`(boolean)였음 — `badge='SALE'`만 예외적으로 주문 마감 정책(`lib/order-policy.ts`)에 영향을 주고 나머지는 순수 노출용 뱃지. ⚠️ 실제 Supabase 프로젝트는 아직 `is_flash` 컬럼 그대로라 마이그레이션 필요(TODO 참고) |
+| `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, badge(NONE/SALE/HOT/NEW/RESERVE/DEADLINE), status(open/ended), deadline_at, delivery_at, notice | 공동구매 회차. `badge`는 예전엔 `is_flash`(boolean)였음 — `badge='SALE'`만 예외적으로 주문 마감 정책(`lib/order-policy.ts`)에 영향을 주고 나머지는 순수 노출용 뱃지. `status`는 관리자 "종료" 버튼이 세우는 값 — `deadline_at`과 별개로 배송방식 정책보다 항상 우선해서 주문을 막는다(`isEventOrderable`). ⚠️ 실제 Supabase 프로젝트는 아직 `is_flash` 컬럼 그대로라 마이그레이션 필요(TODO 참고) |
 | `products` | id, name, emoji, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, eat, description, base_price | **카탈로그 상품** — 이벤트와 무관하게 상품당 한 행만 존재하는 "내용물"(사진/설명/원산지 등). 같은 상품이 여러 회차에 걸려도 여기엔 한 번만 있고, 아래 `event_products`가 이 id를 재사용함. 삭제하려는 상품이 `event_products`에서 쓰이고 있으면 FK가 막음(에러코드 `23503`). `base_price`는 새 이벤트에 추가할 때 기본값으로 복사되는 기준 판매가(공개 정보) |
 | `product_costs` | product_id(PK, →products), cost_price, updated_at | 카탈로그 상품의 **기준 원가** — `products`와 분리된 admin-only 테이블(RLS가 `is_admin()`으로만 select까지 걸림). 고객 화면이 쓰는 공개 쿼리에는 이 값이 절대 섞여 들어올 수 없음(같은 select에 join하지 않는 한 노출될 방법 자체가 없음) |
 | `event_products` | id, event_id, product_id(→products), price, delivery_type, stock, visible | **이벤트별 상품 리스팅** — 옛 `products` 테이블이 하던 역할(이벤트에 속한 판매 정보)을 그대로 가져오되 내용은 `product_id`로 카탈로그를 참조. `price`/`delivery_type`/`stock`/`visible`은 리스팅마다 독립적이라, 같은 카탈로그 상품도 회차별로 다른 가격·재고·노출 여부를 가질 수 있음. `delivery_type`이 비어있으면 소속 이벤트의 배송방식을 그대로 따름. `stock`이 null이면 재고 제한 없음, 값이 있으면 그 수량만큼만 판매되고 0이면 품절. `visible=false`면 고객 화면에서 이 리스팅만 숨김(카탈로그 상품 자체나 다른 회차 리스팅엔 영향 없음) — RLS도 `visible or is_admin()`으로 비노출 리스팅을 비관리자에게 숨김. 화면(`Product` 타입)에는 `products`와 조인한 평평한 모양으로 합쳐져서 전달됨(`catalogProductId`로 원본 카탈로그 id를 알 수 있음) |

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { listEvents, listBanners, isBannerLive } from "@/lib/data";
 import { resolveBannerHref } from "@/lib/banner-link";
+import { isEventOrderable, isEventVisibleToCustomers } from "@/lib/order-policy";
 import type { Banner, EventType, MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatCountdownShort, formatDeadlineShort, formatPrice } from "@/lib/format";
@@ -25,8 +26,13 @@ export function HomeView() {
 
   useEffect(() => {
     // 노출 꺼둔 상품은 홈 화면 어디에도(히어로/마감임박/인기상품) 나오지 않게
-    // 이벤트를 불러온 시점에 한 번만 걸러둔다.
-    listEvents().then((all) => setEvents(all.map((e) => ({ ...e, products: e.products.filter((p) => p.visible !== false) }))));
+    // 이벤트를 불러온 시점에 한 번만 걸러두고, 종료된 지 하루 지난 이벤트도
+    // 함께 걸러낸다(isEventVisibleToCustomers).
+    listEvents().then((all) =>
+      setEvents(
+        all.filter(isEventVisibleToCustomers).map((e) => ({ ...e, products: e.products.filter((p) => p.visible !== false) })),
+      ),
+    );
     listBanners().then(setBanners);
   }, []);
 
@@ -77,7 +83,7 @@ export function HomeView() {
 
   const popular = useMemo(() => {
     if (!events) return [];
-    return events.flatMap((e) => e.products).slice(0, 4);
+    return events.flatMap((e) => e.products.map((p) => ({ product: p, closed: !isEventOrderable(e) }))).slice(0, 4);
   }, [events]);
 
   // Pointer Events unify mobile touch swipe and desktop mouse drag in one
@@ -228,8 +234,8 @@ export function HomeView() {
         <section className="mt-5">
           <p className="mb-2 text-[12.5px] font-bold text-text-muted">🔥 인기상품</p>
           <div className="grid grid-cols-2 gap-x-2 gap-y-2.5">
-            {popular.map((p, i) => (
-              <ProductGridCard key={p.id} product={p} rankBadge={`BEST ${i + 1}`} />
+            {popular.map(({ product, closed }, i) => (
+              <ProductGridCard key={product.id} product={product} rankBadge={`BEST ${i + 1}`} closed={closed} />
             ))}
           </div>
         </section>

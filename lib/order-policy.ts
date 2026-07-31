@@ -15,7 +15,22 @@ export function getOrderPolicy(event: Pick<MarketEvent, "type" | "badge">): Orde
 
 // STRICT_DEADLINE 정책이고 마감이 지났을 때만 주문 자체를 막는다. SOFT_DEADLINE/
 // ALWAYS_OPEN은 여기서 막지 않고, 재고(품절) 여부만으로 계속 제어된다(기존 로직 그대로).
-export function isEventOrderable(event: Pick<MarketEvent, "type" | "badge" | "deadlineAt">): boolean {
+// status==='ended'(관리자 "종료")는 배송방식 정책과 무관하게 항상 최우선으로
+// 주문을 막는다 — 문고리/택배(SOFT_DEADLINE/ALWAYS_OPEN)도 예외 없음.
+export function isEventOrderable(event: Pick<MarketEvent, "type" | "badge" | "status" | "deadlineAt">): boolean {
+  if (event.status === "ended") return false;
   if (getOrderPolicy(event) !== "STRICT_DEADLINE") return true;
   return new Date(event.deadlineAt).getTime() > Date.now();
+}
+
+// 고객 화면(홈/카테고리 등 목록)에 이 이벤트를 아예 노출할지 여부 — 진행중이면
+// 항상 노출하고, 관리자가 종료했다면 배송일 당일까지만 "마감"으로 조회 가능하게
+// 남겨두고(주문은 isEventOrderable이 막음), 배송일 다음날 00:00부터는 목록에서
+// 완전히 숨긴다. 직접 링크(상품 상세 등)로 들어온 경우는 이 함수를 거치지 않으므로
+// 계속 열람은 가능하고 주문만 막힌다.
+export function isEventVisibleToCustomers(event: Pick<MarketEvent, "status" | "deliveryAt">): boolean {
+  if (event.status !== "ended") return true;
+  const d = new Date(event.deliveryAt);
+  const hideAt = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);
+  return Date.now() < hideAt.getTime();
 }

@@ -128,11 +128,17 @@ export const EVENT_BADGE_LABEL: Record<EventBadge, string> = {
   DEADLINE: "마감임박",
 };
 
+// 관리자가 "종료" 버튼으로 세우는 명시적 상태 — deadlineAt과 별개로 배송방식별
+// 마감 정책(lib/order-policy.ts)보다 항상 우선해서 주문을 막는다. "재시작"으로
+// 다시 open으로 되돌릴 수 있다.
+export type EventStatus = "open" | "ended";
+
 export interface MarketEvent {
   id: string;
   type: EventType;
   title: string;
   badge: EventBadge;
+  status: EventStatus;
   deadlineAt: string; // ISO
   deliveryAt: string; // ISO
   notice: string;
@@ -171,6 +177,7 @@ export interface MarketEventSeed {
   type: EventType;
   title: string;
   badge: EventBadge;
+  status: EventStatus;
   deadlineAt: string;
   deliveryAt: string;
   notice: string;
