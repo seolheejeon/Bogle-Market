@@ -259,21 +259,60 @@ export function CheckoutView() {
         </div>
         {!profile && <p className="mb-4 text-[11.5px] text-text-muted">회원가입 없이 주문할 수 있어요. 주문 조회는 이름과 확인번호로 할 수 있어요.</p>}
 
-        <p className="mb-2 text-[12.5px] font-bold text-text-muted">결제 방법</p>
+        <p className="mb-2 text-[12.5px] font-bold text-text-muted">주문 내역</p>
         {deliveryTypesPresent.length > 1 && (
-          <p className="mb-3 rounded-[9px] bg-bg-sunken px-3 py-2.5 text-[12px] text-text-muted">
-            결제 방식이 다른 상품이 포함되어 있습니다. 주문이 배송 유형별로 각각 생성됩니다.
-          </p>
+          <p className="mb-3 rounded-[9px] bg-bg-sunken px-3 py-2.5 text-[12px] text-text-muted">배송유형이 달라 주문이 자동으로 분리됩니다.</p>
         )}
-        <div className="mb-4 flex flex-col gap-4">
+        <div className="flex flex-col gap-5">
           {deliveryTypesPresent.map((type) => {
+            const typeGroups = groups.filter((g) => deliveryTypeOf(g.items[0]) === type);
+            const typeTotal = typeGroups.reduce(
+              (sum, g) => sum + g.items.reduce((s, i) => s + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0),
+              0,
+            );
             const selected = methodFor(type);
             return (
-              <div key={type}>
-                {deliveryTypesPresent.length > 1 && (
-                  <p className="mb-1.5 text-[12px] font-bold text-accent-dark">{EVENT_TYPE_LABEL[type]}</p>
+              <div key={type} className="rounded-xl border border-border p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[13px] font-extrabold">{deliveryTypesPresent.length > 1 ? `${EVENT_TYPE_LABEL[type]} 주문` : "주문 상품"}</span>
+                  <span className="text-[12.5px] font-bold">{formatPrice(typeTotal)}</span>
+                </div>
+                {typeGroups.length > 1 && (
+                  <p className="mb-2 text-[11px] text-text-muted">마감일/배송일이 달라 이 안에서 {typeGroups.length}건으로 나뉘어 접수돼요.</p>
                 )}
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-3">
+                  {typeGroups.map((g) => {
+                    const groupTotal = g.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
+                    return (
+                      <div key={g.event.id}>
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="text-[12px] font-bold text-accent-dark">{g.event.title}</span>
+                          <span className="text-[11px] text-text-muted">배송예정 {formatEventDateChip(g.event.deliveryAt)}</span>
+                        </div>
+                        <div className="flex flex-col gap-1 text-[13px] text-text-muted">
+                          {g.items.map((i) => (
+                            <div key={`${i.product.id}::${i.line.optionValueIds.join(",")}`} className="flex justify-between">
+                              <span>
+                                {i.product.name}
+                                {i.line.optionValueIds.length > 0 && ` (${optionSelectionLabel(i.product, i.line.optionValueIds)})`} x{i.line.qty}
+                              </span>
+                              <span>{formatPrice(unitPrice(i.product, i.line.optionValueIds) * i.line.qty)}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {typeGroups.length > 1 && (
+                          <div className="mt-0.5 flex justify-between text-[11.5px] font-semibold">
+                            <span>소계</span>
+                            <span>{formatPrice(groupTotal)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <p className="mt-3 mb-1.5 text-[11.5px] font-bold text-text-muted">결제 방법</p>
+                <div className="flex flex-col gap-1.5">
                   {allowedPaymentMethods(type).map((value) => {
                     const m = PAYMENT_METHODS.find((pm) => pm.value === value)!;
                     return (
@@ -293,41 +332,6 @@ export function CheckoutView() {
                 {selected === "bank_transfer" && (
                   <div className="mt-2">
                     <BankAccountInfo />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <p className="mb-2 text-[12.5px] font-bold text-text-muted">주문 상품</p>
-        {groups.length > 1 && (
-          <p className="mb-3 text-[11.5px] text-text-muted">이벤트마다 마감일/배송일이 달라서 주문이 {groups.length}건으로 나뉘어 접수돼요. 결제는 한 번만 하시면 돼요.</p>
-        )}
-        <div className="flex flex-col gap-4">
-          {groups.map((g) => {
-            const groupTotal = g.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
-            return (
-              <div key={g.event.id}>
-                <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-[12.5px] font-bold text-accent-dark">{g.event.title}</span>
-                  <span className="text-[11px] text-text-muted">배송예정 {formatEventDateChip(g.event.deliveryAt)}</span>
-                </div>
-                <div className="flex flex-col gap-1.5 text-[13px] text-text-muted">
-                  {g.items.map((i) => (
-                    <div key={`${i.product.id}::${i.line.optionValueIds.join(",")}`} className="flex justify-between">
-                      <span>
-                        {i.product.name}
-                        {i.line.optionValueIds.length > 0 && ` (${optionSelectionLabel(i.product, i.line.optionValueIds)})`} x{i.line.qty}
-                      </span>
-                      <span>{formatPrice(unitPrice(i.product, i.line.optionValueIds) * i.line.qty)}</span>
-                    </div>
-                  ))}
-                </div>
-                {groups.length > 1 && (
-                  <div className="mt-1 flex justify-between text-[12.5px] font-semibold">
-                    <span>소계</span>
-                    <span>{formatPrice(groupTotal)}</span>
                   </div>
                 )}
               </div>
