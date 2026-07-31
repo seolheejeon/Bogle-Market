@@ -67,6 +67,12 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     detailBlocks: catalog?.detailBlocks,
     // 카탈로그 상품의 공유 재고를 그대로 내려준다 — 리스팅 자체엔 재고가 없다.
     stock: catalog?.stock,
+    minQty: catalog?.minQty,
+    shippingFee: catalog?.shippingFee,
+    freeShippingThreshold: catalog?.freeShippingThreshold,
+    courierCode: catalog?.courierCode,
+    fulfillmentType: catalog?.fulfillmentType,
+    shipsAt: catalog?.shipsAt,
     visible: listing.visible,
     optionGroups: mergeOptionStock(catalog?.optionGroups, listing.optionStock),
     // listing.optionStock은 이미 comboKey -> stock 맵이라 그대로 내려주면 된다.
@@ -251,6 +257,12 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
         description: input.description,
         base_price: input.basePrice ?? 0,
         stock: input.stock ?? null,
+        min_qty: input.minQty ?? 1,
+        shipping_fee: input.shippingFee ?? 0,
+        free_shipping_threshold: input.freeShippingThreshold ?? 0,
+        courier_code: input.courierCode ?? null,
+        fulfillment_type: input.fulfillmentType ?? "same_day",
+        ships_at: input.shipsAt ?? null,
       })
       .select()
       .single();
@@ -298,6 +310,12 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     // "무제한"으로 비우는 것도 유효한 값 변경이라, patch.stock이 undefined인
     // 채로 명시적으로 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
     if ("stock" in patch) row.stock = patch.stock ?? null;
+    if (patch.minQty !== undefined) row.min_qty = patch.minQty;
+    if (patch.shippingFee !== undefined) row.shipping_fee = patch.shippingFee;
+    if (patch.freeShippingThreshold !== undefined) row.free_shipping_threshold = patch.freeShippingThreshold;
+    if ("courierCode" in patch) row.courier_code = patch.courierCode ?? null;
+    if (patch.fulfillmentType !== undefined) row.fulfillment_type = patch.fulfillmentType;
+    if ("shipsAt" in patch) row.ships_at = patch.shipsAt ?? null;
     if (Object.keys(row).length > 0) {
       const { error } = await supabase.from("products").update(row).eq("id", catalogProductId);
       if (error) {
@@ -686,6 +704,10 @@ export interface NewOrderInput {
   paymentMethod: PaymentMethod;
   items: OrderItem[];
   total: number;
+  // 이 주문에 포함된 택배 배송비(무료배송 적용 후) — 이미 total에 더해진
+  // 값을 그대로 스냅샷으로 저장해둔다. 안 주면 0(문고리/사다드림, 또는
+  // 배송비 없는 택배).
+  shippingFee?: number;
 }
 
 // 사다드림/특가처럼 STRICT_DEADLINE 정책인 이벤트만 마감 후 주문을 막는다 — 문고리/
@@ -698,8 +720,28 @@ async function assertEventOrderable(eventId: string): Promise<void> {
   }
 }
 
+// 체크아웃 화면에서 이미 막지만, createOrder를 거치는 모든 경로(다른 화면이
+// 생기거나 실수로 검증을 건너뛰어도)에서 한 번 더 최소 구매 수량을 검증한다.
+// Supabase 모드는 create_order RPC 안에서도 같은 검증을 한 번 더 한다(진짜
+// "서버" 검증) — 여기 있는 건 어느 모드든 공통으로 도는 클라이언트 쪽 방어선.
+async function assertMinQuantities(items: OrderItem[]): Promise<void> {
+  const events = await listEvents();
+  for (const item of items) {
+    for (const event of events) {
+      const product = event.products.find((p) => p.id === item.productId);
+      if (!product) continue;
+      const minQty = product.minQty ?? 1;
+      if (item.quantity < minQty) {
+        throw new Error(`${product.name}은(는) 최소 ${minQty}개부터 주문할 수 있어요.`);
+      }
+      break;
+    }
+  }
+}
+
 export async function createOrder(input: NewOrderInput): Promise<Order> {
   await assertEventOrderable(input.eventId);
+  await assertMinQuantities(input.items);
   const number = orderNumber();
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
@@ -736,6 +778,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
         options: item.options ?? [],
         stock_value_ids: item.stockComboValueIds ?? [],
       })),
+      p_shipping_fee: input.shippingFee ?? 0,
     });
     if (error) throw error;
     const orderRow = {
@@ -758,6 +801,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       courier_code: null,
       tracking_number: null,
       total: input.total,
+      shipping_fee: input.shippingFee ?? 0,
       created_at: createdAt,
     };
     for (const item of input.items) {
@@ -789,6 +833,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     trackingNumber: null,
     items: input.items,
     total: input.total,
+    shippingFee: input.shippingFee ?? 0,
     createdAt: new Date().toISOString(),
   };
   saveOrders([order, ...loadOrders()]);
@@ -1364,6 +1409,12 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     detailBlocks: row.detail_blocks && row.detail_blocks.length > 0 ? row.detail_blocks : undefined,
     basePrice: row.base_price ?? 0,
     stock: row.stock ?? undefined,
+    minQty: row.min_qty ?? 1,
+    shippingFee: row.shipping_fee ?? 0,
+    freeShippingThreshold: row.free_shipping_threshold ?? 0,
+    courierCode: row.courier_code ?? undefined,
+    fulfillmentType: row.fulfillment_type ?? "same_day",
+    shipsAt: row.ships_at ?? undefined,
     // product_costs는 1:1 관계라 PostgREST가 보통 객체로 embed하지만, 관계
     // 감지 방식에 따라 배열로 올 수도 있어 양쪽 다 방어적으로 처리한다.
     // RLS상 비관리자에게는 이 값 자체가 null로 오므로 costPrice가 그냥
@@ -1394,6 +1445,12 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     detailBlocks: catalog.detail_blocks && catalog.detail_blocks.length > 0 ? catalog.detail_blocks : undefined,
     // 카탈로그 상품(products.stock)의 공유 재고를 그대로 내려준다.
     stock: catalog.stock ?? undefined,
+    minQty: catalog.min_qty ?? 1,
+    shippingFee: catalog.shipping_fee ?? 0,
+    freeShippingThreshold: catalog.free_shipping_threshold ?? 0,
+    courierCode: catalog.courier_code ?? undefined,
+    fulfillmentType: catalog.fulfillment_type ?? "same_day",
+    shipsAt: catalog.ships_at ?? undefined,
     visible: row.visible ?? true,
     optionGroups: mergeSupabaseOptionStock(mapSupabaseOptionGroups(catalog.product_option_groups), row.event_option_stock),
     optionStockByCombo: optionStockByComboFromRows(row.event_option_stock),
@@ -1452,6 +1509,7 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     trackingNumber: row.tracking_number ?? null,
     items,
     total: row.total,
+    shippingFee: row.shipping_fee ?? 0,
     createdAt: row.created_at,
   };
 }

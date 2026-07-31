@@ -36,7 +36,7 @@ export function ProductGridCard({ product, rankBadge, closed }: { product: Produ
             옵션선택
           </Link>
         ) : (
-          <QtyControl productId={product.id} max={product.stock} />
+          <QtyControl productId={product.id} max={product.stock} minQty={product.minQty} />
         )}
       </div>
     </div>

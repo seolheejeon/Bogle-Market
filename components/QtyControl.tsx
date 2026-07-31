@@ -6,16 +6,20 @@ import { useCart } from "@/lib/cart-context";
 // undefined면 재고 제한 없음. closed는 이벤트 자체가 STRICT_DEADLINE 정책으로
 // 마감된 경우(lib/order-policy.ts) — 재고와 별개로 이 상품을 담을 수 없다는
 // 뜻. optionValueIds는 이 조합이 장바구니의 어느 줄에 해당하는지 구분하는
-// 키 — 안 주면(옵션 없는 상품) 빈 배열과 동일하게 취급된다.
+// 키 — 안 주면(옵션 없는 상품) 빈 배열과 동일하게 취급된다. minQty(기본 1)는
+// 처음 담을 때 시작 수량이자, 그 밑으로는 감소 버튼으로 못 내려가는 하한선 —
+// 완전히 빼려면(0으로) 이 컨트롤이 아니라 별도 삭제 동작을 써야 한다(CartView).
 export function QtyControl({
   productId,
   optionValueIds,
   max,
+  minQty = 1,
   closed,
 }: {
   productId: string;
   optionValueIds?: string[];
   max?: number;
+  minQty?: number;
   closed?: boolean;
 }) {
   const { getQty, changeQty } = useCart();
@@ -35,7 +39,7 @@ export function QtyControl({
         onClick={(e) => {
           e.stopPropagation();
           e.preventDefault();
-          changeQty(productId, 1, optionValueIds);
+          changeQty(productId, minQty, optionValueIds);
         }}
       >
         +
@@ -43,10 +47,12 @@ export function QtyControl({
     );
   }
   const atMax = max !== undefined && qty >= max;
+  const atMin = qty <= minQty;
   return (
     <div className="flex items-center gap-1.5">
       <button
-        className="h-[26px] w-[26px] rounded-full border border-border bg-bg-card text-sm text-text"
+        className="h-[26px] w-[26px] rounded-full border border-border bg-bg-card text-sm text-text disabled:opacity-40"
+        disabled={atMin}
         onClick={(e) => {
           e.stopPropagation();
           e.preventDefault();

@@ -86,6 +86,19 @@ create table if not exists products (
   -- "상품 관리"(/admin/products) 화면에서만 하고, 이벤트 관리 화면에서는
   -- 손대지 않는다(Epic 1 Phase 3).
   stock integer check (stock is null or stock >= 0),
+  -- 최소 구매 수량 — 상품 상세/빠른 담기는 항상 이 수량으로 시작하고, 장바구니
+  -- 등에서 수량을 줄여도 이 밑으로는 못 내려간다(완전히 빼려면 삭제해야 함).
+  min_qty integer not null default 1 check (min_qty >= 1),
+  -- 택배 배송비 — 상품(카탈로그) 단위로 관리한다(리스팅/이벤트 단위가 아님).
+  -- 같은 상품이 여러 이벤트에 걸려도 배송비 정책은 하나. free_shipping_threshold가
+  -- 0이면 무료배송 미사용, 0보다 크면 이 상품의 장바구니 내 소계가 그 금액
+  -- 이상일 때 배송비가 0원이 된다. courier_code는 COURIER_OPTIONS(types/index.ts)
+  -- 코드값. fulfillment_type이 'scheduled'일 때만 ships_at이 의미를 가진다.
+  shipping_fee integer not null default 0 check (shipping_fee >= 0),
+  free_shipping_threshold integer not null default 0 check (free_shipping_threshold >= 0),
+  courier_code text,
+  fulfillment_type text not null default 'same_day' check (fulfillment_type in ('same_day', 'rolling', 'scheduled')),
+  ships_at date,
   created_at timestamptz not null default now()
 );
 
@@ -228,6 +241,11 @@ create table if not exists orders (
   courier_code text,
   tracking_number text,
   total integer not null check (total >= 0),
+  -- 이 주문에 포함된 택배 배송비 합계 스냅샷(상품별 배송비 - 무료배송 적용
+  -- 후) — total에 이미 더해져 있는 값이지만, 나중에 상품의 배송비 정책이
+  -- 바뀌어도 과거 주문 내역이 영향받지 않도록 따로 기록해둔다(price_snapshot과
+  -- 같은 이유). 문고리/사다드림 주문이나 배송비가 없는 택배 주문은 0.
+  shipping_fee integer not null default 0 check (shipping_fee >= 0),
   created_at timestamptz not null default now()
 );
 
@@ -636,6 +654,10 @@ $$;
 -- 완전히 우회해서 이 문제를 근본적으로 없앤다. 회원 주문의 profile_id
 -- 검증(자기 자신 것만 만들 수 있어야 함)은 기존 INSERT 정책이 하던 일을
 -- 함수 안에서 그대로 재현한다.
+-- p_shipping_fee가 새로 추가된 파라미터라 인자 개수가 달라져서 create or
+-- replace만으로는 기존 16개짜리 시그니처가 별도 오버로드로 남을 수 있다 —
+-- 먼저 지우고 새로 만든다(schema.sql 히스토리의 다른 함수들과 동일한 패턴).
+drop function if exists create_order(uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, text, text, integer, timestamptz, jsonb);
 create or replace function create_order(
   p_id uuid,
   p_order_number text,
@@ -652,24 +674,41 @@ create or replace function create_order(
   p_payment_method text,
   p_total integer,
   p_created_at timestamptz,
-  p_items jsonb
+  p_items jsonb,
+  p_shipping_fee integer default 0
 )
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_bad_item record;
 begin
   if p_profile_id is not null and p_profile_id <> auth.uid() then
     raise exception 'profile_id must match the authenticated user';
   end if;
 
+  -- 최소 구매 수량 서버 검증 — 상품상세/장바구니에서 이미 막지만, RPC를 직접
+  -- 호출하는 경우까지 대비해 여기서 한 번 더 막는다(체크아웃의 "서버 검증").
+  select i->>'product_name' as name, (i->>'quantity')::integer as qty, p.min_qty as min_qty
+  into v_bad_item
+  from jsonb_array_elements(p_items) as i
+  join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
+  join products p on p.id = ep.product_id
+  where (i->>'quantity')::integer < p.min_qty
+  limit 1;
+
+  if v_bad_item.name is not null then
+    raise exception '%은(는) 최소 %개부터 주문할 수 있어요.', v_bad_item.name, v_bad_item.min_qty;
+  end if;
+
   insert into orders (
     id, order_number, event_id, batch_id, profile_id, guest_name, guest_phone, guest_pin,
-    recipient_name, recipient_phone, address_snapshot, apartment_name, payment_method, status, total, created_at
+    recipient_name, recipient_phone, address_snapshot, apartment_name, payment_method, status, total, shipping_fee, created_at
   ) values (
     p_id, p_order_number, p_event_id, p_batch_id, p_profile_id, p_guest_name, p_guest_phone, p_guest_pin,
-    p_recipient_name, p_recipient_phone, p_address_snapshot, p_apartment_name, p_payment_method, 'wait', p_total, p_created_at
+    p_recipient_name, p_recipient_phone, p_address_snapshot, p_apartment_name, p_payment_method, 'wait', p_total, p_shipping_fee, p_created_at
   );
 
   insert into order_items (order_id, event_product_id, product_name, price_snapshot, quantity, options, stock_value_ids)

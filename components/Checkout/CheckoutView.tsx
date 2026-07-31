@@ -9,6 +9,7 @@ import { isEventOrderable } from "@/lib/order-policy";
 import { useCart, type CartLine } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { unitPrice, maxQtyForSelection, optionSelectionLabel, buildOptionSnapshot, comboValueIds } from "@/lib/product-options";
+import { totalShippingFee } from "@/lib/shipping";
 import { PAYMENT_METHODS, allowedPaymentMethods } from "@/lib/payments";
 import { EVENT_TYPE_LABEL, type EventType } from "@/types";
 import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
@@ -100,6 +101,16 @@ export function CheckoutView() {
     return item.product.deliveryType ?? item.event.type;
   }
 
+  // 이 이벤트-주문에 포함된 택배 상품들의 배송비 합계 — 상품(카탈로그) 단위로
+  // 한 번만 부과되고, 무료배송 기준을 넘으면 0원(lib/shipping.ts). 문고리/
+  // 사다드림 이벤트는 items에 PARCEL 상품이 없으니 자연히 0이 된다.
+  function groupShippingFee(group: { event: MarketEvent; items: typeof items }): number {
+    const parcelItems = group.items.filter((i) => deliveryTypeOf(i) === "PARCEL");
+    return totalShippingFee(parcelItems.map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty })));
+  }
+
+  const totalShippingAll = groups.reduce((sum, g) => sum + groupShippingFee(g), 0);
+
   // 결제수단은 이벤트가 아니라 실질 배송유형 기준으로 제한되므로(사다드림은
   // 무통장만) 장바구니 전체를 유형별로 다시 묶어서 결제수단 선택 UI와
   // 기본값 계산에 쓴다.
@@ -151,6 +162,13 @@ export function CheckoutView() {
       );
       return;
     }
+    const underMinQty = items.filter((i) => i.line.qty < (i.product.minQty ?? 1));
+    if (underMinQty.length > 0) {
+      setError(
+        `최소 구매 수량 미만인 상품이 있어요: ${underMinQty.map((i) => `${i.product.name}(최소 ${i.product.minQty}개)`).join(", ")}. 장바구니에서 수량을 늘려주세요.`,
+      );
+      return;
+    }
     const closedGroups = groups.filter((g) => !isEventOrderable(g.event));
     if (closedGroups.length > 0) {
       setError(`마감되어 더 이상 주문할 수 없는 이벤트가 있어요: ${closedGroups.map((g) => g.event.title).join(", ")}. 장바구니에서 빼주세요.`);
@@ -173,7 +191,9 @@ export function CheckoutView() {
       const batchId = crypto.randomUUID();
       const createdOrders: Order[] = [];
       for (const group of groups) {
-        const groupTotal = group.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
+        const groupSubtotal = group.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
+        const shippingFee = groupShippingFee(group);
+        const groupTotal = groupSubtotal + shippingFee;
         const groupNeedsEntranceMethod = group.items.some((i) => (i.product.deliveryType ?? group.event.type) !== "PARCEL");
         // 이벤트 하나는 실질 배송유형이 보통 하나로 통일돼 있으므로 대표로
         // 첫 상품의 유형을 기준삼아 그 유형에 맞게 선택된 결제수단을 적용한다.
@@ -205,6 +225,7 @@ export function CheckoutView() {
             stockComboValueIds: comboValueIds(i.product, i.line.optionValueIds).length > 0 ? comboValueIds(i.product, i.line.optionValueIds) : undefined,
           })),
           total: groupTotal,
+          shippingFee,
         });
         createdOrders.push(order);
       }
@@ -267,10 +288,12 @@ export function CheckoutView() {
         <div className="flex flex-col gap-5">
           {deliveryTypesPresent.map((type) => {
             const typeGroups = groups.filter((g) => deliveryTypeOf(g.items[0]) === type);
-            const typeTotal = typeGroups.reduce(
+            const typeSubtotal = typeGroups.reduce(
               (sum, g) => sum + g.items.reduce((s, i) => s + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0),
               0,
             );
+            const typeShipping = typeGroups.reduce((sum, g) => sum + groupShippingFee(g), 0);
+            const typeTotal = typeSubtotal + typeShipping;
             const selected = methodFor(type);
             return (
               <div key={type} className="rounded-xl border border-border p-3">
@@ -283,7 +306,8 @@ export function CheckoutView() {
                 )}
                 <div className="flex flex-col gap-3">
                   {typeGroups.map((g) => {
-                    const groupTotal = g.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
+                    const groupSubtotal = g.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
+                    const shippingFee = groupShippingFee(g);
                     return (
                       <div key={g.event.id}>
                         <div className="mb-1 flex items-center justify-between">
@@ -301,10 +325,16 @@ export function CheckoutView() {
                             </div>
                           ))}
                         </div>
+                        {type === "PARCEL" && (
+                          <div className="mt-0.5 flex justify-between text-[11.5px] text-text-muted">
+                            <span>배송비</span>
+                            <span>{shippingFee > 0 ? formatPrice(shippingFee) : "무료"}</span>
+                          </div>
+                        )}
                         {typeGroups.length > 1 && (
                           <div className="mt-0.5 flex justify-between text-[11.5px] font-semibold">
                             <span>소계</span>
-                            <span>{formatPrice(groupTotal)}</span>
+                            <span>{formatPrice(groupSubtotal + shippingFee)}</span>
                           </div>
                         )}
                       </div>
@@ -339,9 +369,17 @@ export function CheckoutView() {
             );
           })}
         </div>
-        <div className="mt-3.5 flex justify-between border-t border-border pt-3.5 text-base font-extrabold">
+        {totalShippingAll > 0 && (
+          <div className="mt-3.5 flex justify-between border-t border-border pt-3.5 text-[13px] text-text-muted">
+            <span>상품 + 배송비</span>
+            <span>
+              {formatPrice(total)} + {formatPrice(totalShippingAll)}
+            </span>
+          </div>
+        )}
+        <div className={`flex justify-between text-base font-extrabold ${totalShippingAll > 0 ? "mt-1" : "mt-3.5 border-t border-border pt-3.5"}`}>
           <span>총 주문 금액</span>
-          <span>{formatPrice(total)}</span>
+          <span>{formatPrice(total + totalShippingAll)}</span>
         </div>
 
         {error && <p className="mt-3 text-[12.5px] font-semibold text-red-600">{error}</p>}

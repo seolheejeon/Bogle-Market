@@ -78,6 +78,19 @@ export interface CatalogProduct {
   // 입력/수정은 "상품 관리"(/admin/products)에서만 하고, 이벤트 관리
   // 화면(리스팅)에는 재고 입력란이 없다(Epic 1 Phase 3).
   stock?: number;
+  // 최소 구매 수량 — 없으면 1(제한 없음과 동일). 상품 상세/빠른 담기가 항상
+  // 이 수량으로 시작하고, 장바구니 등에서 이 밑으로는 못 내려간다.
+  minQty?: number;
+  // 택배 배송비 — 상품(카탈로그) 단위로 관리한다. 없으면 0(배송비 없음).
+  shippingFee?: number;
+  // 이 상품의 장바구니 내 소계가 이 금액 이상이면 배송비가 0원이 된다. 0(또는
+  // 없음)이면 무료배송 미사용.
+  freeShippingThreshold?: number;
+  // COURIER_OPTIONS의 code값. 택배가 아니거나 아직 안 정했으면 undefined.
+  courierCode?: string;
+  fulfillmentType?: FulfillmentType;
+  // fulfillmentType이 "scheduled"일 때만 의미 있는 출고예정일(YYYY-MM-DD).
+  shipsAt?: string;
   // 색상/사이즈/중량/추가옵션 등 — 신발/의류/식품/과일/묶음상품 어디든 같은
   // 구조로 표현하기 위한 유연한 옵션 그룹 목록. 정렬 순서(sortOrder)대로 온다.
   optionGroups?: ProductOptionGroup[];
@@ -112,6 +125,14 @@ export interface Product {
   // 이 리스팅만의 독립된 값이 아니라, 같은 상품을 쓰는 다른 이벤트와 실시간
   // 공유된다. undefined = 재고 제한 없음. 0이 되면 품절 처리된다.
   stock?: number;
+  // 카탈로그(CatalogProduct)에서 그대로 내려오는 값들 — 리스팅별로 달라지지
+  // 않는다(origin/weight와 동일한 성격).
+  minQty?: number;
+  shippingFee?: number;
+  freeShippingThreshold?: number;
+  courierCode?: string;
+  fulfillmentType?: FulfillmentType;
+  shipsAt?: string;
   // false면 고객 화면(그리드/이벤트 상세 등)에서 숨김 — 상품은 남겨두되 잠시
   // 판매만 중단하고 싶을 때(예: 다음 회차 준비 중) 삭제 없이 끄는 용도.
   visible?: boolean;
@@ -304,6 +325,9 @@ export interface Order {
   trackingNumber: string | null;
   items: OrderItem[];
   total: number;
+  // 이 주문에 포함된 택배 배송비 스냅샷(무료배송 적용 후 값) — total에 이미
+  // 더해져 있다. 문고리/사다드림 주문이나 배송비 없는 택배 주문은 0.
+  shippingFee: number;
   createdAt: string; // ISO
 }
 
@@ -336,6 +360,16 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   card: "카드 결제",
   kakaopay: "카카오페이",
   incheon_eum: "인천 이음카드",
+};
+
+// 택배 상품의 출고 방식 — 상품(카탈로그) 단위 설정. "scheduled"일 때만
+// CatalogProduct.shipsAt(출고예정일)이 의미를 가진다.
+export type FulfillmentType = "same_day" | "rolling" | "scheduled";
+
+export const FULFILLMENT_TYPE_LABEL: Record<FulfillmentType, string> = {
+  same_day: "당일발송",
+  rolling: "순차출고",
+  scheduled: "출고예정일 지정",
 };
 
 // 스마트택배(SweetTracker) API의 택배사 코드(t_code) 기준 — 배송조회 API

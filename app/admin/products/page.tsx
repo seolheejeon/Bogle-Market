@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { listCatalogProducts, createCatalogProduct, updateCatalogProduct, deleteCatalogProduct, listEvents, addEventProduct, removeEventProduct } from "@/lib/data";
-import type { CatalogProduct, MarketEvent, ProductDetailBlock, ProductOptionGroup } from "@/types";
-import { EVENT_TYPE_LABEL } from "@/types";
+import type { CatalogProduct, FulfillmentType, MarketEvent, ProductDetailBlock, ProductOptionGroup } from "@/types";
+import { EVENT_TYPE_LABEL, COURIER_OPTIONS, FULFILLMENT_TYPE_LABEL } from "@/types";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { PhotoUploader } from "@/components/admin/PhotoUploader";
 import { DetailBlockEditor } from "@/components/admin/DetailBlockEditor";
@@ -105,6 +105,8 @@ export default function AdminProductsPage() {
                     {p.costPrice !== undefined && ` · 원가 ${formatPrice(p.costPrice)}`}
                     {" · "}
                     재고 {p.stock !== undefined ? `${p.stock}개` : "무제한"}
+                    {(p.minQty ?? 1) > 1 && ` · 최소 ${p.minQty}개`}
+                    {(p.shippingFee ?? 0) > 0 && ` · 배송비 ${formatPrice(p.shippingFee ?? 0)}`}
                   </p>
                 </div>
                 <div className="flex flex-wrap justify-end gap-1.5">
@@ -147,6 +149,14 @@ function CatalogProductForm({
   const [basePrice, setBasePrice] = useState(initial?.basePrice !== undefined ? String(initial.basePrice) : "");
   const [costPrice, setCostPrice] = useState(initial?.costPrice !== undefined ? String(initial.costPrice) : "");
   const [stock, setStock] = useState(initial?.stock !== undefined ? String(initial.stock) : "");
+  const [minQty, setMinQty] = useState(initial?.minQty !== undefined ? String(initial.minQty) : "1");
+  const [shippingFee, setShippingFee] = useState(initial?.shippingFee !== undefined ? String(initial.shippingFee) : "");
+  const [freeShippingThreshold, setFreeShippingThreshold] = useState(
+    initial?.freeShippingThreshold !== undefined ? String(initial.freeShippingThreshold) : "",
+  );
+  const [courierCode, setCourierCode] = useState(initial?.courierCode ?? "");
+  const [fulfillmentType, setFulfillmentType] = useState<FulfillmentType>(initial?.fulfillmentType ?? "same_day");
+  const [shipsAt, setShipsAt] = useState(initial?.shipsAt ?? "");
   const [origin, setOrigin] = useState(initial?.origin ?? "");
   const [weight, setWeight] = useState(initial?.weight ?? "");
   const [storage, setStorage] = useState(initial?.storage ?? "");
@@ -175,6 +185,12 @@ function CatalogProductForm({
         basePrice: basePrice.trim() === "" ? 0 : Math.max(0, Number(basePrice) || 0),
         costPrice: costPrice.trim() === "" ? 0 : Math.max(0, Number(costPrice) || 0),
         stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
+        minQty: minQty.trim() === "" ? 1 : Math.max(1, Number(minQty) || 1),
+        shippingFee: shippingFee.trim() === "" ? 0 : Math.max(0, Number(shippingFee) || 0),
+        freeShippingThreshold: freeShippingThreshold.trim() === "" ? 0 : Math.max(0, Number(freeShippingThreshold) || 0),
+        courierCode: courierCode || undefined,
+        fulfillmentType,
+        shipsAt: fulfillmentType === "scheduled" && shipsAt ? shipsAt : undefined,
         origin: origin || undefined,
         weight: weight || undefined,
         storage: storage || undefined,
@@ -245,10 +261,81 @@ function CatalogProductForm({
             onChange={(e) => setStock(e.target.value)}
           />
         </label>
+        <label className="min-w-[110px] flex-1 text-[11.5px] font-semibold text-text-muted">
+          최소 구매 수량
+          <input
+            className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+            placeholder="1"
+            type="number"
+            min={1}
+            value={minQty}
+            onChange={(e) => setMinQty(e.target.value)}
+          />
+        </label>
       </div>
       <p className="-mt-1.5 text-[11px] text-text-muted">
-        새 이벤트에 이 상품을 추가하면 기준 판매가·원가가 기본값으로 채워지고, 그 회차에서만 다르게(2+1 묶음 등) 바꿀 수 있어요. 재고는 이 상품을 쓰는 모든 이벤트가 실시간으로 함께 봐요 — 한 회차에서 주문이 들어가면 다른 회차 재고도 즉시 줄어들어요.
+        새 이벤트에 이 상품을 추가하면 기준 판매가·원가가 기본값으로 채워지고, 그 회차에서만 다르게(2+1 묶음 등) 바꿀 수 있어요. 재고는 이 상품을 쓰는 모든 이벤트가 실시간으로 함께 봐요 — 한 회차에서 주문이 들어가면 다른 회차 재고도 즉시 줄어들어요. 최소 구매 수량은 상품 상세/빠른 담기가 항상 이 수량으로 시작하고, 이 밑으로는 수량을 줄일 수 없어요.
       </p>
+
+      <div className="rounded-[9px] border border-border p-3">
+        <p className="mb-2 text-[12px] font-bold text-text-muted">택배 배송비 (택배로 팔 때만 적용돼요)</p>
+        <div className="flex flex-wrap gap-2">
+          <label className="min-w-[110px] flex-1 text-[11.5px] font-semibold text-text-muted">
+            배송비
+            <input
+              className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+              placeholder="0"
+              type="number"
+              min={0}
+              value={shippingFee}
+              onChange={(e) => setShippingFee(e.target.value)}
+            />
+          </label>
+          <label className="min-w-[140px] flex-1 text-[11.5px] font-semibold text-text-muted">
+            무료배송 기준금액 <span className="font-normal">(0이면 미사용)</span>
+            <input
+              className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+              placeholder="0"
+              type="number"
+              min={0}
+              value={freeShippingThreshold}
+              onChange={(e) => setFreeShippingThreshold(e.target.value)}
+            />
+          </label>
+          <label className="min-w-[110px] flex-1 text-[11.5px] font-semibold text-text-muted">
+            택배사
+            <select
+              className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+              value={courierCode}
+              onChange={(e) => setCourierCode(e.target.value)}
+            >
+              <option value="">선택 안 함</option>
+              {COURIER_OPTIONS.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <p className="mt-2 mb-1.5 text-[11.5px] font-bold text-text-muted">출고 방식</p>
+        <div className="flex flex-wrap gap-3">
+          {(Object.keys(FULFILLMENT_TYPE_LABEL) as FulfillmentType[]).map((ft) => (
+            <label key={ft} className="flex items-center gap-1.5 text-[12.5px]">
+              <input type="radio" name="fulfillmentType" checked={fulfillmentType === ft} onChange={() => setFulfillmentType(ft)} />
+              {FULFILLMENT_TYPE_LABEL[ft]}
+            </label>
+          ))}
+        </div>
+        {fulfillmentType === "scheduled" && (
+          <input
+            className="mt-2 w-full max-w-[180px] rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+            type="date"
+            value={shipsAt}
+            onChange={(e) => setShipsAt(e.target.value)}
+          />
+        )}
+      </div>
       <textarea
         className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
         rows={3}

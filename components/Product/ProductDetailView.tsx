@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { findProductWithEvent } from "@/lib/data";
 import type { MarketEvent, Product } from "@/types";
-import { EVENT_TYPE_LABEL } from "@/types";
+import { EVENT_TYPE_LABEL, COURIER_LABEL, FULFILLMENT_TYPE_LABEL } from "@/types";
 import { formatPrice, formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
 import { isEventOrderable } from "@/lib/order-policy";
 import { useCart } from "@/lib/cart-context";
@@ -94,6 +94,12 @@ export function ProductDetailView({ productId }: { productId: string }) {
     setPendingLines([]);
   }, [productId]);
 
+  // data가 로드되기 전엔 최소 구매 수량을 몰라 일단 1로 뒀다가, 로드되면
+  // 그 상품의 최소 구매 수량으로 다시 맞춘다("처음 진입 시 최소 구매 수량으로 시작").
+  useEffect(() => {
+    if (data) setQty(data.product.minQty ?? 1);
+  }, [data]);
+
   useEffect(() => () => {
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
   }, []);
@@ -171,8 +177,9 @@ export function ProductDetailView({ productId }: { productId: string }) {
   function selectOption(group: ProductOptionGroup, value: ProductOptionValue) {
     setOptionError(null);
     // 옵션 조합이 바뀌면 이전 조합 기준으로 고른 수량은 의미가 없어져서(재고
-    // 한도도 조합마다 다름) 항상 1개로 되돌린다 — 일반적인 쇼핑몰 UX.
-    setQty(1);
+    // 한도도 조합마다 다름) 이 상품의 최소 구매 수량으로 되돌린다 — 일반적인
+    // 쇼핑몰 UX(옵션 없는 상품 경로에서만 실제로 쓰이는 qty 상태).
+    setQty(product.minQty ?? 1);
     setSelected((prev) => {
       const current = prev[group.id] ?? [];
       if (group.multi) {
@@ -205,7 +212,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
         next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
         return next;
       }
-      return [...prev, { optionValueIds: selectedOptionValueIds, qty: 1 }];
+      return [...prev, { optionValueIds: selectedOptionValueIds, qty: product.minQty ?? 1 }];
     });
     setSelected({});
   }
@@ -214,7 +221,9 @@ export function ProductDetailView({ productId }: { productId: string }) {
     setPendingLines((prev) => {
       const line = prev[index];
       const newQty = line.qty + delta;
-      if (newQty <= 0) return prev.filter((_, i) => i !== index);
+      // 최소 구매 수량 밑으로는 이 버튼으로 못 내려간다 — 완전히 빼려면
+      // removePendingLine(삭제 버튼)을 써야 한다.
+      if (newQty < (product.minQty ?? 1)) return prev;
       const cap = remainingForIds(line.optionValueIds, index);
       if (cap !== undefined && newQty > cap) return prev;
       return prev.map((p, i) => (i === index ? { ...p, qty: newQty } : p));
@@ -368,7 +377,8 @@ export function ProductDetailView({ productId }: { productId: string }) {
                       <button
                         type="button"
                         onClick={() => adjustPendingQty(i, -1)}
-                        className="h-7 w-7 shrink-0 rounded-full border border-border text-[13px] text-text"
+                        disabled={line.qty <= (product.minQty ?? 1)}
+                        className="h-7 w-7 shrink-0 rounded-full border border-border text-[13px] text-text disabled:opacity-40"
                       >
                         −
                       </button>
@@ -395,6 +405,24 @@ export function ProductDetailView({ productId }: { productId: string }) {
             )}
           </div>
         )}
+
+        {(product.deliveryType ?? event.type) === "PARCEL" &&
+          (product.courierCode || (product.shippingFee ?? 0) > 0 || product.fulfillmentType) && (
+            <div className="mb-3 rounded-[10px] bg-bg-sunken p-3 text-[12.5px]">
+              <p className="mb-1 font-bold text-text-muted">배송 안내</p>
+              <div className="flex flex-col gap-0.5 text-text-muted">
+                {product.courierCode && <span>{COURIER_LABEL[product.courierCode] ?? product.courierCode}</span>}
+                <span>
+                  {FULFILLMENT_TYPE_LABEL[product.fulfillmentType ?? "same_day"]}
+                  {product.fulfillmentType === "scheduled" && product.shipsAt && ` (${product.shipsAt})`}
+                </span>
+                <span>
+                  {(product.shippingFee ?? 0) > 0 ? `배송비 ${formatPrice(product.shippingFee ?? 0)}` : "배송비 무료"}
+                  {(product.freeShippingThreshold ?? 0) > 0 && ` · ${formatPrice(product.freeShippingThreshold ?? 0)} 이상 무료배송`}
+                </span>
+              </div>
+            </div>
+          )}
 
         <div className="overflow-hidden rounded-[10px] border border-border">
           {[
@@ -465,8 +493,8 @@ export function ProductDetailView({ productId }: { productId: string }) {
               <div className="mb-2.5 flex items-center justify-center gap-4">
                 <button
                   className="h-[30px] w-[30px] rounded-full border border-border bg-bg-card text-[15px] text-text disabled:opacity-40"
-                  disabled={qty <= 1}
-                  onClick={() => setQty((q) => Math.max(1, q - 1))}
+                  disabled={qty <= (product.minQty ?? 1)}
+                  onClick={() => setQty((q) => Math.max(product.minQty ?? 1, q - 1))}
                 >
                   −
                 </button>
