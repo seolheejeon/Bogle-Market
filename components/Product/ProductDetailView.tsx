@@ -12,7 +12,7 @@ import { ProductDetailContent } from "@/components/Product/ProductDetailContent"
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
 import { ProductPhoto, isPhotoUrl } from "@/components/ProductPhoto";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
-import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount } from "@/lib/product-options";
+import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, comboKey } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 
 // A small clone of the product photo flies from the "담기" button to the
@@ -70,13 +70,17 @@ function flyToCart(fromEl: HTMLElement, photo: string) {
 
 export function ProductDetailView({ productId }: { productId: string }) {
   const router = useRouter();
-  const { getQty, changeQty } = useCart();
+  const { getQty, changeQty, lines } = useCart();
   const [data, setData] = useState<{ product: Product; event: MarketEvent } | null | undefined>(undefined);
   const [photoIndex, setPhotoIndex] = useState(0);
   // How many to add next — independent of the actual cart until "담기" is pressed.
   const [qty, setQty] = useState(1);
   // 그룹id -> 선택된 옵션값id 목록(single-select 그룹은 항상 길이 0/1).
   const [selected, setSelected] = useState<Record<string, string[]>>({});
+  // 옵션이 있는 상품은 "옵션 담기"를 누를 때마다 조합을 하나씩 이 목록에
+  // 쌓아두고(의류 쇼핑몰 UX), 마지막에 "총 N개 담기"로 한 번에 장바구니에
+  // 반영한다 — 서로 다른 조합을 한 번의 담기로 여러 개 고를 수 있게 하기 위함.
+  const [pendingLines, setPendingLines] = useState<{ optionValueIds: string[]; qty: number }[]>([]);
   const [optionError, setOptionError] = useState<string | null>(null);
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,6 +91,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
     setSelected({});
     setOptionError(null);
     setQty(1);
+    setPendingLines([]);
   }, [productId]);
 
   useEffect(() => () => {
@@ -130,6 +135,38 @@ export function ProductDetailView({ productId }: { productId: string }) {
   // 전체를 봐야 함) — 이 경우 버튼별 품절 표시 대신 위 comboSoldOut으로만
   // 안내한다. 그룹이 1개(또는 0개)일 때만 예전처럼 버튼에 바로 표시한다.
   const showPerButtonStock = stockTrackedGroupCount(product) <= 1;
+  // 옵션이 있는 상품은 조합을 여러 개 골라 쌓은 뒤 한 번에 담는 목록형 UX를
+  // 쓰고(hasOptions), 없는 상품은 예전처럼 수량 스텝퍼 + 바로 담기를 그대로 쓴다.
+  const hasOptions = (product.optionGroups ?? []).length > 0;
+
+  // 이 조합(재고관리 대상 값 기준)이 실제 장바구니 + 다른 대기 목록 줄에서
+  // 이미 얼마나 쓰이고 있는지 — excludeIndex는 "그 줄 자신은 빼고" 계산할 때
+  // 쓴다(그 줄이 가질 수 있는 최대 수량을 구할 때).
+  function stockUsedElsewhere(optionValueIds: string[], excludeIndex?: number): number {
+    const key = comboKey(product, optionValueIds);
+    if (key === "") return 0;
+    let used = 0;
+    for (const l of lines) {
+      if (l.productId === product.id && comboKey(product, l.optionValueIds) === key) used += l.qty;
+    }
+    pendingLines.forEach((p, i) => {
+      if (i === excludeIndex) return;
+      if (comboKey(product, p.optionValueIds) === key) used += p.qty;
+    });
+    return used;
+  }
+
+  function remainingForIds(optionValueIds: string[], excludeIndex?: number): number | undefined {
+    const max = maxQtyForSelection(product, optionValueIds);
+    if (max === undefined) return undefined;
+    return Math.max(0, max - stockUsedElsewhere(optionValueIds, excludeIndex));
+  }
+
+  const currentRemaining = remainingForIds(selectedOptionValueIds);
+  const noMoreToAdd = !selectionIncomplete && !comboSoldOut && currentRemaining !== undefined && currentRemaining <= 0;
+
+  const totalPendingQty = pendingLines.reduce((sum, l) => sum + l.qty, 0);
+  const totalPendingPrice = pendingLines.reduce((sum, l) => sum + unitPrice(product, l.optionValueIds) * l.qty, 0);
 
   function selectOption(group: ProductOptionGroup, value: ProductOptionValue) {
     setOptionError(null);
@@ -146,6 +183,49 @@ export function ProductDetailView({ productId }: { productId: string }) {
     });
   }
 
+  // 지금 고른 옵션 조합을 대기 목록에 한 줄 추가한다(똑같은 조합이 이미
+  // 있으면 수량만 1 더한다) — 그 다음 선택을 비워서 바로 다른 조합을 고를 수
+  // 있게 한다("의류 쇼핑몰처럼 선택한 옵션들이 목록으로 쌓이는" UX).
+  function addSelectionToList() {
+    const error = validateOptionSelection(product, selectedOptionValueIds);
+    if (error) {
+      setOptionError(error);
+      return;
+    }
+    if (currentRemaining !== undefined && currentRemaining <= 0) {
+      setOptionError("이 옵션 조합은 더 담을 수 있는 재고가 없어요.");
+      return;
+    }
+    setOptionError(null);
+    const key = [...selectedOptionValueIds].sort().join(",");
+    setPendingLines((prev) => {
+      const idx = prev.findIndex((p) => [...p.optionValueIds].sort().join(",") === key);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
+        return next;
+      }
+      return [...prev, { optionValueIds: selectedOptionValueIds, qty: 1 }];
+    });
+    setSelected({});
+  }
+
+  function adjustPendingQty(index: number, delta: number) {
+    setPendingLines((prev) => {
+      const line = prev[index];
+      const newQty = line.qty + delta;
+      if (newQty <= 0) return prev.filter((_, i) => i !== index);
+      const cap = remainingForIds(line.optionValueIds, index);
+      if (cap !== undefined && newQty > cap) return prev;
+      return prev.map((p, i) => (i === index ? { ...p, qty: newQty } : p));
+    });
+  }
+
+  function removePendingLine(index: number) {
+    setPendingLines((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  // 옵션 없는 상품은 예전처럼 수량 스텝퍼로 고른 뒤 바로 장바구니에 담는다.
   function addToCart() {
     const error = validateOptionSelection(product, selectedOptionValueIds);
     if (error) {
@@ -155,6 +235,19 @@ export function ProductDetailView({ productId }: { productId: string }) {
     changeQty(product.id, qty, selectedOptionValueIds);
     if (addButtonRef.current) flyToCart(addButtonRef.current, photos[photoIndex]);
     setQty(1);
+    setToastVisible(true);
+    if (toastTimeout.current) clearTimeout(toastTimeout.current);
+    toastTimeout.current = setTimeout(() => setToastVisible(false), 1800);
+  }
+
+  // 옵션 있는 상품은 대기 목록에 쌓아둔 조합들을 한 번에 장바구니로 반영한다.
+  function addPendingLinesToCart() {
+    if (pendingLines.length === 0) return;
+    for (const line of pendingLines) {
+      changeQty(product.id, line.qty, line.optionValueIds);
+    }
+    if (addButtonRef.current) flyToCart(addButtonRef.current, photos[photoIndex]);
+    setPendingLines([]);
     setToastVisible(true);
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
     toastTimeout.current = setTimeout(() => setToastVisible(false), 1800);
@@ -244,6 +337,65 @@ export function ProductDetailView({ productId }: { productId: string }) {
           </div>
         )}
 
+        {hasOptions && !closed && !soldOut && (
+          <div className="mb-4">
+            {selectionIncomplete ? (
+              <p className="mb-2 text-[12.5px] font-semibold text-text-muted">옵션을 모두 선택해 주세요.</p>
+            ) : comboSoldOut ? (
+              <p className="mb-2 text-[12.5px] font-semibold text-text-muted">선택하신 옵션 조합은 품절이에요.</p>
+            ) : noMoreToAdd ? (
+              <p className="mb-2 text-[12.5px] font-semibold text-text-muted">이 조합은 담을 수 있는 만큼 이미 담았어요.</p>
+            ) : null}
+            {optionError && <p className="mb-2 text-[12.5px] font-semibold text-red-600">{optionError}</p>}
+            <button
+              type="button"
+              onClick={addSelectionToList}
+              disabled={selectionIncomplete || comboSoldOut || noMoreToAdd}
+              className="w-full rounded-[9px] border border-accent py-2.5 text-[13px] font-bold text-accent disabled:opacity-40"
+            >
+              + 이 옵션 담기
+            </button>
+
+            {pendingLines.length > 0 && (
+              <div className="mt-3 flex flex-col gap-2 rounded-[10px] border border-border p-3">
+                {pendingLines.map((line, i) => {
+                  const cap = remainingForIds(line.optionValueIds, i);
+                  return (
+                    <div key={`${line.optionValueIds.join(",")}::${i}`} className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+                        {optionSelectionLabel(product, line.optionValueIds)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => adjustPendingQty(i, -1)}
+                        className="h-7 w-7 shrink-0 rounded-full border border-border text-[13px] text-text"
+                      >
+                        −
+                      </button>
+                      <span className="w-5 shrink-0 text-center text-[13px] font-bold">{line.qty}</span>
+                      <button
+                        type="button"
+                        onClick={() => adjustPendingQty(i, 1)}
+                        disabled={cap !== undefined && line.qty >= cap}
+                        className="h-7 w-7 shrink-0 rounded-full border border-border text-[13px] text-text disabled:opacity-40"
+                      >
+                        +
+                      </button>
+                      <button type="button" onClick={() => removePendingLine(i)} className="ml-1 shrink-0 text-[12px] font-semibold text-text-muted">
+                        삭제
+                      </button>
+                    </div>
+                  );
+                })}
+                <div className="mt-1 flex justify-between border-t border-border pt-2 text-[13px] font-bold">
+                  <span>총 {totalPendingQty}개</span>
+                  <span>{formatPrice(totalPendingPrice)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="overflow-hidden rounded-[10px] border border-border">
           {[
             ["원산지", product.origin],
@@ -278,42 +430,67 @@ export function ProductDetailView({ productId }: { productId: string }) {
             </div>
           )}
           {closed ? (
-            <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">마감된 이벤트라 더 이상 주문할 수 없어요.</p>
+            <>
+              <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">마감된 이벤트라 더 이상 주문할 수 없어요.</p>
+              <button className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40" disabled>
+                마감
+              </button>
+            </>
           ) : soldOut ? (
-            <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">품절된 상품이에요.</p>
-          ) : selectionIncomplete ? (
-            <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">옵션을 모두 선택해 주세요.</p>
-          ) : comboSoldOut ? (
-            <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">선택하신 옵션 조합은 품절이에요.</p>
+            <>
+              <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">품절된 상품이에요.</p>
+              <button className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40" disabled>
+                품절
+              </button>
+            </>
+          ) : hasOptions ? (
+            <>
+              {pendingLines.length > 0 && (
+                <div className="mb-2.5 flex items-center justify-between text-[13px]">
+                  <span className="font-semibold text-text-muted">담을 상품 {totalPendingQty}개</span>
+                  <span className="font-bold">{formatPrice(totalPendingPrice)}</span>
+                </div>
+              )}
+              <button
+                ref={addButtonRef}
+                className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40"
+                disabled={pendingLines.length === 0}
+                onClick={addPendingLinesToCart}
+              >
+                {pendingLines.length === 0 ? "옵션을 담아주세요" : `총 ${totalPendingQty}개 담기`}
+              </button>
+            </>
           ) : (
-            <div className="mb-2.5 flex items-center justify-center gap-4">
+            <>
+              <div className="mb-2.5 flex items-center justify-center gap-4">
+                <button
+                  className="h-[30px] w-[30px] rounded-full border border-border bg-bg-card text-[15px] text-text disabled:opacity-40"
+                  disabled={qty <= 1}
+                  onClick={() => setQty((q) => Math.max(1, q - 1))}
+                >
+                  −
+                </button>
+                <span className="w-5 text-center font-bold">{qty}</span>
+                <button
+                  className="h-[30px] w-[30px] rounded-full border border-border bg-bg-card text-[15px] text-text disabled:opacity-40"
+                  disabled={remaining !== undefined && qty >= remaining}
+                  onClick={() => setQty((q) => q + 1)}
+                >
+                  +
+                </button>
+                <span className="ml-auto text-[13px] font-bold text-text-muted">{formatPrice(qty * unitPriceWithOptions)}</span>
+              </div>
+              {optionError && <p className="mb-2.5 text-center text-[12.5px] font-semibold text-red-600">{optionError}</p>}
               <button
-                className="h-[30px] w-[30px] rounded-full border border-border bg-bg-card text-[15px] text-text disabled:opacity-40"
-                disabled={qty <= 1}
-                onClick={() => setQty((q) => Math.max(1, q - 1))}
+                ref={addButtonRef}
+                className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40"
+                disabled={soldOut || closed}
+                onClick={addToCart}
               >
-                −
+                장바구니 담기
               </button>
-              <span className="w-5 text-center font-bold">{qty}</span>
-              <button
-                className="h-[30px] w-[30px] rounded-full border border-border bg-bg-card text-[15px] text-text disabled:opacity-40"
-                disabled={remaining !== undefined && qty >= remaining}
-                onClick={() => setQty((q) => q + 1)}
-              >
-                +
-              </button>
-              <span className="ml-auto text-[13px] font-bold text-text-muted">{formatPrice(qty * unitPriceWithOptions)}</span>
-            </div>
+            </>
           )}
-          {optionError && <p className="mb-2.5 text-center text-[12.5px] font-semibold text-red-600">{optionError}</p>}
-          <button
-            ref={addButtonRef}
-            className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40"
-            disabled={soldOut || closed || selectionIncomplete || comboSoldOut}
-            onClick={addToCart}
-          >
-            {closed ? "마감" : soldOut || comboSoldOut ? "품절" : selectionIncomplete ? "옵션 선택" : "장바구니 담기"}
-          </button>
         </div>
       </div>
       <div className="h-[150px]" />
