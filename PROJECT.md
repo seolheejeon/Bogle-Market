@@ -422,7 +422,15 @@
 - **발송 트리거 3곳**: (1) 체크아웃에서 주문 생성 성공 직후, 이미 이 기기가 푸시를 켜둔 상태면 로그인 여부와 무관하게 "주문이 접수됐어요" 즉시 발송(방금 만든 구독을 그 자리에서 바로 씀 — 비회원은 이 순간 아니면 다시 찾아 보낼 방법이 없음) (2) 관리자가 주문 상태를 바꿀 때(`app/admin/page.tsx`의 `notifyStatusChange`) 기존 인앱 알림과 같은 제목/내용으로 그 회원 앞 구독에 발송(입금확인/배송시작/배송완료/환불완료/취소) (3) 관리자 공지 발송(`/admin/notifications`)에 "웹 푸시로도 보내기" 체크박스(기본 켬) — 전체 발송
 - `tsc`/`build` 통과 확인. 프로덕션 빌드(`next start`)로 서비스워커 등록/manifest 서빙/오프라인 폴백 페이지/푸시 발송 API의 인증 거부 동작까지 브라우저에서 직접 확인함. 실제 알림 수신(권한 허용 후 발송→수신)은 이 환경(자동화 브라우저)에서 알림 권한을 허용할 수 없어 코드 경로 검증까지만 진행 — 실제 브라우저로 배포 후 확인 필요
 - 참고: "사다드림 픽업 완료"는 현재 `done` 상태 문구가 배송/픽업 구분 없이 "배송이 완료됐어요"로 공용인데, 이건 이번 작업 범위 밖의 기존 문구라 그대로 재사용함(인앱 알림도 원래 이렇게 표시돼왔음) — 배송방식별로 문구를 분리하고 싶으면 별도로 요청해줄 것
-- ⚠️ **배포 시 확인 필요**: (1) 실제 Supabase 프로젝트에 `push_subscriptions` 테이블 + `save_push_subscription`/`delete_push_subscription` RPC 마이그레이션 미적용 — 대화에서 안내한 SQL을 SQL 에디터에서 먼저 실행할 것 (2) Netlify 환경변수에 `NEXT_PUBLIC_VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`(대화에서 생성해 전달한 값)와 `SUPABASE_SERVICE_ROLE_KEY`(Supabase 프로젝트 설정에서 직접 복사) 설정 필요 — 없으면 푸시 발송 API가 계속 `not_configured`를 반환해 아무 알림도 안 나감(PWA 설치/오프라인 자체는 이 키들과 무관하게 정상 동작함)
+- 마이그레이션 SQL 실행 + Netlify 환경변수(`NEXT_PUBLIC_VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`/`SUPABASE_SERVICE_ROLE_KEY`) 등록 완료(운영 환경 반영됨)
+
+**상품 공유 (Web Share API + OG 메타태그)**
+- 배경: 카카오톡/오픈채팅/블로그 등으로 상품을 쉽게 퍼뜨릴 수 있게 해서 마케팅 효과를 노리는 요청. 나중에 추천인 시스템(`?ref=`)을 붙일 걸 감안해 URL 생성 로직을 분리해달라는 요구도 포함
+- **공유 URL 유틸**(`lib/share.ts`): `buildProductShareUrl(id, { ref })` 하나로 상품 공유 링크를 만듦 — `ref` 옵션은 지금 아무도 안 넘기지만, 추천인 기능이 생기면 이 자리에 코드만 채우면 됨. 서버(OG 메타태그 생성)에서는 `NEXT_PUBLIC_SITE_URL`(없으면 `https://bogle-market.netlify.app`)을 기준으로, 클라이언트(공유 버튼)에서는 실제 접속 도메인(`window.location.origin`)을 기준으로 절대 URL을 만듦
+- **공유 버튼**(`components/ShareButton.tsx`): 상품 상세 sticky 헤더의 뒤로가기 반대편(🔗)에 배치. `navigator.share` 지원 브라우저(대부분 모바일)는 네이티브 공유 시트를 띄우고(제목/가격/소개/링크 포함), 미지원(대부분 데스크톱)은 링크를 클립보드에 복사한 뒤 "상품 링크가 복사되었습니다." 토스트를 보여줌(복사 자체가 막힌 극단적인 경우엔 `window.prompt`로 최후 폴백)
+- **OG/Twitter 메타태그**(`app/(shop)/product/[id]/page.tsx`의 `generateMetadata`): 상품 상세는 이미 클라이언트 컴포넌트(`ProductDetailView`)라 서버에서 별도로 최소 데이터만 조회하는 `lib/og.ts`(anon key로 `event_products`+`products` 조인, 공개 데이터라 인증 불필요)를 새로 둠 — 페이지 컴포넌트 자체는 그대로 두고 같은 라우트 파일에 `generateMetadata`만 얹어서 카카오톡/트위터 크롤러가 og:title(상품명)/og:description(가격+한줄설명)/og:image(대표사진, Storage 공개 URL)/og:url/twitter:card를 받아가게 함
+- `tsc`/`build` 통과 확인. 프로덕션 빌드에서 실제 상품 페이지의 og:*/twitter:* 메타태그가 정확한 값(가격 포함 설명, Storage 이미지 URL, 배포 도메인 기준 og:url)으로 렌더링되는 것과, 공유 버튼 클릭 시 클립보드 복사 성공 → 토스트 노출까지 브라우저에서 직접 확인함(이 자동화 브라우저 자체는 클립보드 쓰기 권한이 막혀 있어 API를 임시로 성공하도록 바꿔치기해서 토스트 UI 자체의 동작을 검증 — 실제 배포 환경의 HTTPS+사용자 제스처 클릭에서는 이 문제가 없음). 실제 카카오톡 미리보기(진짜 카카오 크롤러가 og 태그를 어떻게 렌더링하는지)는 배포 후 실제로 카카오톡에 링크를 붙여넣어 확인 필요 — og 태그 자체는 표준 스펙대로 채워짐
+- 마이그레이션 불필요(DB 스키마 변경 없음)
 
 # 진행 중인 기능
 

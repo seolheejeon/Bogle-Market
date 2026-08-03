@@ -11,6 +11,7 @@ import { useCart } from "@/lib/cart-context";
 import { ProductDetailContent } from "@/components/Product/ProductDetailContent";
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
 import { ProductPhoto, isPhotoUrl } from "@/components/ProductPhoto";
+import { ShareButton } from "@/components/ShareButton";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, comboKey } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
@@ -274,6 +275,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
           </p>
           <p className="truncate text-[13.5px] leading-tight font-extrabold">{product.name}</p>
         </div>
+        <ShareButton productId={product.id} name={product.name} price={product.price} />
       </div>
       <div className="p-4">
         <div className="relative flex aspect-square w-full items-center justify-center rounded-2xl bg-accent-soft text-[76px]">
