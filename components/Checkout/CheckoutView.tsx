@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { listEvents, createOrder, getDefaultAddress, updateAddress } from "@/lib/data";
 import { formatAddress, type MarketEvent, type Order, type PaymentMethod, type Product } from "@/types";
@@ -22,7 +23,7 @@ const DELIVERY_TYPE_ORDER: EventType[] = ["DOOR", "GROUP_BUY", "PARCEL"];
 
 export function CheckoutView() {
   const router = useRouter();
-  const { lines, clear } = useCart();
+  const { lines, setQty } = useCart();
   const { profile } = useAuth();
 
   const [events, setEvents] = useState<MarketEvent[] | null>(null);
@@ -38,6 +39,19 @@ export function CheckoutView() {
   const [methods, setMethods] = useState<Partial<Record<EventType, PaymentMethod>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 한 번의 체크아웃 시도에서 배송유형 그룹 중 일부만 주문 생성에 실패할 수
+  // 있다(재고 경합, 네트워크/DB 오류 등 — 카드/카카오페이도 아직 실제 PG 연동
+  // 전이라 무통장입금처럼 관리자가 수동 확인하는 방식이라, "결제 자체가
+  // 거절"되는 상황은 없고 "이 그룹의 주문 생성이 실패"하는 상황만 있다). 실패한
+  // 그룹 때문에 이미 성공한 다른 그룹의 주문까지 없던 일이 되면 안 되므로,
+  // 성공한 주문은 바로 장바구니에서 지워 확정하고 이 목록에 계속 쌓아두고,
+  // 실패한 그룹의 상품만 장바구니에 남겨서 "주문하기"를 다시 누르면 그 그룹만
+  // 재시도되게 한다.
+  const [completedOrders, setCompletedOrders] = useState<Order[]>([]);
+  const [failureNotice, setFailureNotice] = useState<string | null>(null);
+  // 재시도해도 같은 batchId를 유지해야 성공한 주문과 재시도로 성공한 주문이
+  // 계속 "한 번의 체크아웃"으로 묶여 보인다(OrderDetailView의 batchSiblings).
+  const [batchId] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     listEvents().then(setEvents);
@@ -176,6 +190,7 @@ export function CheckoutView() {
       return;
     }
     setSubmitting(true);
+    setFailureNotice(null);
     try {
       if (profile && saveAsDefault && defaultAddressId) {
         await updateAddress(defaultAddressId, profile.id, {
@@ -187,18 +202,29 @@ export function CheckoutView() {
           memo: address.memo.trim() || undefined,
         });
       }
-      // 여러 이벤트가 섞여 있으면 이벤트 수만큼 주문이 생기지만, 결제는 한
-      // 번만 하는 것처럼 보이도록 같은 batchId로 묶는다.
-      const batchId = crypto.randomUUID();
-      const createdOrders: Order[] = [];
-      for (const group of groups) {
-        const groupSubtotal = group.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
-        const shippingFee = groupShippingFee(group);
-        const groupTotal = groupSubtotal + shippingFee;
-        const groupNeedsEntranceMethod = group.items.some((i) => (i.product.deliveryType ?? group.event.type) !== "PARCEL");
-        // 이벤트 하나는 실질 배송유형이 보통 하나로 통일돼 있으므로 대표로
-        // 첫 상품의 유형을 기준삼아 그 유형에 맞게 선택된 결제수단을 적용한다.
-        const groupType = group.items.length > 0 ? deliveryTypeOf(group.items[0]) : group.event.type;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "배송지 저장 중 오류가 발생했어요.");
+      setSubmitting(false);
+      return;
+    }
+
+    // 그룹(배송유형)마다 독립적으로 주문을 만든다 — 하나를 큰 try로 묶어버리면
+    // 뒤쪽 그룹 하나가 실패했을 때(재고 경합/네트워크 오류 등) 이미 성공한
+    // 앞쪽 그룹까지 화면에는 "실패"로 보여버리고, 사용자가 다시 누르면 이미
+    // 만들어진 주문이 중복 생성될 위험이 있다. 그룹별로 개별 시도해서, 성공한
+    // 것은 바로 장바구니에서 지워 확정하고, 실패한 그룹의 상품만 장바구니에
+    // 남겨 "주문하기"를 다시 누르면 그 그룹만 재시도되게 한다.
+    const newlySucceeded: Order[] = [];
+    const failedTypes: { type: EventType; message: string }[] = [];
+    for (const group of groups) {
+      const groupSubtotal = group.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
+      const shippingFee = groupShippingFee(group);
+      const groupTotal = groupSubtotal + shippingFee;
+      const groupNeedsEntranceMethod = group.items.some((i) => (i.product.deliveryType ?? group.event.type) !== "PARCEL");
+      // 이벤트 하나는 실질 배송유형이 보통 하나로 통일돼 있으므로 대표로
+      // 첫 상품의 유형을 기준삼아 그 유형에 맞게 선택된 결제수단을 적용한다.
+      const groupType = group.items.length > 0 ? deliveryTypeOf(group.items[0]) : group.event.type;
+      try {
         const order = await createOrder({
           eventId: group.event.id,
           batchId,
@@ -228,16 +254,24 @@ export function CheckoutView() {
           total: groupTotal,
           shippingFee,
         });
-        createdOrders.push(order);
+        newlySucceeded.push(order);
+        // 성공한 그룹은 바로 장바구니에서 지운다 — 실패한 다른 그룹 때문에
+        // 이 주문이 취소되거나 다시 만들어지는 일이 없도록 여기서 바로 확정.
+        for (const i of group.items) setQty(i.product.id, 0, i.line.optionValueIds);
+      } catch (e) {
+        failedTypes.push({ type: groupType, message: e instanceof Error ? e.message : "주문 생성 중 오류가 발생했어요." });
       }
-      clear();
-      // 이미 이 기기에서 푸시를 켜뒀다면(알림 화면에서 미리 허용) 로그인 여부와
-      // 무관하게 방금 만든 주문들에 바로 알림을 보낸다 — 비회원은 로그인 세션이
-      // 없어서 이 순간 말고는 다시 찾아 보낼 방법이 없다. 페이지 이동을 늦추지
-      // 않도록 완료를 기다리지 않는다(실패해도 체크아웃 자체에는 영향 없음).
+    }
+
+    setCompletedOrders((prev) => [...prev, ...newlySucceeded]);
+
+    // 이 기기에서 푸시를 미리 켜뒀다면(알림 화면) 방금 성공한 주문에만 바로
+    // 알림을 보낸다 — 비회원은 로그인 세션이 없어서 이 순간 말고는 다시 찾아
+    // 보낼 방법이 없다. 페이지 이동을 늦추지 않도록 완료를 기다리지 않는다.
+    if (newlySucceeded.length > 0) {
       getCurrentPushSubscription().then((sub) => {
         if (!sub) return;
-        for (const order of createdOrders) {
+        for (const order of newlySucceeded) {
           void sendPushToSelf(sub, {
             title: "주문이 접수됐어요",
             body: `주문번호 ${order.orderNumber} 입금 확인 후 순차로 진행돼요.`,
@@ -245,16 +279,25 @@ export function CheckoutView() {
           });
         }
       });
-      const first = createdOrders[0];
-      if (profile) {
-        router.push(`/orders/${first.id}`);
-      } else {
-        router.push(`/orders/${first.id}?gn=${encodeURIComponent(name)}&pin=${pin}`);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "주문 중 오류가 발생했어요.");
-    } finally {
+    }
+
+    if (failedTypes.length > 0) {
+      const label = failedTypes.map((f) => `${EVENT_TYPE_LABEL[f.type]}(${f.message})`).join(", ");
+      const okNote = newlySucceeded.length > 0 ? " 나머지 배송유형은 정상 접수됐어요." : "";
+      setFailureNotice(`${label} 주문 처리에 실패했어요.${okNote} 아래 남은 상품으로 다시 시도해주세요.`);
       setSubmitting(false);
+      return;
+    }
+
+    // 전부 성공 — 이번 시도(및 이전 재시도)에서 만든 주문 중 첫 번째로 이동.
+    const all = [...completedOrders, ...newlySucceeded];
+    const first = all[0];
+    setSubmitting(false);
+    if (!first) return;
+    if (profile) {
+      router.push(`/orders/${first.id}`);
+    } else {
+      router.push(`/orders/${first.id}?gn=${encodeURIComponent(name)}&pin=${pin}`);
     }
   }
 
@@ -296,7 +339,19 @@ export function CheckoutView() {
         </div>
         {!profile && <p className="mb-4 text-[11.5px] text-text-muted">회원가입 없이 주문할 수 있어요. 주문 조회는 이름과 확인번호로 할 수 있어요.</p>}
 
-        <p className="mb-2 text-[12.5px] font-bold text-text-muted">주문 내역</p>
+        {completedOrders.length > 0 && (
+          <div className="mb-3 flex flex-col gap-1 rounded-[9px] border border-accent bg-accent-soft px-3 py-2.5">
+            <p className="text-[12px] font-bold text-accent-dark">이미 접수된 주문</p>
+            {completedOrders.map((o) => (
+              <Link key={o.id} href={`/orders/${o.id}`} className="text-[12px] font-semibold text-accent-dark underline">
+                주문번호 {o.orderNumber} 보기
+              </Link>
+            ))}
+          </div>
+        )}
+        {failureNotice && <p className="mb-3 rounded-[9px] bg-bg-sunken px-3 py-2.5 text-[12px] font-semibold text-red-600">{failureNotice}</p>}
+
+        <p className="mb-2 text-[12.5px] font-bold text-text-muted">{completedOrders.length > 0 ? "다시 시도할 주문 내역" : "주문 내역"}</p>
         {deliveryTypesPresent.length > 1 && (
           <p className="mb-3 rounded-[9px] bg-bg-sunken px-3 py-2.5 text-[12px] text-text-muted">배송유형이 달라 주문이 자동으로 분리됩니다.</p>
         )}
@@ -404,7 +459,7 @@ export function CheckoutView() {
           disabled={submitting || items.length === 0}
           onClick={placeOrder}
         >
-          {submitting ? "주문 처리 중..." : "주문하기"}
+          {submitting ? "주문 처리 중..." : failureNotice ? "남은 주문 다시 시도" : "주문하기"}
         </button>
       </div>
     </div>
