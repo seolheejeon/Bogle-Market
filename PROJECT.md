@@ -443,6 +443,15 @@
 - `tsc`/`build` 통과 확인. 로그인해야 들어갈 수 있는 관리자 화면이라 이번 세션에서는 관리자 로그인으로 직접 클릭 테스트는 못 했고(계정 정보 없음), 코드 레벨로 draft 흐름·이탈 방지 훅을 꼼꼼히 검토함 — 실제 로그인 후 수정→저장/취소/새로고침 이탈 시나리오를 한 번씩 확인해보길 권장
 - 마이그레이션 불필요(DB 스키마 변경 없음)
 
+**재고 초과판매 방지 (원자적 재고 차감)**
+- 배경: 재고 차감(`decrement_stock`)이 부족분을 `greatest(stock - qty, 0)`으로 그냥 0에 클램프만 하고 주문 자체는 항상 성공시켰다 — 재고 1개 남았을 때 두 명이 동시에 주문하면 둘 다 주문이 생성되고 재고는 그냥 0이 되는, 실제 초과판매가 나는 구조였다. 게다가 재고 차감이 `create_order`(주문 생성) RPC와 **별도의** RPC 호출로 클라이언트에서 순차 실행되고 있어서, 애초에 "주문 생성"과 "재고 차감"이 하나의 트랜잭션도 아니었다
+- **`decrement_stock`/`decrement_option_stock`을 조건부 원자적 UPDATE로 재작성**: `update ... set stock = stock - qty where stock >= qty`(GET DIAGNOSTICS로 영향받은 행 수 확인) 한 문장으로 "재고 확인"과 "차감"을 동시에 수행 — Postgres가 UPDATE 대상 행에 거는 잠금 덕분에 별도의 `SELECT ... FOR UPDATE` 없이도 동시 주문이 서로를 기다렸다가 갱신된 값으로 다시 조건을 확인하게 되어, 재고가 음수가 되거나 초과판매될 수 없다. 조건을 만족 못 하면(재고 부족) `raise exception '재고가 부족하여 주문할 수 없습니다.'`로 거부한다. 옵션 조합 재고도 같은 패턴(행이 아직 없으면 `on conflict do nothing`으로 먼저 만들고 다시 조건부 차감 — 동시에 여러 트랜잭션이 처음 만드는 경우에도 안전)
+- **`create_order` RPC 안에서 직접 차감 호출**: 클라이언트가 주문 생성 후 따로 `decrement_stock`을 호출하던 걸 없애고, `create_order` 함수 본문 안에서 `p_items`를 순회하며 `perform decrement_stock(...)`/`decrement_option_stock(...)`을 호출하도록 바꿨다 — PL/pgSQL 함수 호출은 별도 트랜잭션을 열지 않고 호출자(REST 요청 하나)의 트랜잭션에 그대로 참여하므로, 재고 차감에서 예외가 나면 이미 실행된 `orders`/`order_items` INSERT와 앞서 처리한 다른 상품의 차감분까지 전부 롤백된다 — "주문은 생겼는데 재고는 그대로"나 그 반대의 불일치가 구조적으로 불가능해짐
+- **고객 화면 에러 노출**: 예외 메시지가 `PostgrestError`(→ `Error` 상속)로 그대로 전달돼 체크아웃 화면이 기존 최소구매수량 에러와 동일한 방식으로 "재고가 부족하여 주문할 수 없습니다."를 보여줌 — 별도 파싱/매핑 불필요
+- **mock 모드도 동일하게 방어**: `lib/data.ts`의 mock `createOrder`에 `assertStockAvailable()` 추가 — 카탈로그 공유 재고와 옵션 조합 재고를 상품별로 합산해서 현재 재고를 넘으면 Supabase 모드와 똑같은 메시지로 거부(mock은 브라우저 탭 하나뿐이라 동시성 문제는 없지만, "부족하면 거부"라는 동작 자체는 두 모드가 항상 같아야 함)
+- `tsc`/`build` 통과 확인. 실제 동시 주문 경쟁 상황은 로컬에서 재현하기 어려워 별도 부하 테스트는 안 했고, SQL 로직 자체를 신중히 검토함(아래 사용자 질문에 대한 답변 참고) — 실 운영 전 마이그레이션 SQL을 먼저 실행할 것
+- ⚠️ **배포 시 확인 필요**: 실제 Supabase 프로젝트에 `decrement_stock`/`decrement_option_stock`/`create_order` 재정의 마이그레이션이 아직 미적용 — 대화에서 안내한 SQL을 SQL 에디터에서 먼저 실행할 것(실행 전까지는 여전히 예전 방식대로 0으로 클램프되며 초과판매 위험이 남아있음)
+
 # 진행 중인 기능
 
 - **카드/카카오페이 결제**: Toss Payments 키가 없어서 지금은 무통장입금과 동일하게 관리자가 수동으로 확인하는 방식으로 대체 중
@@ -456,7 +465,7 @@
 - [x] ~~대시보드 "진행 중 이벤트" 수치가 마감된 이벤트까지 포함해서 부정확~~ → 이벤트 종료 기능 수정으로 해결(위 "완료된 기능" 참고)
 - [ ] 대시보드 "오늘 매출"이 입금대기(미확인) 주문까지 합산 — 실제 입금액과 괴리
 - [ ] 비회원 "이름+PIN" 조회가 같은 이름+같은 PIN을 쓰는 타인과 주문이 섞일 여지 있음 (설계 당시 인지된 트레이드오프, 경미하지만 남아있는 리스크)
-- [ ] 재고 차감(`decrement_stock`)이 부족분을 그냥 0으로 클램프할 뿐 거부하지 않음 — 동시에 여러 명이 마지막 재고를 주문하면 이론적으로 재고 이상으로 판매될 수 있음(이벤트별 판매 정책 작업 중 확인, 지금 규모에선 발생 확률 낮은 레이스 컨디션이라 별도 항목으로만 남김)
+- [x] ~~재고 차감(`decrement_stock`)이 부족분을 그냥 0으로 클램프할 뿐 거부하지 않음~~ → 완료(위 "완료된 기능" 참고)
 
 **기존에 알려져 있던 항목**
 - [x] ~~실제 Supabase 프로젝트에 `product_option_groups`/`product_option_values`/`event_option_stock`/`order_items.options` 마이그레이션 미적용~~ → 실행 완료, 운영 환경에서 옵션 선택/재고차감/주문표시까지 검증함
@@ -512,8 +521,8 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 - `lookup_guest_orders(name, pin)` — 비회원 주문 조회용 RPC (RLS 우회, 인증 불필요), 이름+확인번호 일치하는 주문 전부 반환
 - `cancel_guest_order(order_id, name, pin)` — 비회원 셀프취소용 RPC. 이름+확인번호가 맞고 아직 발주확인 전(wait/paid)일 때만 취소로 전환, 실제로 취소됐을 때만 재고를 복구
 - `request_guest_cancel(order_id, name, pin, reason)` — 비회원의 발주확인 이후 취소 "요청"용 RPC. status는 안 건드리고 confirmed/ship일 때만 cancel_requested를 true로 세움
-- `decrement_stock(event_product_id, qty)` / `increment_stock(event_product_id, qty)` — 재고 차감/복구 RPC. 카탈로그 분리 이후 `event_products` 행을 대상으로 동작(파라미터명만 변경, 가리키는 대상은 그대로). `stock`이 null(재고 제한 없음)인 리스팅은 건드리지 않고, 차감은 0 밑으로 안 내려감
-- `decrement_option_stock(event_product_id, option_value_id, qty)` / `increment_option_stock(event_product_id, option_value_id, qty)` — 위와 같은 패턴의 옵션값 단위 재고 차감/복구 RPC. `event_option_stock`에 행이 없는 조합(재고 제한 없는 옵션값)은 그냥 0 rows에 적용되고 조용히 아무 일도 안 함
+- `decrement_stock(event_product_id, qty)` / `increment_stock(event_product_id, qty)` — 재고 차감/복구 RPC. 카탈로그 분리 이후 `event_products` 행을 대상으로 동작(파라미터명만 변경, 가리키는 대상은 그대로). `stock`이 null(재고 제한 없음)인 리스팅은 건드리지 않음. `decrement_stock`은 `update ... where stock >= qty` 조건부 UPDATE 한 문장으로 확인+차감을 원자적으로 처리해 동시 주문에도 재고가 음수가 될 수 없고, 부족하면 `raise exception '재고가 부족하여 주문할 수 없습니다.'`로 거부한다(더 이상 0으로 클램프하지 않음). `create_order` RPC 안에서 주문 생성과 같은 트랜잭션으로 호출되어 원자성을 보장한다(주문은 생겼는데 재고가 그대로거나 그 반대인 경우가 구조적으로 불가능)
+- `decrement_option_stock(event_product_id, option_value_id, qty)` / `increment_option_stock(event_product_id, option_value_id, qty)` — 위와 같은 패턴의 옵션값 단위 재고 차감/복구 RPC. `event_option_stock`에 행이 없는 조합(재고 제한 없는 옵션값)은 그냥 0 rows에 적용되고 조용히 아무 일도 안 함. `decrement_option_stock`도 `decrement_stock`과 동일하게 조건부 UPDATE + 예외 방식으로 바뀌었고, 역시 `create_order` 트랜잭션 안에서 호출됨
 - `save_push_subscription(profile_id, endpoint, p256dh, auth, user_agent)` — 웹 푸시 구독 저장/갱신 RPC. 같은 endpoint로 다시 구독하면 덮어씀(on conflict)
 - `delete_push_subscription(endpoint)` — 웹 푸시 구독 해제 RPC. endpoint는 브라우저가 발급하는 사실상 유추 불가능한 값이라 guest_pin처럼 그 값을 아는 것 자체를 본인 기기라는 증거로 취급해 로그인 확인 없이 삭제
 - 시드 데이터는 고정 UUID(`00000000-...`) 사용, `ON CONFLICT DO NOTHING`이라 재실행해도 안전

@@ -722,6 +722,10 @@ set search_path = public
 as $$
 declare
   v_bad_item record;
+  v_item jsonb;
+  v_event_product_id uuid;
+  v_qty integer;
+  v_stock_value_ids uuid[];
 begin
   if p_profile_id is not null and p_profile_id <> auth.uid() then
     raise exception 'profile_id must match the authenticated user';
@@ -740,6 +744,25 @@ begin
   if v_bad_item.name is not null then
     raise exception '%은(는) 최소 %개부터 주문할 수 있어요.', v_bad_item.name, v_bad_item.min_qty;
   end if;
+
+  -- 재고 차감을 주문 생성과 같은 트랜잭션 안에서 수행한다 — decrement_stock/
+  -- decrement_option_stock이 재고 부족 시 예외를 던지면 이 함수 전체가
+  -- (지금까지 insert한 것 없이) 롤백되므로, "재고 없이 만들어진 주문"이나
+  -- "차감은 됐는데 주문은 실패" 같은 불일치가 생길 수 없다. 여러 상품을 한
+  -- 번에 주문할 때 뒤쪽 상품의 재고가 부족해 실패하면 앞쪽 상품에서 이미
+  -- 차감한 것도 함께 되돌아간다.
+  for v_item in select * from jsonb_array_elements(p_items) loop
+    v_event_product_id := nullif(v_item->>'event_product_id', '')::uuid;
+    if v_event_product_id is null then
+      continue;
+    end if;
+    v_qty := (v_item->>'quantity')::integer;
+    perform decrement_stock(v_event_product_id, v_qty);
+    v_stock_value_ids := (select array_agg(x::uuid) from jsonb_array_elements_text(coalesce(v_item->'stock_value_ids', '[]'::jsonb)) x);
+    if v_stock_value_ids is not null and array_length(v_stock_value_ids, 1) > 0 then
+      perform decrement_option_stock(v_event_product_id, v_stock_value_ids, v_qty);
+    end if;
+  end loop;
 
   insert into orders (
     id, order_number, event_id, batch_id, profile_id, guest_name, guest_phone, guest_pin,
@@ -767,18 +790,40 @@ $$;
 -- 하나의 재고를 실시간으로 공유한다(Epic 1 Phase 3) — 호출부는 그대로
 -- event_product_id(리스팅)를 넘기고, 이 함수가 그 리스팅이 가리키는
 -- product_id를 찾아 그 상품의 재고를 갱신한다. stock이 null인 경우(재고
--- 제한 없음)는 그대로 null 유지. 0 밑으로는 안 내려감.
+-- 제한 없음)는 그대로 null 유지.
+--
+-- 동시성 안전성: "UPDATE ... WHERE stock >= p_qty"는 한 문장 안에서 조건 확인과
+-- 차감이 함께 일어나는 원자적 연산이다 — Postgres가 이 UPDATE 대상 행에 걸어주는
+-- 잠금 덕분에, 같은 상품을 동시에 여러 명이 주문해도 두 번째 트랜잭션은 첫 번째가
+-- 커밋(또는 롤백)할 때까지 이 행에서 대기했다가 "갱신된" stock 값으로 다시
+-- 조건을 확인한다 — 그래서 별도의 SELECT ... FOR UPDATE 없이도 이 한 줄만으로
+-- 재고가 음수가 될 수 없다. 조건을 만족 못 해 0행이 갱신되면(재고 부족) 예외를
+-- 던져 호출부(create_order) 전체를 롤백시킨다 — 재고 없는 주문이 생기는 일이
+-- 없다. 이 함수는 create_order 안에서 같은 트랜잭션으로 호출되는 게 기본
+-- 사용법이다(REST로 단독 호출해도 안전하게 동작하지만, 그러면 주문 생성과
+-- 별도 트랜잭션이 되어 원자성이 깨진다 — lib/data.ts 참고).
 create or replace function decrement_stock(p_event_product_id uuid, p_qty integer)
 returns void
 language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  v_product_id uuid;
+  v_updated integer;
 begin
+  select product_id into v_product_id from event_products where id = p_event_product_id;
+
   update products
-  set stock = greatest(stock - p_qty, 0)
-  where id = (select product_id from event_products where id = p_event_product_id)
-    and stock is not null;
+  set stock = stock - p_qty
+  where id = v_product_id
+    and stock is not null
+    and stock >= p_qty;
+  get diagnostics v_updated = row_count;
+
+  if v_updated = 0 and exists (select 1 from products where id = v_product_id and stock is not null) then
+    raise exception '재고가 부족하여 주문할 수 없습니다.';
+  end if;
 end;
 $$;
 
@@ -802,12 +847,15 @@ $$;
 -- 대상 값을 하나도 안 고른 주문(p_value_ids가 비었거나 null)은 애초에
 -- 아무 일도 안 한다(재고 제한 없음과 동일한 동작).
 --
--- 해당 조합에 대한 행이 아직 없는 경우(리스팅을 이벤트에 추가한 *이후*에
--- 관리자가 뒤늦게 재고관리를 켰거나, 처음 나오는 조합인 경우 —
--- addEventProduct의 자동 초기화는 추가 시점에만 한 번 실행되므로 이미
--- 존재하는 리스팅엔 소급 적용되지 않음)에는 그냥 무시하지 않고, 조합을
--- 구성하는 값들의 카탈로그 default_stock 중 최솟값을 기준으로 행을 새로
--- 만들면서 이번 차감분까지 한 번에 반영한다.
+-- decrement_stock과 같은 이유로 "UPDATE ... WHERE stock >= p_qty" 조건부
+-- 갱신으로 동시성을 안전하게 보장하고, 부족하면 예외를 던진다(create_order
+-- 트랜잭션 전체가 롤백됨). 해당 조합에 대한 행이 아직 없는 경우(리스팅을
+-- 이벤트에 추가한 *이후*에 관리자가 뒤늦게 재고관리를 켰거나, 처음 나오는
+-- 조합인 경우 — addEventProduct의 자동 초기화는 추가 시점에만 한 번 실행되므로
+-- 이미 존재하는 리스팅엔 소급 적용되지 않음)에는 카탈로그 default_stock을
+-- 기준으로 행을 먼저 만들어둔 뒤(on conflict do nothing — 동시에 다른
+-- 트랜잭션이 먼저 만들었을 수 있어 값을 덮어쓰지 않는다) 위와 같은 조건부
+-- 갱신을 다시 시도한다.
 create or replace function decrement_option_stock(p_event_product_id uuid, p_value_ids uuid[], p_qty integer)
 returns void
 language plpgsql
@@ -816,21 +864,32 @@ set search_path = public
 as $$
 declare
   v_ids uuid[] := (select array_agg(x order by x) from unnest(p_value_ids) x);
+  v_updated integer;
 begin
   if v_ids is null or array_length(v_ids, 1) is null then
     return;
   end if;
 
-  update event_option_stock set stock = greatest(stock - p_qty, 0)
-  where event_product_id = p_event_product_id and value_ids = v_ids;
+  update event_option_stock set stock = stock - p_qty
+  where event_product_id = p_event_product_id and value_ids = v_ids and stock >= p_qty;
+  get diagnostics v_updated = row_count;
+  if v_updated = 1 then
+    return;
+  end if;
 
-  if not found then
-    insert into event_option_stock (event_product_id, value_ids, stock)
-    select p_event_product_id, v_ids, greatest(coalesce(min(pov.default_stock), 0) - p_qty, 0)
-    from product_option_values pov
-    where pov.id = any(v_ids) and pov.has_stock
-    having count(*) > 0
-    on conflict (event_product_id, value_ids) do update set stock = excluded.stock;
+  insert into event_option_stock (event_product_id, value_ids, stock)
+  select p_event_product_id, v_ids, coalesce(min(pov.default_stock), 0)
+  from product_option_values pov
+  where pov.id = any(v_ids) and pov.has_stock
+  having count(*) > 0
+  on conflict (event_product_id, value_ids) do nothing;
+
+  update event_option_stock set stock = stock - p_qty
+  where event_product_id = p_event_product_id and value_ids = v_ids and stock >= p_qty;
+  get diagnostics v_updated = row_count;
+
+  if v_updated = 0 then
+    raise exception '재고가 부족하여 주문할 수 없습니다.';
   end if;
 end;
 $$;

@@ -810,14 +810,20 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       shipping_fee: input.shippingFee ?? 0,
       created_at: createdAt,
     };
-    for (const item of input.items) {
-      await supabase.rpc("decrement_stock", { p_event_product_id: item.productId, p_qty: item.quantity });
-      if (item.stockComboValueIds && item.stockComboValueIds.length > 0) {
-        await supabase.rpc("decrement_option_stock", { p_event_product_id: item.productId, p_value_ids: item.stockComboValueIds, p_qty: item.quantity });
-      }
-    }
+    // 재고 차감은 create_order RPC 안에서 주문 생성과 같은 트랜잭션으로
+    // 처리된다(schema.sql 참고) — 재고가 부족하면 RPC 자체가 예외를 던지고
+    // 위의 `if (error) throw error`에서 이미 걸러지므로, 여기서 따로 차감
+    // RPC를 또 호출하지 않는다(예전에는 별도 호출이었는데, 주문은 만들어지고
+    // 재고만 못 깎이거나 그 반대인 경우가 생길 수 있어 한 트랜잭션으로 합침).
     return mapSupabaseOrder(orderRow, input.items);
   }
+  // Supabase 모드는 create_order RPC 안에서 재고를 원자적으로 검증/차감하지만
+  // (schema.sql), mock 모드는 브라우저 localStorage뿐이라 그 RPC를 안 거친다 —
+  // 그래도 "재고 부족이면 주문 자체를 거부한다"는 동작은 두 모드가 항상 같아야
+  // 하므로 여기서 직접 한 번 더 확인한다(동시성 걱정은 없음 — mock은 탭 하나뿐).
+  const eventsBeforeOrder = loadEvents();
+  assertStockAvailable(eventsBeforeOrder, input.items);
+
   const order: Order = {
     id: genId("order"),
     orderNumber: number,
@@ -843,8 +849,53 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     createdAt: new Date().toISOString(),
   };
   saveOrders([order, ...loadOrders()]);
-  saveEvents(decrementProductStock(loadEvents(), input.items));
+  saveEvents(decrementProductStock(eventsBeforeOrder, input.items));
   return order;
+}
+
+// 이 주문에 포함된 상품들의 요청 수량이 현재 재고(카탈로그 공유 재고 +
+// 옵션 조합별 재고)를 넘으면 거부한다 — decrementProductStock이 하는 것과
+// 같은 방식으로 상품/조합별 요청 수량을 합산해서 비교한다(applyStockDelta와
+// 동일한 그룹핑 로직).
+function assertStockAvailable(events: MarketEventSeed[], items: OrderItem[]): void {
+  const catalogIdByListing = new Map<string, string>();
+  const listingById = new Map<string, EventProductSeed>();
+  for (const e of events) {
+    for (const p of e.products) {
+      catalogIdByListing.set(p.id, p.catalogProductId);
+      listingById.set(p.id, p);
+    }
+  }
+  const catalogById = new Map(loadCatalogProducts().map((c) => [c.id, c]));
+
+  const requestedByCatalog = new Map<string, number>();
+  const requestedByListingCombo = new Map<string, Record<string, number>>();
+  for (const i of items) {
+    const catalogId = catalogIdByListing.get(i.productId);
+    if (catalogId) requestedByCatalog.set(catalogId, (requestedByCatalog.get(catalogId) ?? 0) + i.quantity);
+    if (!i.stockComboValueIds || i.stockComboValueIds.length === 0) continue;
+    const key = i.stockComboValueIds.join(",");
+    const map = requestedByListingCombo.get(i.productId) ?? {};
+    map[key] = (map[key] ?? 0) + i.quantity;
+    requestedByListingCombo.set(i.productId, map);
+  }
+
+  for (const [catalogId, qty] of requestedByCatalog) {
+    const stock = catalogById.get(catalogId)?.stock;
+    if (stock !== undefined && qty > stock) {
+      throw new Error("재고가 부족하여 주문할 수 없습니다.");
+    }
+  }
+  for (const [listingId, combos] of requestedByListingCombo) {
+    const optionStock = listingById.get(listingId)?.optionStock;
+    if (!optionStock) continue;
+    for (const [key, qty] of Object.entries(combos)) {
+      const stock = optionStock[key];
+      if (stock !== undefined && qty > stock) {
+        throw new Error("재고가 부족하여 주문할 수 없습니다.");
+      }
+    }
+  }
 }
 
 // 카탈로그 상품(products.stock의 mock 버전)의 공유 재고와 리스팅의 옵션값별
