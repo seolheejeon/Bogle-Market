@@ -7,28 +7,43 @@ import { useAuth } from "@/lib/auth-context";
 import type { NotificationItem } from "@/types";
 import { formatDateTime } from "@/lib/format";
 import { getReadIds, getDismissedIds, markRead, markAllRead, dismiss, dismissAll, isWithinRetention } from "@/lib/notification-state";
-import { isPushSupported, getNotificationPermission, enablePush, disablePush } from "@/lib/push";
+import { isPushSupported, getNotificationPermission, enablePush, disablePush, PUSH_FAILURE_MESSAGE } from "@/lib/push";
 
+// "지원 브라우저라면 항상 클릭 가능해야 한다" — permission이 이미 denied여도
+// 버튼은 눌리게 두고(눌러서 다시 확인해보는 것 자체가 사용자에게 유용한
+// 피드백이다), 클릭 자체가 의미 없는 두 경우(이 브라우저가 애초에 Push API를
+// 지원 안 하거나, HTTPS가 아니라 API 자체가 없는 경우)만 진짜로 비활성화한다.
 function PushOptIn() {
   const { profile } = useAuth();
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [hardBlocked, setHardBlocked] = useState<string | null>(null);
 
   useEffect(() => {
     setPermission(getNotificationPermission());
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setHardBlocked(PUSH_FAILURE_MESSAGE.insecure);
+    } else if (!isPushSupported()) {
+      setHardBlocked(PUSH_FAILURE_MESSAGE.unsupported);
+    }
   }, []);
-
-  if (!isPushSupported()) return null;
 
   async function toggle() {
     setBusy(true);
+    setErrorMessage(null);
     try {
       if (permission === "granted") {
         await disablePush();
-        setPermission("default");
+        setPermission(getNotificationPermission());
+        return;
+      }
+      const result = await enablePush(profile?.id ?? null);
+      if (result.ok) {
+        setPermission("granted");
       } else {
-        const sub = await enablePush(profile?.id ?? null);
-        setPermission(sub ? "granted" : getNotificationPermission());
+        setErrorMessage(result.message);
+        setPermission(getNotificationPermission());
       }
     } finally {
       setBusy(false);
@@ -36,22 +51,31 @@ function PushOptIn() {
   }
 
   return (
-    <div className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-[10px] bg-bg-sunken px-3.5 py-3">
-      <div className="min-w-0">
-        <p className="text-[12.5px] font-bold">푸시 알림</p>
-        <p className="mt-0.5 text-[11.5px] text-text-muted">
-          {permission === "granted" ? "이 기기로 알림을 받고 있어요." : permission === "denied" ? "브라우저 설정에서 알림이 차단돼 있어요." : "배송 소식을 앱처럼 바로 받아보세요."}
-        </p>
+    <div className="mx-4 mt-3 flex flex-col gap-1.5 rounded-[10px] bg-bg-sunken px-3.5 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[12.5px] font-bold">푸시 알림</p>
+          <p className="mt-0.5 text-[11.5px] text-text-muted">
+            {hardBlocked
+              ? hardBlocked
+              : permission === "granted"
+                ? "이 기기로 알림을 받고 있어요."
+                : permission === "denied"
+                  ? "브라우저에서 알림이 차단돼 있어요. 아래 버튼을 눌러 다시 확인해보세요."
+                  : "배송 소식을 앱처럼 바로 받아보세요."}
+          </p>
+        </div>
+        <button
+          onClick={toggle}
+          disabled={busy || !!hardBlocked}
+          className={`shrink-0 rounded-full px-3.5 py-1.5 text-[12px] font-bold disabled:opacity-50 ${
+            permission === "granted" ? "border border-border text-text-muted" : "bg-accent text-white"
+          }`}
+        >
+          {busy ? "확인 중..." : permission === "granted" ? "끄기" : "받기"}
+        </button>
       </div>
-      <button
-        onClick={toggle}
-        disabled={busy || permission === "denied"}
-        className={`shrink-0 rounded-full px-3.5 py-1.5 text-[12px] font-bold disabled:opacity-50 ${
-          permission === "granted" ? "border border-border text-text-muted" : "bg-accent text-white"
-        }`}
-      >
-        {permission === "granted" ? "끄기" : "받기"}
-      </button>
+      {errorMessage && <p className="text-[11.5px] font-semibold text-red-600">{errorMessage}</p>}
     </div>
   );
 }
