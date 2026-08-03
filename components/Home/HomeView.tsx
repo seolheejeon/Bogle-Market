@@ -73,17 +73,30 @@ export function HomeView() {
     return () => clearInterval(id);
   }, [heroLength, heroIndex]);
 
+  // "마감 임박"은 실제로 곧 닫히는 회차만 의미가 있다 — 이미 마감됐거나(주문
+  // 불가) 24시간보다 여유 있는 회차는 여기 안 보인다. 택배(PARCEL)는 상시
+  // 판매라 마감 개념 자체가 없어서(lib/order-policy.ts의 ALWAYS_OPEN) 애초에
+  // 대상에서 뺀다. 이벤트당 대표 상품 하나(첫 상품)만 보여주는 건 기존과 동일.
+  const DEADLINE_SOON_MS = 24 * 60 * 60 * 1000;
   const deadlineItems = useMemo(() => {
-    const items: { badgeType: EventType; eventId: string; product: MarketEvent["products"][number]; deadlineAt: string }[] = [];
-    if (door?.products[0]) items.push({ badgeType: "DOOR", eventId: door.id, product: door.products[0], deadlineAt: door.deadlineAt });
-    if (group?.products[0]) items.push({ badgeType: "GROUP_BUY", eventId: group.id, product: group.products[0], deadlineAt: group.deadlineAt });
-    if (flash?.products[0]) items.push({ badgeType: flash.type, eventId: flash.id, product: flash.products[0], deadlineAt: flash.deadlineAt });
-    return items.sort((a, b) => new Date(a.deadlineAt).getTime() - new Date(b.deadlineAt).getTime());
-  }, [door, group, flash]);
+    if (!events) return [];
+    const now = Date.now();
+    return events
+      .filter((e) => e.type !== "PARCEL" && e.products.length > 0 && isEventOrderable(e))
+      .map((e) => ({ event: e, msLeft: new Date(e.deadlineAt).getTime() - now }))
+      .filter(({ msLeft }) => msLeft > 0 && msLeft <= DEADLINE_SOON_MS)
+      .sort((a, b) => a.msLeft - b.msLeft)
+      .map(({ event: e }) => ({ badgeType: e.type, eventId: e.id, product: e.products[0], deadlineAt: e.deadlineAt }));
+  }, [events]);
 
+  // 마감된(주문 불가) 이벤트의 상품은 인기상품에서 아예 제외한다 — 예전엔
+  // closed 표시만 하고 그대로 목록에 남겨뒀었음.
   const popular = useMemo(() => {
     if (!events) return [];
-    return events.flatMap((e) => e.products.map((p) => ({ product: p, closed: !isEventOrderable(e) }))).slice(0, 4);
+    return events
+      .filter(isEventOrderable)
+      .flatMap((e) => e.products)
+      .slice(0, 4);
   }, [events]);
 
   // Pointer Events unify mobile touch swipe and desktop mouse drag in one
@@ -234,8 +247,8 @@ export function HomeView() {
         <section className="mt-5">
           <p className="mb-2 text-[12.5px] font-bold text-text-muted">🔥 인기상품</p>
           <div className="grid grid-cols-2 gap-x-2 gap-y-2.5">
-            {popular.map(({ product, closed }, i) => (
-              <ProductGridCard key={product.id} product={product} rankBadge={`BEST ${i + 1}`} closed={closed} />
+            {popular.map((product, i) => (
+              <ProductGridCard key={product.id} product={product} rankBadge={`BEST ${i + 1}`} />
             ))}
           </div>
         </section>

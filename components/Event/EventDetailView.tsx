@@ -74,7 +74,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                   옵션선택
                 </Link>
               ) : (
-                <QtyControl productId={product.id} max={product.stock} minQty={product.minQty} closed={closed} />
+                <QtyControl productId={product.id} max={product.stock} minQty={product.minQty} closed={closed} photo={product.photos?.[0] ?? product.emoji} />
               )}
             </div>
           ))}

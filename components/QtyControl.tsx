@@ -1,6 +1,7 @@
 "use client";
 
 import { useCart } from "@/lib/cart-context";
+import { flyToCart, showAddedToast } from "@/lib/cart-feedback";
 
 // max는 재고 한도(stock/옵션재고 중 가장 작은 값)가 정해진 경우에만 전달됨 —
 // undefined면 재고 제한 없음. closed는 이벤트 자체가 STRICT_DEADLINE 정책으로
@@ -9,18 +10,23 @@ import { useCart } from "@/lib/cart-context";
 // 키 — 안 주면(옵션 없는 상품) 빈 배열과 동일하게 취급된다. minQty(기본 1)는
 // 처음 담을 때 시작 수량이자, 그 밑으로는 감소 버튼으로 못 내려가는 하한선 —
 // 완전히 빼려면(0으로) 이 컨트롤이 아니라 별도 삭제 동작을 써야 한다(CartView).
+// photo가 있으면 홈/카테고리/이벤트 상세의 그리드 빠른 담기에서도 상품
+// 상세와 같은 토스트 + fly-to-cart 피드백을 보여준다(0에서 처음 담을 때만 —
+// 이미 담긴 걸 +/-로 조정할 때는 매번 뜨면 시끄러워서 안 보여줌).
 export function QtyControl({
   productId,
   optionValueIds,
   max,
   minQty = 1,
   closed,
+  photo,
 }: {
   productId: string;
   optionValueIds?: string[];
   max?: number;
   minQty?: number;
   closed?: boolean;
+  photo?: string;
 }) {
   const { getQty, changeQty } = useCart();
   const qty = getQty(productId, optionValueIds);
@@ -40,6 +46,8 @@ export function QtyControl({
           e.stopPropagation();
           e.preventDefault();
           changeQty(productId, minQty, optionValueIds);
+          showAddedToast();
+          if (photo) flyToCart(e.currentTarget, photo);
         }}
       >
         +

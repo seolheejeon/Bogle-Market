@@ -10,64 +10,12 @@ import { isEventOrderable } from "@/lib/order-policy";
 import { useCart } from "@/lib/cart-context";
 import { ProductDetailContent } from "@/components/Product/ProductDetailContent";
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
-import { ProductPhoto, isPhotoUrl } from "@/components/ProductPhoto";
+import { ProductPhoto } from "@/components/ProductPhoto";
 import { ShareButton } from "@/components/ShareButton";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, comboKey } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
-
-// A small clone of the product photo flies from the "담기" button to the
-// header's cart icon as lightweight visual confirmation that something was
-// actually added (as opposed to just adjusting the on-page quantity).
-function flyToCart(fromEl: HTMLElement, photo: string) {
-  const target = document.getElementById("header-cart-link");
-  if (!target) return;
-  const fromRect = fromEl.getBoundingClientRect();
-  const toRect = target.getBoundingClientRect();
-
-  const el = document.createElement("div");
-  Object.assign(el.style, {
-    position: "fixed",
-    left: `${fromRect.left + fromRect.width / 2 - 16}px`,
-    top: `${fromRect.top + fromRect.height / 2 - 16}px`,
-    width: "32px",
-    height: "32px",
-    borderRadius: "9999px",
-    overflow: "hidden",
-    zIndex: "9999",
-    pointerEvents: "none",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "18px",
-    background: "var(--accent-soft, #f7e4d3)",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-    transition: "transform 0.55s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.55s ease",
-  });
-
-  if (isPhotoUrl(photo)) {
-    const img = document.createElement("img");
-    img.src = photo;
-    Object.assign(img.style, { width: "100%", height: "100%", objectFit: "cover" });
-    el.appendChild(img);
-  } else {
-    el.textContent = photo;
-  }
-
-  document.body.appendChild(el);
-
-  const dx = toRect.left + toRect.width / 2 - (fromRect.left + fromRect.width / 2);
-  const dy = toRect.top + toRect.height / 2 - (fromRect.top + fromRect.height / 2);
-
-  requestAnimationFrame(() => {
-    el.style.transform = `translate(${dx}px, ${dy}px) scale(0.15)`;
-    el.style.opacity = "0.15";
-  });
-
-  const remove = () => el.remove();
-  el.addEventListener("transitionend", remove, { once: true });
-  setTimeout(remove, 700);
-}
+import { flyToCart } from "@/lib/cart-feedback";
 
 export function ProductDetailView({ productId }: { productId: string }) {
   const router = useRouter();
