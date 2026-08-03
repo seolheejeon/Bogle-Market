@@ -14,12 +14,13 @@ import {
   getEventProductCosts,
   getSoldQuantities,
 } from "@/lib/data";
-import type { CatalogProduct, EventType, MarketEvent, Product } from "@/types";
+import type { CatalogProduct, EventBadge, EventType, MarketEvent, Product } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice, toDateInputValue, dateInputValueToIso } from "@/lib/format";
 import { generateStockCombos } from "@/lib/product-options";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { EventBadgePicker } from "@/components/admin/EventBadgePicker";
+import { useUnsavedChangesGuard } from "@/lib/useUnsavedChangesGuard";
 
 const DELIVERY_TYPES: EventType[] = ["DOOR", "GROUP_BUY", "PARCEL"];
 
@@ -29,14 +30,54 @@ function toLocalInputValue(iso: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// 이벤트 상단 정보(이름/뱃지/마감/배송일/안내문구)의 편집용 로컬 상태 — 저장
+// 버튼을 누르기 전까지는 이 draft만 바뀌고 서버에는 아무것도 반영되지
+// 않는다. datetime-local/date input은 그 형식 그대로 들고 있다가 저장 시점에
+// ISO로 변환한다(예전 blur 핸들러가 하던 변환을 그대로 가져옴).
+interface EventDraft {
+  title: string;
+  badge: EventBadge;
+  deadlineAtLocal: string;
+  deliveryAtDate: string;
+  notice: string;
+}
+
+function toDraft(e: MarketEvent): EventDraft {
+  return {
+    title: e.title,
+    badge: e.badge,
+    deadlineAtLocal: toLocalInputValue(e.deadlineAt),
+    deliveryAtDate: toDateInputValue(e.deliveryAt),
+    notice: e.notice,
+  };
+}
+
+function draftToPatch(draft: EventDraft): Partial<MarketEvent> {
+  return {
+    title: draft.title,
+    badge: draft.badge,
+    deadlineAt: new Date(draft.deadlineAtLocal).toISOString(),
+    deliveryAt: dateInputValueToIso(draft.deliveryAtDate),
+    notice: draft.notice,
+  };
+}
+
+function draftsEqual(a: EventDraft, b: EventDraft): boolean {
+  return a.title === b.title && a.badge === b.badge && a.deadlineAtLocal === b.deadlineAtLocal && a.deliveryAtDate === b.deliveryAtDate && a.notice === b.notice;
+}
+
 export default function AdminEventEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [event, setEvent] = useState<MarketEvent | null | undefined>(undefined);
-  // 이 화면은 각 필드가 blur될 때마다 자동 저장되는 방식이라 "저장 버튼"이
-  // 따로 없다 — 대신 지금 이 상태(저장 중/완료/실패)를 명확히 보여줘서 자동
-  // 저장이라는 것과 실제로 저장됐는지를 사용자가 헷갈리지 않게 한다.
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // 상단 정보(이름/뱃지/마감/배송일/안내문구)만 draft로 편집한다 — 상품별
+  // 가격수정/옵션재고 등 나머지는 원래부터 명시적 저장 버튼이 있던 방식이라
+  // 그대로 둔다. draft는 최초 로드 시 한 번만 채우고, 상품 목록 조작(추가/
+  // 제거/순서변경 등)이 refresh()를 다시 불러도 덮어쓰지 않는다 — 안 그러면
+  // "이름 수정 중에 다른 상품 노출을 토글"했을 때 이름 수정분이 날아간다.
+  const [draft, setDraft] = useState<EventDraft | null>(null);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [savedToast, setSavedToast] = useState(false);
   // 원가/판매수량은 event_product_costs·order_items에서 따로 불러와서 화면
   // 쪽에서 직접 매칭한다(원가는 관리자만 조회 가능한 별도 테이블이라 event.products
   // 자체에는 안 실려 있음). 이벤트 정보가 새로 로드될 때마다 같이 갱신한다.
@@ -49,13 +90,22 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
       if (e) {
         getEventProductCosts(e.products.map((p) => p.id)).then(setCostsByListing);
         getSoldQuantities(e.id).then(setSoldByListing);
+        setDraft((prev) => prev ?? toDraft(e));
       }
     });
   }
-  useEffect(refresh, [id]);
+  useEffect(() => {
+    setDraft(null); // 다른 이벤트로 이동하면 draft를 새로 채워야 한다.
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const dirty = !!(event && draft && !draftsEqual(draft, toDraft(event)));
+  useUnsavedChangesGuard(dirty);
 
   if (event === undefined) return <p className="text-sm text-text-muted">불러오는 중...</p>;
   if (event === null) return <p className="text-sm text-text-muted">이벤트를 찾을 수 없어요.</p>;
+  if (!draft) return <p className="text-sm text-text-muted">불러오는 중...</p>;
   // 아래 클로저(moveProduct)에서 쓰려고 새 const로 다시 담아둔다 — 위에서
   // early-return으로 좁혀둔 타입은 컨트롤플로우 분석 결과라 중첩 함수 안까지
   // 그대로 이어지지 않는다(state 변수라 나중에 다시 null이 될 수도 있다고
@@ -63,18 +113,31 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
   // 고정돼 중첩 함수에서도 그대로 쓸 수 있다.
   const currentEvent = event;
 
-  async function saveEventFields(patch: Partial<MarketEvent>) {
-    setSaveStatus("saving");
+  function updateDraft(patch: Partial<EventDraft>) {
+    setDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+  }
+
+  async function saveTop() {
+    if (!dirty) return;
+    setSaving(true);
     setError(null);
     try {
-      await updateEvent(id, patch);
-      refresh();
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 1800);
+      await updateEvent(id, draftToPatch(draft));
+      const updated = await getEvent(id);
+      setEvent(updated);
+      if (updated) setDraft(toDraft(updated));
+      setSavedToast(true);
+      setTimeout(() => setSavedToast(false), 1800);
     } catch (e) {
       setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
-      setSaveStatus("error");
+    } finally {
+      setSaving(false);
     }
+  }
+
+  function cancelTop() {
+    setDraft(toDraft(currentEvent));
+    setError(null);
   }
 
   // 현재 화면 순서에서 두 상품의 자리를 바꾼 새 순서를 통째로 저장한다 —
@@ -92,34 +155,29 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
     <div className="max-w-2xl">
       <div className="mb-4 flex items-center justify-between">
         <p className="text-[15px] font-bold">{event.title} 관리</p>
-        <span className="text-[11.5px] font-semibold">
-          {saveStatus === "saving" && <span className="text-text-muted">저장 중...</span>}
-          {saveStatus === "saved" && <span className="text-accent-dark">✓ 저장 완료</span>}
-          {saveStatus === "error" && <span className="text-red-600">⚠ 저장 실패</span>}
-        </span>
+        {savedToast && <span className="text-[11.5px] font-semibold text-accent-dark">✓ 저장되었습니다.</span>}
       </div>
-      <p className="mb-2 -mt-2 text-[11.5px] text-text-muted">각 항목은 입력을 마치고 다른 곳을 누르면(포커스를 벗어나면) 자동으로 저장돼요.</p>
 
       <div className="mb-6 flex flex-col gap-3 rounded-xl border border-border p-4">
         <label className="text-[12.5px] font-semibold text-text-muted">
           이벤트 이름
           <input
             className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-            defaultValue={event.title}
-            onBlur={(e) => e.target.value !== event.title && saveEventFields({ title: e.target.value })}
+            value={draft.title}
+            onChange={(e) => updateDraft({ title: e.target.value })}
           />
         </label>
         <div>
           <p className="mb-1.5 text-[12.5px] font-semibold text-text-muted">뱃지</p>
-          <EventBadgePicker value={event.badge} onChange={(badge) => saveEventFields({ badge })} />
+          <EventBadgePicker value={draft.badge} onChange={(badge) => updateDraft({ badge })} />
         </div>
         <label className="text-[12.5px] font-semibold text-text-muted">
           주문 마감
           <input
             type="datetime-local"
             className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-            defaultValue={toLocalInputValue(event.deadlineAt)}
-            onBlur={(e) => saveEventFields({ deadlineAt: new Date(e.target.value).toISOString() })}
+            value={draft.deadlineAtLocal}
+            onChange={(e) => updateDraft({ deadlineAtLocal: e.target.value })}
           />
         </label>
         <label className="text-[12.5px] font-semibold text-text-muted">
@@ -127,8 +185,8 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
           <input
             type="date"
             className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-            defaultValue={toDateInputValue(event.deliveryAt)}
-            onBlur={(e) => saveEventFields({ deliveryAt: dateInputValueToIso(e.target.value) })}
+            value={draft.deliveryAtDate}
+            onChange={(e) => updateDraft({ deliveryAtDate: e.target.value })}
           />
         </label>
         <label className="text-[12.5px] font-semibold text-text-muted">
@@ -136,11 +194,24 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
           <textarea
             className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
             rows={3}
-            defaultValue={event.notice}
-            onBlur={(e) => e.target.value !== event.notice && saveEventFields({ notice: e.target.value })}
+            value={draft.notice}
+            onChange={(e) => updateDraft({ notice: e.target.value })}
           />
         </label>
-        {saveStatus === "error" && error && <p className="text-[11.5px] font-semibold text-red-600">{error}</p>}
+        {error && <p className="text-[11.5px] font-semibold text-red-600">{error}</p>}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={saveTop}
+            disabled={!dirty || saving}
+            className="rounded-[9px] bg-accent px-4 py-2 text-[13px] font-bold text-white disabled:opacity-40"
+          >
+            {saving ? "저장 중..." : "저장"}
+          </button>
+          <button onClick={cancelTop} disabled={!dirty || saving} className="rounded-[9px] border border-border px-4 py-2 text-[13px] font-semibold disabled:opacity-40">
+            취소
+          </button>
+          <span className="text-[11.5px] text-text-muted">{dirty ? "저장하지 않은 변경사항이 있어요." : "변경사항 없음"}</span>
+        </div>
       </div>
 
       <p className="mb-2 text-[13.5px] font-bold">상품 목록</p>
