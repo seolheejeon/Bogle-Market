@@ -1247,6 +1247,9 @@ export async function updateStoreSettings(input: StoreSettings): Promise<void> {
       bank_name: input.bankName,
       account_number: input.accountNumber,
       account_holder: input.accountHolder,
+      inquiry_chat_url: input.inquiryChatUrl || null,
+      kakao_channel_url: input.kakaoChannelUrl || null,
+      opentalk_url: input.opentalkUrl || null,
       updated_at: new Date().toISOString(),
     });
     if (error) throw error;
@@ -1350,7 +1353,14 @@ export async function reorderBanners(orderedIds: string[]): Promise<void> {
 // ---------- Supabase row mappers ----------
 
 function mapSupabaseStoreSettings(row: Record<string, any>): StoreSettings {
-  return { bankName: row.bank_name ?? "", accountNumber: row.account_number ?? "", accountHolder: row.account_holder ?? "" };
+  return {
+    bankName: row.bank_name ?? "",
+    accountNumber: row.account_number ?? "",
+    accountHolder: row.account_holder ?? "",
+    inquiryChatUrl: row.inquiry_chat_url ?? undefined,
+    kakaoChannelUrl: row.kakao_channel_url ?? undefined,
+    opentalkUrl: row.opentalk_url ?? undefined,
+  };
 }
 
 function mapSupabaseBanner(row: Record<string, any>): Banner {

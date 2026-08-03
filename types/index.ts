@@ -458,6 +458,15 @@ export interface StoreSettings {
   bankName: string;
   accountNumber: string;
   accountHolder: string;
+  // 운영 중 자주 바뀌는 안내/링크류 — 코드 배포 없이 관리자 설정(/admin/settings)에서
+  // 바꾸면 바로 고객 화면에 반영된다. 전부 선택값이라 안 채우면 해당 버튼/문구가
+  // 그냥 안 보인다. 항목을 더 늘리고 싶으면(사업자정보, 고객센터 운영시간, 배송/
+  // 환불 안내 문구 등) 여기에 필드를 추가하고 schema.sql의 store_settings에 같은
+  // 이름의 컬럼을 추가한 뒤 관리자 설정 폼에 입력란만 붙이면 된다 — 싱글턴 행 하나에
+  // 컬럼만 늘리는 지금 구조 그대로 확장된다.
+  inquiryChatUrl?: string;
+  kakaoChannelUrl?: string;
+  opentalkUrl?: string;
 }
 
 export const EMPTY_STORE_SETTINGS: StoreSettings = { bankName: "", accountNumber: "", accountHolder: "" };

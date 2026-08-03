@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { listAddresses, updateAddress } from "@/lib/data";
 import type { Address, Profile } from "@/types";
 import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
+import { SupportLinks } from "@/components/SupportLinks";
 
 type UsernameStatus = "unchecked" | "checking" | "available" | "taken";
 
@@ -136,6 +137,7 @@ export function MyPageView() {
   return (
     <div className="p-4">
       <strong className="mb-3 block text-[15px]">마이페이지</strong>
+      <SupportLinks />
       <p className="mb-4 text-[12.5px] text-text-muted">로그인 없이도 주문할 수 있어요. 회원가입하면 배송지를 저장해둘 수 있어요.</p>
 
       <div className="mb-4 flex gap-2">
@@ -325,6 +327,7 @@ function ProfilePanel({
   return (
     <div className="p-4">
       <strong className="mb-3 block text-[15px]">마이페이지</strong>
+      <SupportLinks />
 
       <div className="rounded-xl border border-border p-4">
         <div className="text-[15px] font-bold">

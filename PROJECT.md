@@ -45,11 +45,11 @@
 - [ ] 홈의 마감임박 상품은 마감까지 48시간 이하인 상품만 노출
 - [ ] 마감된 상품은 홈의 마감임박/인기상품에서 제외
 - [ ] 마감임박 상품이 없으면 섹션 자체를 숨김
-- [ ] 관리자 설정에 고객 문의 링크(오픈채팅/카카오채널) 관리 기능 추가
-- [ ] 관리자 설정에 보글마켓 오픈톡방 링크 관리 기능 추가
-- [ ] 주문 상세 및 마이페이지에 '문의하기' 버튼 추가
-- [ ] 홈 및 마이페이지에 '보글마켓 오픈톡방 입장하기' 버튼 추가
-- [ ] 운영 관련 링크는 관리자 설정에서 URL만 변경하면 즉시 반영되도록 개선
+- [x] ~~관리자 설정에 고객 문의 링크(오픈채팅/카카오채널) 관리 기능 추가~~ → 완료(위 "완료된 기능" 참고)
+- [x] ~~관리자 설정에 보글마켓 오픈톡방 링크 관리 기능 추가~~ → 완료
+- [x] ~~주문 상세 및 마이페이지에 '문의하기' 버튼 추가~~ → 완료(주문상세/마이페이지 모두 적용, 홈은 미적용 — 필요하면 요청)
+- [x] ~~홈 및 마이페이지에 '보글마켓 오픈톡방 입장하기' 버튼 추가~~ → 마이페이지 적용 완료, 홈은 미적용(요청 시 추가 가능)
+- [x] ~~운영 관련 링크는 관리자 설정에서 URL만 변경하면 즉시 반영되도록 개선~~ → 완료(`store_settings` 싱글턴 행에 컬럼만 추가하는 확장 가능한 구조)
 - [x] ~~상품 공유 기능~~ → 완료(위 "완료된 기능" 참고 — 공유 버튼, Web Share API + 클립보드 폴백, OG/Twitter 메타태그, 추천인 파라미터 확장 가능한 URL 유틸까지 전부 구현됨)
 
 ---
@@ -450,8 +450,15 @@
 - **`create_order` RPC 안에서 직접 차감 호출**: 클라이언트가 주문 생성 후 따로 `decrement_stock`을 호출하던 걸 없애고, `create_order` 함수 본문 안에서 `p_items`를 순회하며 `perform decrement_stock(...)`/`decrement_option_stock(...)`을 호출하도록 바꿨다 — PL/pgSQL 함수 호출은 별도 트랜잭션을 열지 않고 호출자(REST 요청 하나)의 트랜잭션에 그대로 참여하므로, 재고 차감에서 예외가 나면 이미 실행된 `orders`/`order_items` INSERT와 앞서 처리한 다른 상품의 차감분까지 전부 롤백된다 — "주문은 생겼는데 재고는 그대로"나 그 반대의 불일치가 구조적으로 불가능해짐
 - **고객 화면 에러 노출**: 예외 메시지가 `PostgrestError`(→ `Error` 상속)로 그대로 전달돼 체크아웃 화면이 기존 최소구매수량 에러와 동일한 방식으로 "재고가 부족하여 주문할 수 없습니다."를 보여줌 — 별도 파싱/매핑 불필요
 - **mock 모드도 동일하게 방어**: `lib/data.ts`의 mock `createOrder`에 `assertStockAvailable()` 추가 — 카탈로그 공유 재고와 옵션 조합 재고를 상품별로 합산해서 현재 재고를 넘으면 Supabase 모드와 똑같은 메시지로 거부(mock은 브라우저 탭 하나뿐이라 동시성 문제는 없지만, "부족하면 거부"라는 동작 자체는 두 모드가 항상 같아야 함)
-- `tsc`/`build` 통과 확인. 실제 동시 주문 경쟁 상황은 로컬에서 재현하기 어려워 별도 부하 테스트는 안 했고, SQL 로직 자체를 신중히 검토함(아래 사용자 질문에 대한 답변 참고) — 실 운영 전 마이그레이션 SQL을 먼저 실행할 것
-- ⚠️ **배포 시 확인 필요**: 실제 Supabase 프로젝트에 `decrement_stock`/`decrement_option_stock`/`create_order` 재정의 마이그레이션이 아직 미적용 — 대화에서 안내한 SQL을 SQL 에디터에서 먼저 실행할 것(실행 전까지는 여전히 예전 방식대로 0으로 클램프되며 초과판매 위험이 남아있음)
+- `tsc`/`build` 통과 확인. 실제 동시 주문 경쟁 상황은 로컬에서 재현하기 어려워 별도 부하 테스트는 안 했고, SQL 로직 자체를 신중히 검토함. 마이그레이션 SQL 실행 완료(운영 환경 반영됨)
+
+**관리자 설정(Settings) 확장 — 고객 문의/오픈톡방 링크**
+- 배경: 설정 화면에 입금 계좌 정보만 있어서, 운영하며 자주 바뀌는 정보(문의 채널, 오픈톡방 링크 등)를 코드 배포 없이 관리자 설정에서 바로 바꿀 수 있게 해달라는 요청. 사업자정보/고객센터 운영시간/배송·환불 안내 문구처럼 나중에 추가될 항목까지 감안한 확장 가능한 구조로 설계해달라는 요구도 포함(이번 범위에서는 그 네 가지는 구현하지 않음)
+- **`store_settings`에 컬럼만 추가하는 방식으로 확장**: 기존에도 계좌 정보 3개가 싱글턴 행 하나에 플랫하게 들어있던 구조라, 별도 테이블이나 key-value 구조로 새로 설계하지 않고 그대로 `inquiry_chat_url`/`kakao_channel_url`/`opentalk_url` 컬럼만 추가함 — 나중에 사업자정보 등을 추가할 때도 `StoreSettings` 타입에 필드 추가 + `store_settings`에 컬럼 추가 + 관리자 설정 폼에 입력란 추가, 이 세 단계만 반복하면 됨(타입 주석에 이 확장 절차를 남겨둠)
+- **관리자 설정 화면**(`/admin/settings`)에 "고객 문의 · 오픈톡방" 섹션 추가 — 문의 오픈채팅 URL, 카카오채널 URL(선택), 보글마켓 오픈톡방 URL 세 입력란. 계좌 정보와 같은 저장 버튼으로 한 번에 저장됨
+- **고객 화면**: `components/SupportLinks.tsx`(재사용 컴포넌트)가 설정된 URL이 있을 때만 버튼을 보여줌 — "문의하기"는 오픈채팅 URL을 우선 쓰고 없으면 카카오채널 URL로 대신함(둘 다 "연락할 방법"이라는 같은 목적이라 버튼 하나로 통합), "보글마켓 오픈톡방 입장하기"는 오픈톡방 URL 전용. 마이페이지(로그인 전 화면 + 로그인 후 프로필 화면 양쪽 모두, 비회원도 문의/오픈톡 버튼을 볼 수 있어야 해서)와 주문상세(반품/환불 신청 버튼 아래)에 배선함. 아무 링크도 설정 안 돼 있으면 섹션 자체가 렌더링되지 않음. 홈 화면에는 아직 안 넣음(요청 시 추가 가능)
+- `tsc`/`build` 통과 확인. 마이그레이션 전이라 아직 값이 비어있는 실제 배포 화면에서 버튼이 안 보이는(정상) 것과 콘솔 에러 없음을 확인함 — 관리자 로그인이 필요한 설정 저장 자체는 계정 정보가 없어 직접 클릭 테스트는 못 함
+- ⚠️ **배포 시 확인 필요**: 실제 Supabase 프로젝트에 `store_settings.inquiry_chat_url`/`kakao_channel_url`/`opentalk_url` 컬럼 마이그레이션이 아직 미적용 — 대화에서 안내한 SQL을 SQL 에디터에서 먼저 실행할 것(실행 전까지는 관리자 설정 저장 시 이 세 필드가 반영되지 않음 — 읽기는 문제없이 동작)
 
 # 진행 중인 기능
 
@@ -513,7 +520,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, cancel_requested, cancel_reason, courier_code, tracking_number, total, shipping_fee | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용). `status`는 `wait`→`paid`→`confirmed`(발주확인)→`ship`→`done` 순서로 진행하고, `done` 이후 `refund_requested`/`refunded`가 곁가지로 붙을 수 있으며 `wait`/`paid` 단계에서는 고객이 직접 `cancelled`로 바꿀 수 있음(RLS/RPC로 서버에서도 강제). `cancel_requested`는 발주확인 이후 고객이 취소를 "요청"했는지 나타내는 플래그 — status는 그대로 두고(배송 준비 계속 진행) 관리자가 승인(cancelled로 전환)하거나 거절(플래그만 해제)할 때까지 대기. `cancel_reason`은 고객이 남긴 취소 사유(선택). `courier_code`/`tracking_number`는 배송중(ship) 처리 시 관리자가 입력 — 스마트택배 API의 택배사 코드 기준(`types/index.ts`의 `COURIER_LABEL`), 문고리/사다드림 주문은 항상 null. `shipping_fee`는 주문 생성 시점에 계산된 택배 배송비 스냅샷(이미 `total`에 포함된 값 — 이후 상품 배송정책이 바뀌어도 과거 주문 금액엔 영향 없음) |
 | `order_items` | id, order_id, event_product_id(→event_products), product_name, price_snapshot, quantity, options(jsonb), stock_value_ids(uuid[]) | 주문 상품 스냅샷. `event_product_id`는 카탈로그 분리 이전엔 `product_id`였던 컬럼 — 가리키는 대상(리스팅 id)은 동일해서 주문/재고/취소 로직은 변경 없음. TS 쪽 `OrderItem.productId` 필드명은 그대로 유지(DB 컬럼명만 바뀜). `options`는 주문 시점에 고른 옵션들의 스냅샷 배열(`[{optionValueId, groupName, valueName, priceDelta}, ...]`, 화면 표시용). `stock_value_ids`는 그중 재고관리 대상이었던 값들만 정렬해 담은 배열(Epic 1) — 취소/환불 시 `event_option_stock`의 어느 조합 행을 복구할지 이 값 그대로 찾는다. 카탈로그의 `has_stock` 설정이 주문 이후 바뀌어도 차감 때 쓴 것과 항상 같은 키로 복구되도록 주문 시점에 스냅샷으로 고정해둔 것 |
 | `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
-| `store_settings` | id(boolean, 항상 true — 싱글턴 강제), bank_name, account_number, account_holder, updated_at | 무통장입금 안내용 계좌 정보. 매장 전체에 한 행만 존재. 조회는 게스트 포함 전체 공개, 수정은 관리자만 |
+| `store_settings` | id(boolean, 항상 true — 싱글턴 강제), bank_name, account_number, account_holder, inquiry_chat_url, kakao_channel_url, opentalk_url, updated_at | 운영 중 자주 바뀌는 매장 전체 설정값(싱글턴 행 하나). 무통장입금 계좌 정보와, 코드 배포 없이 관리자 설정에서 바로 바꾸는 고객 문의/오픈톡방 링크(전부 선택값, 비어있으면 해당 고객 화면 버튼이 안 보임)가 이 한 행에 같이 들어있음. 새 설정 항목(사업자정보, 고객센터 운영시간, 배송/환불 안내 문구 등)을 추가하고 싶으면 이 테이블에 컬럼만 추가하면 되는 구조. 조회는 게스트 포함 전체 공개, 수정은 관리자만 |
 | `banners` | id, image_url, link_type(PRODUCT/EVENT/URL/NONE), link_id, link_url, active, starts_at, ends_at, sort_order | 메인 홈 상단 배너. `link_type=PRODUCT`일 때 `link_id`는 카탈로그 상품(`products`) id — 리스팅이 아니라 카탈로그를 가리켜두고 클릭 시점에 가장 적합한 리스팅으로 해석함(`lib/banner-link.ts`). `active`+`starts_at`/`ends_at`로 노출 여부를 판단(`isBannerLive`), RLS는 활성 배너만 공개 조회(`active or is_admin()`) — 노출 기간 자체는 앱 코드에서 걸러짐. ⚠️ 실제 Supabase 프로젝트에는 아직 이 테이블이 없어서, 이 기능을 쓰려면 `schema.sql`을 다시 실행해야 함 |
 | `push_subscriptions` | id, profile_id(nullable, →profiles), endpoint(unique), p256dh, auth, user_agent, created_at | 브라우저 `PushSubscription`(웹 푸시 구독) 저장소. `profile_id`가 있으면 그 회원 앞 알림(배송시작/완료 등)을 나중에도 이 기기로 받을 수 있고, null이면 비로그인 기기 — "방금 만든 구독으로 즉시 한 번 보내기"(주문 완료) 외에는 다시 찾아 보낼 방법이 없음(guest_pin 같은 별도 식별자가 없어서). 테이블 직접 조회는 관리자만 가능하고(`is_admin()`), 구독 저장/해제는 아래 `save_push_subscription`/`delete_push_subscription` RPC로만 함 — 발송 API(`app/api/push/send`)는 서비스 롤 키로 RLS 자체를 우회해서 전체를 읽음 |
 

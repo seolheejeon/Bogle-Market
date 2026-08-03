@@ -327,6 +327,12 @@ create table if not exists store_settings (
   bank_name text not null default '',
   account_number text not null default '',
   account_holder text not null default '',
+  -- 운영 중 자주 바뀌는 안내/링크류 — 전부 선택값(비어있으면 해당 고객 화면
+  -- 버튼이 그냥 안 보임). types/index.ts의 StoreSettings 주석 참고 — 항목을
+  -- 더 늘리고 싶으면 이 테이블에 컬럼만 추가하면 된다(같은 싱글턴 행 구조).
+  inquiry_chat_url text,
+  kakao_channel_url text,
+  opentalk_url text,
   updated_at timestamptz not null default now()
 );
 

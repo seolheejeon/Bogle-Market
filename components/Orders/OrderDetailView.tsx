@@ -10,6 +10,7 @@ import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL, COURIER_LABEL, COURIER_TRACKI
 import { formatDateTime, formatPrice, formatEventDateChip } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
+import { SupportLinks } from "@/components/SupportLinks";
 
 const STEPS: { value: OrderStatus; label: string }[] = [
   { value: "wait", label: "입금대기" },
@@ -212,6 +213,8 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
                 반품/환불 신청이 접수됐어요. 확인 후 처리해드릴게요.
               </p>
             )}
+
+            <SupportLinks />
 
             {batchSiblings.length > 0 && (
               <div className="mb-4 rounded-[10px] border border-border p-3">
