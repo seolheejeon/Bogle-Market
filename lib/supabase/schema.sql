@@ -43,11 +43,13 @@ create table if not exists events (
   id uuid primary key default gen_random_uuid(),
   type text not null check (type in ('DOOR', 'GROUP_BUY', 'PARCEL')),
   title text not null,
-  -- 이벤트 카드에 붙는 판매용 뱃지 — 관리자가 이벤트 수정 화면에서 직접 고른다.
-  -- SALE(특가)만 예외적으로 lib/order-policy.ts의 마감 정책(STRICT_DEADLINE)에도
-  -- 영향을 준다. 예전엔 is_flash(boolean)였는데, HOT/NEW/예약상품/마감임박처럼
-  -- 더 다양한 뱃지를 지원하려고 badge(text enum)로 바꿨다.
-  badge text not null default 'NONE' check (badge in ('NONE', 'SALE', 'HOT', 'NEW', 'RESERVE', 'DEADLINE')),
+  -- 관리자가 켠 "1시간 특가" 이벤트 여부 — 켜지면 배송방식과 무관하게 항상
+  -- deadline_at이 지나는 즉시 주문이 막힌다(lib/order-policy.ts의
+  -- STRICT_DEADLINE). 예전엔 HOT/NEW/예약상품/마감임박까지 포함한 badge(text
+  -- enum)로 이벤트 단위 표시 뱃지를 함께 관리했지만, 상품마다 다른 뱃지를
+  -- 붙이고 싶다는 요청으로 표시용 뱃지는 products.badge(상품 카탈로그)로
+  -- 옮기고 여기는 순수 정책 플래그(boolean)만 남았다.
+  flash_sale boolean not null default false,
   deadline_at timestamptz not null,
   delivery_at timestamptz not null,
   notice text not null default '',
@@ -89,6 +91,11 @@ create table if not exists products (
   -- 최소 구매 수량 — 상품 상세/빠른 담기는 항상 이 수량으로 시작하고, 장바구니
   -- 등에서 수량을 줄여도 이 밑으로는 못 내려간다(완전히 빼려면 삭제해야 함).
   min_qty integer not null default 1 check (min_qty >= 1),
+  -- 상품 카드/상세에 붙는 표시용 뱃지 — 예전엔 이벤트(events.badge) 단위로
+  -- 관리했지만, 같은 이벤트 안에서도 상품마다 다르게 붙이고 싶다는 요청으로
+  -- 상품(카탈로그) 단위로 옮겼다. 순수 노출용이라 주문/마감 정책과는 무관하다
+  -- ("특가"라는 이름이 겹치지만 events.flash_sale과는 완전히 별개의 값).
+  badge text not null default 'NONE' check (badge in ('NONE', 'SALE', 'HOT', 'NEW', 'RESERVE', 'DEADLINE')),
   -- 택배 배송비 — 상품(카탈로그) 단위로 관리한다(리스팅/이벤트 단위가 아님).
   -- 같은 상품이 여러 이벤트에 걸려도 배송비 정책은 하나. shipping_fee_type이
   -- 실제로 어떻게 부과할지를 정하고, 나머지 세 컬럼은 그 정책에 필요한 값만

@@ -68,6 +68,7 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     // 카탈로그 상품의 공유 재고를 그대로 내려준다 — 리스팅 자체엔 재고가 없다.
     stock: catalog?.stock,
     minQty: catalog?.minQty,
+    badge: catalog?.badge ?? "NONE",
     shippingFee: catalog?.shippingFee,
     shippingFeeType: catalog?.shippingFeeType,
     freeShippingThreshold: catalog?.freeShippingThreshold,
@@ -142,7 +143,7 @@ export async function createEvent(input: Omit<MarketEvent, "id" | "products">): 
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase
       .from("events")
-      .insert({ type: input.type, title: input.title, badge: input.badge, deadline_at: input.deadlineAt, delivery_at: input.deliveryAt, notice: input.notice })
+      .insert({ type: input.type, title: input.title, flash_sale: input.flashSale, deadline_at: input.deadlineAt, delivery_at: input.deliveryAt, notice: input.notice })
       .select()
       .single();
     if (error) throw error;
@@ -160,7 +161,7 @@ export async function updateEvent(id: string, patch: Partial<Omit<MarketEvent, "
     const row: Record<string, unknown> = {};
     if (patch.type !== undefined) row.type = patch.type;
     if (patch.title !== undefined) row.title = patch.title;
-    if (patch.badge !== undefined) row.badge = patch.badge;
+    if (patch.flashSale !== undefined) row.flash_sale = patch.flashSale;
     if (patch.status !== undefined) row.status = patch.status;
     if (patch.deadlineAt !== undefined) row.deadline_at = patch.deadlineAt;
     if (patch.deliveryAt !== undefined) row.delivery_at = patch.deliveryAt;
@@ -184,7 +185,7 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
   const created = await createEvent({
     type: source.type,
     title: overrides.title,
-    badge: source.badge,
+    flashSale: source.flashSale,
     // 원본이 종료 상태였어도 복제본은 항상 새 회차로 진행중 시작.
     status: "open",
     deadlineAt: overrides.deadlineAt,
@@ -260,6 +261,7 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
         base_price: input.basePrice ?? 0,
         stock: input.stock ?? null,
         min_qty: input.minQty ?? 1,
+        badge: input.badge ?? "NONE",
         shipping_fee: input.shippingFee ?? 0,
         shipping_fee_type: input.shippingFeeType ?? "fixed",
         free_shipping_threshold: input.freeShippingThreshold ?? 0,
@@ -315,6 +317,7 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     // 채로 명시적으로 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
     if ("stock" in patch) row.stock = patch.stock ?? null;
     if (patch.minQty !== undefined) row.min_qty = patch.minQty;
+    if (patch.badge !== undefined) row.badge = patch.badge;
     if (patch.shippingFee !== undefined) row.shipping_fee = patch.shippingFee;
     if (patch.shippingFeeType !== undefined) row.shipping_fee_type = patch.shippingFeeType;
     if (patch.freeShippingThreshold !== undefined) row.free_shipping_threshold = patch.freeShippingThreshold;
@@ -1477,6 +1480,7 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     basePrice: row.base_price ?? 0,
     stock: row.stock ?? undefined,
     minQty: row.min_qty ?? 1,
+    badge: row.badge ?? "NONE",
     shippingFee: row.shipping_fee ?? 0,
     shippingFeeType: row.shipping_fee_type ?? "fixed",
     freeShippingThreshold: row.free_shipping_threshold ?? 0,
@@ -1515,6 +1519,7 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     // 카탈로그 상품(products.stock)의 공유 재고를 그대로 내려준다.
     stock: catalog.stock ?? undefined,
     minQty: catalog.min_qty ?? 1,
+    badge: catalog.badge ?? "NONE",
     shippingFee: catalog.shipping_fee ?? 0,
     shippingFeeType: catalog.shipping_fee_type ?? "fixed",
     freeShippingThreshold: catalog.free_shipping_threshold ?? 0,
@@ -1533,7 +1538,7 @@ function mapSupabaseEvent(row: Record<string, any>): MarketEvent {
     id: row.id,
     type: row.type,
     title: row.title,
-    badge: row.badge ?? "NONE",
+    flashSale: row.flash_sale ?? false,
     status: row.status ?? "open",
     deadlineAt: row.deadline_at,
     deliveryAt: row.delivery_at,

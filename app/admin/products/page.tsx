@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { listCatalogProducts, createCatalogProduct, updateCatalogProduct, deleteCatalogProduct, listEvents, addEventProduct, removeEventProduct } from "@/lib/data";
-import type { CatalogProduct, FulfillmentType, MarketEvent, ProductDetailBlock, ProductOptionGroup, ShippingFeeType } from "@/types";
+import type { CatalogProduct, EventBadge, FulfillmentType, MarketEvent, ProductDetailBlock, ProductOptionGroup, ShippingFeeType } from "@/types";
 import { EVENT_TYPE_LABEL, COURIER_OPTIONS, FULFILLMENT_TYPE_LABEL, SHIPPING_FEE_TYPE_LABEL } from "@/types";
 
 // 택배사 select에서 기본 목록(COURIER_OPTIONS)에 없는 값을 직접 입력할 때 쓰는
@@ -14,6 +14,8 @@ import { ProductPhoto } from "@/components/ProductPhoto";
 import { PhotoUploader } from "@/components/admin/PhotoUploader";
 import { DetailBlockEditor } from "@/components/admin/DetailBlockEditor";
 import { ProductOptionEditor } from "@/components/admin/ProductOptionEditor";
+import { ProductBadgePicker } from "@/components/admin/ProductBadgePicker";
+import { EventBadgeTag } from "@/components/Badge";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
 
 // 상품은 하나만 존재하고 여러 이벤트가 재사용한다 — 여기서 고치는 사진/설명은
@@ -103,7 +105,10 @@ export default function AdminProductsPage() {
               <div className="flex items-center gap-3">
                 <ProductPhoto photo={p.photos?.[0] ?? p.emoji} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-accent-soft text-xl" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-semibold">{p.name}</p>
+                  <p className="flex items-center gap-1.5 truncate text-[13px] font-semibold">
+                    {p.name}
+                    <EventBadgeTag badge={p.badge} />
+                  </p>
                   <p className="truncate text-[12px] text-text-muted">{[p.origin, p.weight, p.storage].filter(Boolean).join(" · ") || "추가 정보 없음"}</p>
                   <p className="truncate text-[11.5px] text-text-muted">
                     기준가 {formatPrice(p.basePrice ?? 0)}
@@ -155,6 +160,7 @@ function CatalogProductForm({
   const [costPrice, setCostPrice] = useState(initial?.costPrice !== undefined ? String(initial.costPrice) : "");
   const [stock, setStock] = useState(initial?.stock !== undefined ? String(initial.stock) : "");
   const [minQty, setMinQty] = useState(initial?.minQty !== undefined ? String(initial.minQty) : "1");
+  const [badge, setBadge] = useState<EventBadge>(initial?.badge ?? "NONE");
   const [shippingFeeType, setShippingFeeType] = useState<ShippingFeeType>(initial?.shippingFeeType ?? "fixed");
   const [shippingFee, setShippingFee] = useState(initial?.shippingFee !== undefined ? String(initial.shippingFee) : "");
   const [freeShippingThreshold, setFreeShippingThreshold] = useState(
@@ -202,6 +208,7 @@ function CatalogProductForm({
         costPrice: costPrice.trim() === "" ? 0 : Math.max(0, Number(costPrice) || 0),
         stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
         minQty: minQty.trim() === "" ? 1 : Math.max(1, Number(minQty) || 1),
+        badge,
         shippingFee: shippingFee.trim() === "" ? 0 : Math.max(0, Number(shippingFee) || 0),
         shippingFeeType,
         freeShippingThreshold: freeShippingThreshold.trim() === "" ? 0 : Math.max(0, Number(freeShippingThreshold) || 0),
@@ -255,6 +262,10 @@ function CatalogProductForm({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
+          <div>
+            <p className="mb-1.5 text-[12px] font-bold text-text-muted">뱃지 (홈/카테고리/상품상세 카드에 표시돼요)</p>
+            <ProductBadgePicker value={badge} onChange={setBadge} />
+          </div>
           <div>
             <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
             <DetailBlockEditor blocks={detailBlocks} onChange={setDetailBlocks} />

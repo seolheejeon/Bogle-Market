@@ -252,7 +252,6 @@ export function ProductDetailView({ productId }: { productId: string }) {
 
         <button onClick={() => router.push(`/event/${event.id}`)} className="mt-3.5 flex items-center gap-1.5">
           <EventTypeBadge type={product.deliveryType ?? event.type} />
-          <EventBadgeTag badge={event.badge} />
           <span className="text-[12px] font-semibold text-text-muted">{event.title}</span>
         </button>
         <p className="mt-1 text-[12px] text-text-muted">

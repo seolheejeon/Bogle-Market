@@ -14,12 +14,11 @@ import {
   getEventProductCosts,
   getSoldQuantities,
 } from "@/lib/data";
-import type { CatalogProduct, EventBadge, EventType, MarketEvent, Product } from "@/types";
+import type { CatalogProduct, EventType, MarketEvent, Product } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice, toDateInputValue, dateInputValueToIso } from "@/lib/format";
 import { generateStockCombos } from "@/lib/product-options";
 import { ProductPhoto } from "@/components/ProductPhoto";
-import { EventBadgePicker } from "@/components/admin/EventBadgePicker";
 import { useUnsavedChangesGuard } from "@/lib/useUnsavedChangesGuard";
 
 const DELIVERY_TYPES: EventType[] = ["DOOR", "GROUP_BUY", "PARCEL"];
@@ -30,13 +29,14 @@ function toLocalInputValue(iso: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-// 이벤트 상단 정보(이름/뱃지/마감/배송일/안내문구)의 편집용 로컬 상태 — 저장
-// 버튼을 누르기 전까지는 이 draft만 바뀌고 서버에는 아무것도 반영되지
+// 이벤트 상단 정보(이름/1시간특가/마감/배송일/안내문구)의 편집용 로컬 상태 —
+// 저장 버튼을 누르기 전까지는 이 draft만 바뀌고 서버에는 아무것도 반영되지
 // 않는다. datetime-local/date input은 그 형식 그대로 들고 있다가 저장 시점에
-// ISO로 변환한다(예전 blur 핸들러가 하던 변환을 그대로 가져옴).
+// ISO로 변환한다(예전 blur 핸들러가 하던 변환을 그대로 가져옴). 뱃지(HOT/NEW
+// 등 표시용 라벨)는 더 이상 이벤트가 아니라 상품(상품 관리)에서 관리한다.
 interface EventDraft {
   title: string;
-  badge: EventBadge;
+  flashSale: boolean;
   deadlineAtLocal: string;
   deliveryAtDate: string;
   notice: string;
@@ -45,7 +45,7 @@ interface EventDraft {
 function toDraft(e: MarketEvent): EventDraft {
   return {
     title: e.title,
-    badge: e.badge,
+    flashSale: e.flashSale,
     deadlineAtLocal: toLocalInputValue(e.deadlineAt),
     deliveryAtDate: toDateInputValue(e.deliveryAt),
     notice: e.notice,
@@ -55,7 +55,7 @@ function toDraft(e: MarketEvent): EventDraft {
 function draftToPatch(draft: EventDraft): Partial<MarketEvent> {
   return {
     title: draft.title,
-    badge: draft.badge,
+    flashSale: draft.flashSale,
     deadlineAt: new Date(draft.deadlineAtLocal).toISOString(),
     deliveryAt: dateInputValueToIso(draft.deliveryAtDate),
     notice: draft.notice,
@@ -63,7 +63,7 @@ function draftToPatch(draft: EventDraft): Partial<MarketEvent> {
 }
 
 function draftsEqual(a: EventDraft, b: EventDraft): boolean {
-  return a.title === b.title && a.badge === b.badge && a.deadlineAtLocal === b.deadlineAtLocal && a.deliveryAtDate === b.deliveryAtDate && a.notice === b.notice;
+  return a.title === b.title && a.flashSale === b.flashSale && a.deadlineAtLocal === b.deadlineAtLocal && a.deliveryAtDate === b.deliveryAtDate && a.notice === b.notice;
 }
 
 export default function AdminEventEditPage({ params }: { params: Promise<{ id: string }> }) {
@@ -167,28 +167,40 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
             onChange={(e) => updateDraft({ title: e.target.value })}
           />
         </label>
-        <div>
-          <p className="mb-1.5 text-[12.5px] font-semibold text-text-muted">뱃지</p>
-          <EventBadgePicker value={draft.badge} onChange={(badge) => updateDraft({ badge })} />
-        </div>
-        <label className="text-[12.5px] font-semibold text-text-muted">
-          주문 마감
-          <input
-            type="datetime-local"
-            className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-            value={draft.deadlineAtLocal}
-            onChange={(e) => updateDraft({ deadlineAtLocal: e.target.value })}
-          />
-        </label>
-        <label className="text-[12.5px] font-semibold text-text-muted">
-          배송일
-          <input
-            type="date"
-            className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-            value={draft.deliveryAtDate}
-            onChange={(e) => updateDraft({ deliveryAtDate: e.target.value })}
-          />
-        </label>
+        {/* 1시간 특가는 배송방식과 무관하게 마감이 곧 종료로 취급되는(STRICT_DEADLINE)
+            특수 이벤트라 주문마감이 없는 택배에서는 의미가 없다 — 택배는 숨긴다.
+            상품 카드에 붙는 HOT/NEW 같은 표시용 뱃지는 이제 상품 관리에서 정한다. */}
+        {event.type !== "PARCEL" && (
+          <label className="flex items-center gap-2 text-[12.5px] font-semibold text-text-muted">
+            <input type="checkbox" checked={draft.flashSale} onChange={(e) => updateDraft({ flashSale: e.target.checked })} />
+            🔥 1시간 특가 이벤트로 지정 (마감이 지나면 배송방식과 무관하게 즉시 주문 마감)
+          </label>
+        )}
+        {/* 택배는 이벤트가 아니라 상품(출고방식/배송비/택배사) 기준으로 운영돼서
+            이벤트 단위 주문마감/배송일이 의미가 없다 — 택배 이벤트에서는
+            숨긴다(값 자체는 그대로 남아있고 저장 시 건드리지 않는다). */}
+        {event.type !== "PARCEL" && (
+          <>
+            <label className="text-[12.5px] font-semibold text-text-muted">
+              주문 마감
+              <input
+                type="datetime-local"
+                className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+                value={draft.deadlineAtLocal}
+                onChange={(e) => updateDraft({ deadlineAtLocal: e.target.value })}
+              />
+            </label>
+            <label className="text-[12.5px] font-semibold text-text-muted">
+              배송일
+              <input
+                type="date"
+                className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+                value={draft.deliveryAtDate}
+                onChange={(e) => updateDraft({ deliveryAtDate: e.target.value })}
+              />
+            </label>
+          </>
+        )}
         <label className="text-[12.5px] font-semibold text-text-muted">
           안내 문구
           <textarea
@@ -339,50 +351,90 @@ function EventProductRow({
   const isVisible = product.visible !== false;
 
   if (!editing) {
+    const optionStockNote = (() => {
+      const combos = generateStockCombos(product.optionGroups ?? []);
+      if (combos.length === 0) return null;
+      return `${combos[0].valueIds.length > 1 ? "옵션조합재고" : "옵션재고"} ${combos
+        .map((c) => {
+          const key = c.valueIds.join(",");
+          return `${comboLabel(product, c.valueIds)} ${product.optionStockByCombo?.[key] ?? c.defaultStock}개`;
+        })
+        .join(", ")}`;
+    })();
+
     return (
-      <div className="flex items-center gap-3 rounded-lg border border-border p-2.5">
-        <ProductPhoto photo={product.photos?.[0] ?? product.emoji} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-xl" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-semibold">
-            {product.name}
-            {!isVisible && <span className="ml-1.5 rounded-md bg-bg-sunken px-1.5 py-0.5 text-[10.5px] font-bold text-text-muted">숨김</span>}
-          </p>
-          <p className="text-[12px] text-text-muted">
-            {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
-            {product.stock !== undefined && ` · 재고 ${product.stock}개(상품관리 공유)`}
-            {isSoldout && <span className="ml-1 font-bold text-red-600">품절</span>}
-          </p>
-          <p className="text-[11.5px] text-text-muted">
-            원가 {formatPrice(costPrice ?? 0)} · 개당 예상수익 {formatPrice(profitPerItem)} · 판매 {soldQty}개 · 누적 예상수익 {formatPrice(totalProfit)}
-          </p>
-          {(() => {
-            const combos = generateStockCombos(product.optionGroups ?? []);
-            if (combos.length === 0) return null;
-            return (
-              <p className="truncate text-[11.5px] text-text-muted">
-                {combos[0].valueIds.length > 1 ? "옵션조합재고" : "옵션재고"}{" "}
-                {combos
-                  .map((c) => {
-                    const key = c.valueIds.join(",");
-                    return `${comboLabel(product, c.valueIds)} ${product.optionStockByCombo?.[key] ?? c.defaultStock}개`;
-                  })
-                  .join(", ")}
+      <>
+        {/* PC 레이아웃 — 한 줄에 사진/정보/버튼을 나란히 배치. 좁은 화면에서는
+            정보와 버튼이 서로 자리를 다투며 상품명이 세로로 줄바꿈되고 버튼이
+            좁아지는 문제가 있어, 모바일에서는 아래의 별도 스택형 레이아웃을 쓴다. */}
+        <div className="hidden items-center gap-3 rounded-lg border border-border p-2.5 sm:flex">
+          <ProductPhoto photo={product.photos?.[0] ?? product.emoji} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft text-xl" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13px] font-semibold">
+              {product.name}
+              {!isVisible && <span className="ml-1.5 rounded-md bg-bg-sunken px-1.5 py-0.5 text-[10.5px] font-bold text-text-muted">숨김</span>}
+            </p>
+            <p className="text-[12px] text-text-muted">
+              {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
+              {product.stock !== undefined && ` · 재고 ${product.stock}개(상품관리 공유)`}
+              {isSoldout && <span className="ml-1 font-bold text-red-600">품절</span>}
+            </p>
+            <p className="text-[11.5px] text-text-muted">
+              원가 {formatPrice(costPrice ?? 0)} · 개당 예상수익 {formatPrice(profitPerItem)} · 판매 {soldQty}개 · 누적 예상수익 {formatPrice(totalProfit)}
+            </p>
+            {optionStockNote && <p className="truncate text-[11.5px] text-text-muted">{optionStockNote}</p>}
+          </div>
+          <div className="flex flex-wrap justify-end gap-1.5">
+            <button onClick={toggleVisible} disabled={busy} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50">
+              {isVisible ? "숨기기" : "노출"}
+            </button>
+            <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
+              가격/원가 수정
+            </button>
+            <button onClick={remove} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold text-red-600">
+              제거
+            </button>
+          </div>
+        </div>
+
+        {/* 모바일 레이아웃 — 사진+상품명(1줄 ellipsis)을 맨 위에, 나머지 정보는
+            한 줄씩 세로로 쌓고, 버튼은 그리드로 균등 배치한다. */}
+        <div className="flex flex-col gap-2 rounded-lg border border-border p-2.5 sm:hidden">
+          <div className="flex items-center gap-2.5">
+            <ProductPhoto photo={product.photos?.[0] ?? product.emoji} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-accent-soft text-xl" />
+            <p className="min-w-0 flex-1 truncate text-[13px] font-semibold">
+              {product.name}
+              {!isVisible && <span className="ml-1.5 rounded-md bg-bg-sunken px-1.5 py-0.5 text-[10.5px] font-bold text-text-muted">숨김</span>}
+            </p>
+          </div>
+          <div className="flex flex-col gap-0.5 text-[12px] text-text-muted">
+            <p>
+              판매가 {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
+            </p>
+            <p>원가 {formatPrice(costPrice ?? 0)}</p>
+            {product.stock !== undefined && (
+              <p>
+                재고 {product.stock}개{isSoldout && <span className="ml-1 font-bold text-red-600">품절</span>}
               </p>
-            );
-          })()}
+            )}
+            <p>
+              판매 {soldQty}개 · 예상수익 {formatPrice(totalProfit)}
+            </p>
+            {optionStockNote && <p className="truncate">{optionStockNote}</p>}
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            <button onClick={toggleVisible} disabled={busy} className="rounded-[7px] border border-border py-1.5 text-[12px] font-semibold disabled:opacity-50">
+              {isVisible ? "숨기기" : "노출"}
+            </button>
+            <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border py-1.5 text-[12px] font-semibold">
+              가격/원가 수정
+            </button>
+            <button onClick={remove} className="rounded-[7px] border border-border py-1.5 text-[12px] font-semibold text-red-600">
+              제거
+            </button>
+          </div>
         </div>
-        <div className="flex flex-wrap justify-end gap-1.5">
-          <button onClick={toggleVisible} disabled={busy} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50">
-            {isVisible ? "숨기기" : "노출"}
-          </button>
-          <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
-            가격/원가 수정
-          </button>
-          <button onClick={remove} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold text-red-600">
-            제거
-          </button>
-        </div>
-      </div>
+      </>
     );
   }
 

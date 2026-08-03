@@ -7,26 +7,26 @@
 -- 카탈로그 상품(예: 유정란 20구)이 문고리 1회차/2회차 두 곳에 걸려도 products
 -- 행은 하나뿐이고, event_products 리스팅만 두 개 생긴다(lib/mock-data.ts와 동일).
 
-insert into events (id, type, title, badge, deadline_at, delivery_at, notice) values
-  ('00000000-0000-0000-0000-000000000001', 'PARCEL', '돌문어 1시간 특가!', 'SALE',
+insert into events (id, type, title, flash_sale, deadline_at, delivery_at, notice) values
+  ('00000000-0000-0000-0000-000000000001', 'PARCEL', '돌문어 1시간 특가!', true,
     now() + interval '45 minutes', now() + interval '1 day',
     '한정 수량 특가 상품이에요. 오늘 당일발송됩니다.'),
-  ('00000000-0000-0000-0000-000000000002', 'DOOR', '7/24 문고리배송', 'NONE',
+  ('00000000-0000-0000-0000-000000000002', 'DOOR', '7/24 문고리배송', false,
     now() + interval '27 hours', now() + interval '48 hours',
     '현관 앞에 안전하게 배송됩니다.
 부재 시 문 앞, 보관함에 두고 사전 전송드려요.
 아이스팩과 보냉백은 회수해 주세요.'),
-  ('00000000-0000-0000-0000-000000000003', 'DOOR', '7/28 문고리배송', 'NEW',
+  ('00000000-0000-0000-0000-000000000003', 'DOOR', '7/28 문고리배송', false,
     now() + interval '5 days 3 hours', now() + interval '5 days 27 hours',
     '현관 앞에 안전하게 배송됩니다.
 부재 시 문 앞, 보관함에 두고 사전 전송드려요.'),
-  ('00000000-0000-0000-0000-000000000004', 'GROUP_BUY', '대전 사다드림 특집', 'NONE',
+  ('00000000-0000-0000-0000-000000000004', 'GROUP_BUY', '대전 사다드림 특집', false,
     now() + interval '30 hours', now() + interval '54 hours',
     '대전 현지에서 직접 사다드리는 특산물이에요. 수량 한정으로 조기 마감될 수 있어요.'),
-  ('00000000-0000-0000-0000-000000000005', 'GROUP_BUY', '안동 사다드림 특집', 'NONE',
+  ('00000000-0000-0000-0000-000000000005', 'GROUP_BUY', '안동 사다드림 특집', false,
     now() + interval '9 days', now() + interval '10 days',
     '안동 현지에서 직접 사다드리는 특산물이에요.'),
-  ('00000000-0000-0000-0000-000000000006', 'PARCEL', '대왕복숭아 (황도)', 'NONE',
+  ('00000000-0000-0000-0000-000000000006', 'PARCEL', '대왕복숭아 (황도)', false,
     now() + interval '48 hours', now() + interval '72 hours',
     '신선하게 당일 발송해드립니다.')
 on conflict (id) do nothing;

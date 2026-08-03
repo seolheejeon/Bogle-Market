@@ -36,7 +36,6 @@ export function EventDetailView({ eventId }: { eventId: string }) {
       <div className="p-4">
         <div className="mb-2 flex items-center gap-1.5">
           <EventTypeBadge type={event.type} />
-          <EventBadgeTag badge={event.badge} />
         </div>
         <p className="text-[17px] font-extrabold">{event.title}</p>
         <p className="mt-1 text-[13px] text-text-muted">
@@ -61,9 +60,12 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                 />
               </Link>
               <div className="min-w-0 flex-1">
-                <Link href={`/product/${product.id}`} className="mb-0.5 block truncate text-[13.5px] font-semibold">
-                  {product.name}
-                </Link>
+                <div className="mb-0.5 flex items-center gap-1.5">
+                  <Link href={`/product/${product.id}`} className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">
+                    {product.name}
+                  </Link>
+                  <EventBadgeTag badge={product.badge} />
+                </div>
                 <p className="text-[13.5px] font-bold">{formatPrice(product.price)}</p>
               </div>
               {!closed && product.stock !== 0 && hasRequiredOptions(product) ? (

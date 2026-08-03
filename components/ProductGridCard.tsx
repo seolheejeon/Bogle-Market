@@ -3,6 +3,7 @@ import type { Product } from "@/types";
 import { formatPrice } from "@/lib/format";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
+import { EventBadgeTag } from "@/components/Badge";
 import { hasRequiredOptions } from "@/lib/product-options";
 
 // 색상/사이즈처럼 반드시 골라야 하는 옵션이 있는 상품은 그리드에서 바로
@@ -22,6 +23,11 @@ export function ProductGridCard({ product, rankBadge, closed }: { product: Produ
         />
         {rankBadge && (
           <span className="absolute top-1.5 left-1.5 rounded-md bg-accent px-1.5 py-0.5 text-[10px] font-extrabold text-white">{rankBadge}</span>
+        )}
+        {product.badge && product.badge !== "NONE" && (
+          <span className="absolute top-1.5 right-1.5">
+            <EventBadgeTag badge={product.badge} />
+          </span>
         )}
       </Link>
       <Link href={`/product/${product.id}`} className="mt-1.5 mb-0.5 block text-[13.5px] font-semibold">

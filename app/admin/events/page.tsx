@@ -7,7 +7,6 @@ import { listEvents, deleteEvent, duplicateEvent, updateEvent } from "@/lib/data
 import type { MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatDateTime, toDateInputValue, dateInputValueToIso } from "@/lib/format";
-import { EventBadgeTag } from "@/components/Badge";
 
 function toLocalInputValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -98,12 +97,14 @@ export default function AdminEventsPage() {
                 <div>
                   <div className="flex items-center gap-1.5">
                     <span className="rounded-md bg-bg-sunken px-1.5 py-0.5 text-[11px] font-bold text-text-muted">{EVENT_TYPE_LABEL[e.type]}</span>
-                    <EventBadgeTag badge={e.badge} />
+                    {e.flashSale && (
+                      <span className="rounded-md bg-[var(--badge-flash-bg)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--badge-flash-fg)]">🔥 1시간 특가</span>
+                    )}
                     {ended && <span className="rounded-md bg-text-muted px-1.5 py-0.5 text-[10.5px] font-bold text-white">종료됨</span>}
                     <span className="text-[14px] font-bold">{e.title}</span>
                   </div>
                   <p className="mt-1 text-[12px] text-text-muted">
-                    상품 {e.products.length}개 · 마감 {formatDateTime(e.deadlineAt)}
+                    상품 {e.products.length}개{e.type !== "PARCEL" && <> · 마감 {formatDateTime(e.deadlineAt)}</>}
                   </p>
                 </div>
                 <div className="flex flex-wrap justify-end gap-1.5">
@@ -161,10 +162,11 @@ function DuplicateForm({ event, onDone, onCreated }: { event: MarketEvent; onDon
     setSubmitting(true);
     setError(null);
     try {
+      const now = new Date().toISOString();
       const created = await duplicateEvent(event.id, {
         title: title.trim(),
-        deadlineAt: new Date(deadlineAt).toISOString(),
-        deliveryAt: dateInputValueToIso(deliveryAt),
+        deadlineAt: event.type === "PARCEL" ? now : new Date(deadlineAt).toISOString(),
+        deliveryAt: event.type === "PARCEL" ? now : dateInputValueToIso(deliveryAt),
       });
       onCreated();
       router.push(`/admin/events/${created.id}`);
@@ -176,28 +178,32 @@ function DuplicateForm({ event, onDone, onCreated }: { event: MarketEvent; onDon
 
   return (
     <div className="mt-3 flex flex-col gap-2.5 rounded-[10px] border border-dashed border-accent bg-accent-soft p-3">
-      <p className="text-[12px] text-text-muted">상품 {event.products.length}개가 그대로 복사돼요. 이 회차만 다른 값(제목/마감/배송일)만 정해주세요.</p>
+      <p className="text-[12px] text-text-muted">
+        상품 {event.products.length}개가 그대로 복사돼요. {event.type === "PARCEL" ? "이 회차만 다른 이름만 정해주세요." : "이 회차만 다른 값(제목/마감/배송일)만 정해주세요."}
+      </p>
       <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="이벤트 이름" />
-      <div className="flex gap-2">
-        <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
-          주문 마감
-          <input
-            type="datetime-local"
-            className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
-            value={deadlineAt}
-            onChange={(e) => setDeadlineAt(e.target.value)}
-          />
-        </label>
-        <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
-          배송일
-          <input
-            type="date"
-            className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
-            value={deliveryAt}
-            onChange={(e) => setDeliveryAt(e.target.value)}
-          />
-        </label>
-      </div>
+      {event.type !== "PARCEL" && (
+        <div className="flex gap-2">
+          <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
+            주문 마감
+            <input
+              type="datetime-local"
+              className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
+              value={deadlineAt}
+              onChange={(e) => setDeadlineAt(e.target.value)}
+            />
+          </label>
+          <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
+            배송일
+            <input
+              type="date"
+              className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
+              value={deliveryAt}
+              onChange={(e) => setDeliveryAt(e.target.value)}
+            />
+          </label>
+        </div>
+      )}
       {error && <p className="text-[12px] font-semibold text-red-600">{error}</p>}
       <div className="flex gap-2">
         <button onClick={submit} disabled={submitting} className="rounded-[8px] bg-accent px-4 py-2 text-[12.5px] font-bold text-white disabled:opacity-50">

@@ -36,7 +36,7 @@ export function HomeView() {
     listBanners().then(setBanners);
   }, []);
 
-  const flash = events?.find((e) => e.badge === "SALE");
+  const flash = events?.find((e) => e.flashSale);
   const door = events ? nearestOfType(events, "DOOR") : undefined;
   const group = events ? nearestOfType(events, "GROUP_BUY") : undefined;
 

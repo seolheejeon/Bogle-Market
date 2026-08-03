@@ -81,6 +81,12 @@ export interface CatalogProduct {
   // 최소 구매 수량 — 없으면 1(제한 없음과 동일). 상품 상세/빠른 담기가 항상
   // 이 수량으로 시작하고, 장바구니 등에서 이 밑으로는 못 내려간다.
   minQty?: number;
+  // 상품 카드/상세에 붙는 표시용 뱃지(HOT/NEW/특가 등) — 예전엔 이벤트
+  // 단위로 관리했지만, 같은 이벤트 안에서도 상품마다 다르게 붙이고 싶다는
+  // 요청으로 상품(카탈로그) 단위로 옮겼다. 순수 노출용이라 주문/마감 정책과는
+  // 무관하다 — "특가"라는 이름이 겹치지만 이벤트의 flashSale(1시간 특가)과는
+  // 완전히 별개의 값이니 헷갈리지 않도록 주의.
+  badge?: EventBadge;
   // 택배 배송비 — 상품(카탈로그) 단위로 관리한다. 없으면 0(배송비 없음).
   // 실제로 어떻게 부과되는지는 shippingFeeType이 정한다.
   shippingFee?: number;
@@ -135,6 +141,9 @@ export interface Product {
   // 카탈로그(CatalogProduct)에서 그대로 내려오는 값들 — 리스팅별로 달라지지
   // 않는다(origin/weight와 동일한 성격).
   minQty?: number;
+  // 카탈로그의 표시용 뱃지(CatalogProduct.badge) — 리스팅마다 달라지지 않고
+  // 이 상품을 파는 모든 이벤트에서 항상 같게 보인다.
+  badge?: EventBadge;
   shippingFee?: number;
   shippingFeeType?: ShippingFeeType;
   freeShippingThreshold?: number;
@@ -159,10 +168,10 @@ export interface Product {
   optionStockByCombo?: Record<string, number>;
 }
 
-// 이벤트 카드에 붙는 판매용 뱃지 — 배송방식 뱃지(EventTypeBadge)와는 별개로
-// 관리자가 이벤트 수정 화면에서 직접 고른다. SALE(특가)만 예외적으로
-// lib/order-policy.ts의 마감 정책(STRICT_DEADLINE)에도 영향을 준다 — 나머지는
-// 순수 노출용 라벨이라 주문 로직과 무관하다.
+// 상품 카드/상세에 붙는 표시용 뱃지 — 관리자가 상품 관리(CatalogProduct.badge)
+// 화면에서 직접 고른다. 순수 노출용 라벨이라 주문 로직과는 무관하다(예전엔
+// 이벤트 단위로 관리하며 SALE만 예외적으로 마감 정책에도 영향을 줬지만, 지금은
+// 완전히 분리되어 그 역할은 MarketEvent.flashSale이 대신한다).
 export type EventBadge = "NONE" | "SALE" | "HOT" | "NEW" | "RESERVE" | "DEADLINE";
 
 export const EVENT_BADGE_LABEL: Record<EventBadge, string> = {
@@ -183,7 +192,12 @@ export interface MarketEvent {
   id: string;
   type: EventType;
   title: string;
-  badge: EventBadge;
+  // 관리자가 켠 "1시간 특가" 이벤트 여부 — 켜지면 배송방식과 무관하게 항상
+  // 마감(deadlineAt)이 지나는 즉시 주문이 막히고(lib/order-policy.ts의
+  // STRICT_DEADLINE), 홈 화면 히어로에 특가 슬라이드로 노출된다. 상품에
+  // 붙이는 표시용 "특가" 뱃지(CatalogProduct.badge)와는 이름만 같을 뿐
+  // 서로 아무 영향을 주지 않는 별개의 값.
+  flashSale: boolean;
   status: EventStatus;
   deadlineAt: string; // ISO
   deliveryAt: string; // ISO
@@ -227,7 +241,7 @@ export interface MarketEventSeed {
   id: string;
   type: EventType;
   title: string;
-  badge: EventBadge;
+  flashSale: boolean;
   status: EventStatus;
   deadlineAt: string;
   deliveryAt: string;
