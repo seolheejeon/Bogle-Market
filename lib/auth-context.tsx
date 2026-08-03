@@ -23,10 +23,10 @@ interface AuthContextValue {
   profile: Profile | null;
   loading: boolean;
   isMockMode: boolean;
-  signUp: (input: { username: string; password: string; nickname: string; phone: string; address: SignUpAddressInput; asAdmin?: boolean }) => Promise<AuthResult>;
+  signUp: (input: { username: string; password: string; name: string; nickname: string; phone: string; address: SignUpAddressInput; asAdmin?: boolean }) => Promise<AuthResult>;
   signIn: (username: string, password: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
-  updateProfile: (patch: Partial<Pick<Profile, "nickname" | "phone">>) => Promise<AuthResult>;
+  updateProfile: (patch: Partial<Pick<Profile, "name" | "nickname" | "phone">>) => Promise<AuthResult>;
   changePassword: (newPassword: string) => Promise<AuthResult>;
   checkUsernameTaken: (username: string) => Promise<boolean>;
   checkPhoneTaken: (phone: string) => Promise<boolean>;
@@ -45,7 +45,7 @@ function toInternalEmail(username: string): string {
 }
 
 function mapProfileRow(row: Record<string, any>): Profile {
-  return { id: row.id, username: row.username, nickname: row.nickname, phone: row.phone, isAdmin: row.is_admin };
+  return { id: row.id, username: row.username, name: row.name ?? "", nickname: row.nickname, phone: row.phone, isAdmin: row.is_admin };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -77,18 +77,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const signUp = useCallback<AuthContextValue["signUp"]>(async ({ username, password, nickname, phone, address, asAdmin }) => {
+  const signUp = useCallback<AuthContextValue["signUp"]>(async ({ username, password, name, nickname, phone, address, asAdmin }) => {
     if (isSupabaseConfigured) {
       const supabase = getSupabaseBrowserClient()!;
       const { data, error } = await supabase.auth.signUp({ email: toInternalEmail(username), password });
       if (error) return { error: error.message };
       const userId = data.user?.id;
       if (!userId) return { error: "가입에 실패했어요. 잠시 후 다시 시도해주세요." };
-      const { error: profileError } = await supabase.from("profiles").insert({ id: userId, username, nickname, phone, is_admin: false });
+      const { error: profileError } = await supabase.from("profiles").insert({ id: userId, username, name, nickname, phone, is_admin: false });
       if (profileError) return { error: profileError.message };
       await saveAddress({
         profileId: userId,
-        name: nickname,
+        name,
         phone,
         zonecode: address.zonecode,
         roadAddress: address.roadAddress,
@@ -98,20 +98,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         memo: address.memo,
         isDefault: true,
       });
-      const newProfile: Profile = { id: userId, username, nickname, phone, isAdmin: false };
+      const newProfile: Profile = { id: userId, username, name, nickname, phone, isAdmin: false };
       setProfile(newProfile);
       return {};
     }
     const accounts = loadAccounts();
     if (accounts[username]) return { error: "이미 사용 중인 아이디예요." };
     if (Object.values(accounts).some((a) => a.profile.phone === phone)) return { error: "이미 가입된 휴대폰번호예요." };
-    const newProfile: Profile = { id: genId("user"), username, nickname, phone, isAdmin: Boolean(asAdmin) };
+    const newProfile: Profile = { id: genId("user"), username, name, nickname, phone, isAdmin: Boolean(asAdmin) };
     accounts[username] = { password, profile: newProfile };
     saveAccounts(accounts);
     saveAuthProfile(newProfile);
     await saveAddress({
       profileId: newProfile.id,
-      name: nickname,
+      name,
       phone,
       zonecode: address.zonecode,
       roadAddress: address.roadAddress,
@@ -161,6 +161,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isSupabaseConfigured) {
         const supabase = getSupabaseBrowserClient()!;
         const row: Record<string, unknown> = {};
+        if (patch.name !== undefined) row.name = patch.name;
         if (patch.nickname !== undefined) row.nickname = patch.nickname;
         if (patch.phone !== undefined) row.phone = patch.phone;
         const { error } = await supabase.from("profiles").update(row).eq("id", profile.id);

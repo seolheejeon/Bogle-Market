@@ -59,7 +59,7 @@ export function CheckoutView() {
 
   useEffect(() => {
     if (profile) {
-      setName(profile.nickname);
+      setName(profile.name);
       setPhone(profile.phone);
       getDefaultAddress(profile.id).then((addr) => {
         if (!addr) return;

@@ -24,6 +24,7 @@ export function MyPageView() {
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>("unchecked");
   const [suPassword, setSuPassword] = useState("");
   const [suPasswordConfirm, setSuPasswordConfirm] = useState("");
+  const [name, setName] = useState("");
   const [nickname, setNickname] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState<AddressFieldsValue>(EMPTY_ADDRESS_FIELDS);
@@ -83,6 +84,10 @@ export function MyPageView() {
       setError("비밀번호가 일치하지 않아요.");
       return;
     }
+    if (!name.trim()) {
+      setError("이름을 입력해 주세요.");
+      return;
+    }
     if (!nickname.trim()) {
       setError("오픈채팅 닉네임을 입력해 주세요.");
       return;
@@ -114,6 +119,7 @@ export function MyPageView() {
       const result = await signUp({
         username: suUsername.trim(),
         password: suPassword,
+        name: name.trim(),
         nickname: nickname.trim(),
         phone: phoneDigits,
         address: {
@@ -209,6 +215,7 @@ export function MyPageView() {
             value={suPasswordConfirm}
             onChange={(e) => setSuPasswordConfirm(e.target.value)}
           />
+          <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="이름" value={name} onChange={(e) => setName(e.target.value)} />
           <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="오픈채팅 닉네임" value={nickname} onChange={(e) => setNickname(e.target.value)} />
           <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="휴대폰번호" value={phone} onChange={(e) => setPhone(e.target.value)} />
 
@@ -244,7 +251,7 @@ function ProfilePanel({
   signOut,
 }: {
   profile: Profile;
-  updateProfile: (patch: Partial<Pick<Profile, "nickname" | "phone">>) => Promise<{ error?: string }>;
+  updateProfile: (patch: Partial<Pick<Profile, "name" | "nickname" | "phone">>) => Promise<{ error?: string }>;
   changePassword: (newPassword: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 }) {
@@ -255,6 +262,7 @@ function ProfilePanel({
   // 같은 섹션을 추가하고 싶으면 비밀번호 섹션 앞뒤로 같은 모양의 블록만
   // 하나 더 넣으면 된다.
   const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(profile.name);
   const [nickname, setNickname] = useState(profile.nickname);
   const [phone, setPhone] = useState(profile.phone);
   const [newPassword, setNewPassword] = useState("");
@@ -287,6 +295,7 @@ function ProfilePanel({
   }, [profile.id]);
 
   function startEditing() {
+    setName(profile.name);
     setNickname(profile.nickname);
     setPhone(profile.phone);
     setNewPassword("");
@@ -297,13 +306,17 @@ function ProfilePanel({
 
   async function saveAll() {
     setError(null);
+    if (!name.trim()) {
+      setError("이름을 입력해 주세요.");
+      return;
+    }
     if (!address.roadAddress.trim() || !address.detailAddress.trim() || !address.entranceMethod.trim()) {
       setError("배송지(주소검색/상세주소/공동현관 출입방법)를 모두 입력해 주세요.");
       return;
     }
     setSaving(true);
     try {
-      const result = await updateProfile({ nickname, phone });
+      const result = await updateProfile({ name: name.trim(), nickname, phone });
       if (result.error) {
         setError(result.error);
         return;
@@ -349,6 +362,7 @@ function ProfilePanel({
 
         {!editing ? (
           <>
+            <div className="mt-1 text-[12.5px] text-text-muted">이름 {profile.name}</div>
             <div className="mt-1 text-[12.5px] text-text-muted">{profile.phone}</div>
             {saved && <p className="mt-2 text-[11.5px] font-semibold text-accent-dark">저장했어요.</p>}
             <button className="mt-3 rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-semibold" onClick={startEditing}>
@@ -359,6 +373,7 @@ function ProfilePanel({
           <div className="mt-3 flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <p className="text-[11.5px] font-bold text-text-muted">기본 정보</p>
+              <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="이름" value={name} onChange={(e) => setName(e.target.value)} />
               <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="오픈채팅 닉네임" value={nickname} onChange={(e) => setNickname(e.target.value)} />
               <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="휴대폰번호" value={phone} onChange={(e) => setPhone(e.target.value)} />
             </div>

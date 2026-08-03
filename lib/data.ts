@@ -1147,7 +1147,7 @@ export async function listAllProfiles(): Promise<Profile[]> {
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
     if (error) throw error;
-    return (data ?? []).map((row) => ({ id: row.id, username: row.username, nickname: row.nickname, phone: row.phone, isAdmin: row.is_admin }));
+    return (data ?? []).map((row) => ({ id: row.id, username: row.username, name: row.name ?? "", nickname: row.nickname, phone: row.phone, isAdmin: row.is_admin }));
   }
   return Object.values(loadAccounts()).map((a) => a.profile);
 }

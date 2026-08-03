@@ -514,6 +514,21 @@ alter table products add column if not exists badge text not null default 'NONE'
 - `tsc`/`build` 통과 확인. 장바구니 그룹 표시는 실 배포 사이트와 연결된 로컬 개발 서버에서 실제 상품을 담아 배송방식별 섹션 분리와 접기/펼치기까지 브라우저로 직접 확인함. 체크아웃 화면도 그룹 분리와 결제수단 제한이 정상 렌더링되는 것까지 확인했지만, **실제 "주문하기" 클릭(주문 생성)은 실행하지 않음** — 로컬 개발 서버가 실 프로덕션 Supabase 프로젝트에 연결돼 있어서, 테스트로 눌렀다간 진짜 주문 데이터가 만들어지고 실제 알림까지 발송될 수 있기 때문(부분 실패 로직 자체는 코드 리뷰 + `tsc`/`build`로만 검증)
 - 마이그레이션 불필요(DB 스키마 변경 없음 — 위 뱃지 마이그레이션과는 무관)
 
+**회원가입/정보수정에 실명(이름) 필드 추가**
+- 배경: 회원가입 화면에서 "이름"이 사라졌다는 신고. 확인해보니 애초에 이 서비스는 실명 필드를 가진 적이 없었음 — "이름"이 필요한 자리(홈 인사말, 배송지 받는사람, 체크아웃 기본값)에 전부 오픈채팅 닉네임(`nickname`)을 대신 써왔음. 요청대로 실명(`name`)을 닉네임과 완전히 별개인 필수 필드로 새로 추가하고, 회원가입과 정보수정 양쪽에서 입력/확인 가능하게 함
+- `types/index.ts`의 `Profile`에 `name: string` 추가(닉네임과 구분되는 실명). `lib/supabase/schema.sql`의 `profiles`에 `name text not null default ''` 컬럼 추가
+- `lib/auth-context.tsx`: `signUp`/`updateProfile` 시그니처와 구현에 `name` 배선(mock/Supabase 두 모드 모두), `mapProfileRow`에도 반영
+- `components/MyPage/MyPageView.tsx`: 회원가입 폼에 "이름" 입력란 추가(비밀번호 확인 다음, 오픈채팅 닉네임 앞) + 미입력 시 "이름을 입력해 주세요." 검증. `ProfilePanel` 요약 화면(정보 확인)에 "이름 {실명}" 줄 추가, 수정 화면에도 "이름" 입력란 추가해 언제든 확인/수정 가능
+- 그동안 닉네임으로 대신하던 곳도 실명으로 정정: `CheckoutView.tsx`의 "받는 분 이름" 기본값(`profile.nickname` → `profile.name`), `app/admin/customers/page.tsx`의 고객 카드 굵은 글씨(실명으로, 닉네임은 그 아래 별도 줄로), `lib/data.ts`의 `listAllProfiles` 매핑
+- `tsc`/`build` 통과 확인. 로컬 개발 서버(실 프로덕션 Supabase 연결)에서 회원가입 화면에 "이름" 입력란이 올바른 위치에 뜨는 것, 비워두고 제출하면 "이름을 입력해 주세요." 오류가 뜨는 것, 이름을 채우면 다음 필수 항목(닉네임) 검증으로 넘어가는 것까지 브라우저로 확인함 — 실제 계정 생성(회원가입 완료)까지는 진행하지 않음(진짜 계정이 만들어지는 것을 피하기 위해)
+- **DB 마이그레이션 필요**: 실 Supabase 프로젝트에 아래 SQL 실행 필요. 기존 회원은 `name`이 빈 문자열로 채워지므로(과거엔 실명을 따로 받은 적이 없어 자동으로 채울 방법이 없음) 정보수정에서 한 번 직접 입력해야 함 — 임시로 닉네임을 이름 자리에 채워두고 싶다면 두 번째 줄도 함께 실행
+
+```sql
+alter table profiles add column if not exists name text not null default '';
+-- (선택) 기존 회원의 이름을 비워두지 않으려면 닉네임으로 임시 채우기
+-- update profiles set name = nickname where name = '';
+```
+
 # 진행 중인 기능
 
 - **카드/카카오페이 결제**: Toss Payments 키가 없어서 지금은 무통장입금과 동일하게 관리자가 수동으로 확인하는 방식으로 대체 중

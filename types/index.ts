@@ -277,6 +277,11 @@ export function formatAddress(a: Pick<Address, "roadAddress" | "detailAddress" |
 export interface Profile {
   id: string;
   username: string;
+  // 실명 — 회원가입 시 필수 입력. 주문서/배송지의 받는 분 이름 기본값,
+  // 관리자 고객 관리 화면 등 "진짜 이름"이 필요한 곳에 쓴다. 오픈채팅
+  // 닉네임(nickname)과는 별개 값 — nickname은 화면 인사말/채팅용 표시
+  // 이름이라 실명과 다를 수 있다.
+  name: string;
   nickname: string;
   phone: string;
   isAdmin: boolean;

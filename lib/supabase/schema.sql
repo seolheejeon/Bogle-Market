@@ -10,6 +10,9 @@ create extension if not exists "pgcrypto";
 create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   username text not null unique,
+  -- 실명 — 회원가입 시 필수. 오픈채팅 닉네임(nickname)과는 별개 값(닉네임은
+  -- 화면 인사말/채팅용 표시 이름이라 실명과 다를 수 있음).
+  name text not null default '',
   nickname text not null default '',
   phone text not null unique,
   is_admin boolean not null default false,

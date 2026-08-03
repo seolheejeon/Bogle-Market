@@ -61,11 +61,12 @@ export default function AdminCustomersPage() {
           <div key={profile.id} className="rounded-xl border border-border p-3.5">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[13.5px] font-bold">
-                {profile.nickname}
+                {profile.name}
                 {profile.isAdmin && " (관리자)"}
               </span>
               <span className="shrink-0 text-[11.5px] text-text-muted">아이디 {profile.username}</span>
             </div>
+            <p className="mt-1 text-[12.5px] text-text-muted">오픈채팅 닉네임 {profile.nickname}</p>
             <p className="mt-1 text-[12.5px] text-text-muted">{profile.phone}</p>
             <p className="mt-1 text-[12.5px] text-text-muted">{address ? formatAddress(address) : "등록된 배송지 없음"}</p>
             <p className="mt-1.5 text-[12px] font-semibold text-accent-dark">
