@@ -248,37 +248,59 @@ function ProfilePanel({
   changePassword: (newPassword: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 }) {
+  // 배송지도 회원정보의 일부라는 판단 아래, "정보 수정" 하나로 프로필+배송지를
+  // 한 화면에서 같이 고친다(예전엔 배송지가 항상 펼쳐진 별도 카드였음). 요약
+  // 화면(!editing)에는 닉네임/휴대폰만 간단히 보여주고, 수정 화면은 아래 섹션
+  // 순서(기본 정보 → 배송지 → 비밀번호)로 구성해뒀다 — 나중에 "알림 설정"
+  // 같은 섹션을 추가하고 싶으면 비밀번호 섹션 앞뒤로 같은 모양의 블록만
+  // 하나 더 넣으면 된다.
   const [editing, setEditing] = useState(false);
   const [nickname, setNickname] = useState(profile.nickname);
   const [phone, setPhone] = useState(profile.phone);
   const [newPassword, setNewPassword] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [savedAddress, setSavedAddress] = useState<Address | null>(null);
   const [address, setAddress] = useState<AddressFieldsValue>(EMPTY_ADDRESS_FIELDS);
-  const [savingAddress, setSavingAddress] = useState(false);
-  const [addressSaved, setAddressSaved] = useState(false);
+
+  function loadSavedAddress(def: Address | null) {
+    setSavedAddress(def);
+    setAddress(
+      def
+        ? {
+            zonecode: def.zonecode,
+            roadAddress: def.roadAddress,
+            apartmentName: def.apartmentName,
+            detailAddress: def.detailAddress,
+            entranceMethod: def.entranceMethod ?? "",
+            memo: def.memo ?? "",
+          }
+        : EMPTY_ADDRESS_FIELDS,
+    );
+  }
 
   useEffect(() => {
-    listAddresses(profile.id).then((addrs) => {
-      const def = addrs.find((a) => a.isDefault) ?? addrs[0] ?? null;
-      setSavedAddress(def);
-      if (def) {
-        setAddress({
-          zonecode: def.zonecode,
-          roadAddress: def.roadAddress,
-          apartmentName: def.apartmentName,
-          detailAddress: def.detailAddress,
-          entranceMethod: def.entranceMethod ?? "",
-          memo: def.memo ?? "",
-        });
-      }
-    });
+    listAddresses(profile.id).then((addrs) => loadSavedAddress(addrs.find((a) => a.isDefault) ?? addrs[0] ?? null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id]);
 
-  async function saveInfo() {
+  function startEditing() {
+    setNickname(profile.nickname);
+    setPhone(profile.phone);
+    setNewPassword("");
+    if (savedAddress) loadSavedAddress(savedAddress);
     setError(null);
+    setEditing(true);
+  }
+
+  async function saveAll() {
+    setError(null);
+    if (!address.roadAddress.trim() || !address.detailAddress.trim() || !address.entranceMethod.trim()) {
+      setError("배송지(주소검색/상세주소/공동현관 출입방법)를 모두 입력해 주세요.");
+      return;
+    }
     setSaving(true);
     try {
       const result = await updateProfile({ nickname, phone });
@@ -293,34 +315,24 @@ function ProfilePanel({
           return;
         }
       }
+      if (savedAddress) {
+        await updateAddress(savedAddress.id, profile.id, {
+          zonecode: address.zonecode,
+          roadAddress: address.roadAddress,
+          apartmentName: address.apartmentName,
+          detailAddress: address.detailAddress.trim(),
+          entranceMethod: address.entranceMethod.trim(),
+          memo: address.memo.trim() || undefined,
+        });
+      }
       setNewPassword("");
       setEditing(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
     } catch (e) {
       setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function saveAddressInfo() {
-    if (!savedAddress || !address.roadAddress.trim() || !address.detailAddress.trim() || !address.entranceMethod.trim()) return;
-    setSavingAddress(true);
-    setError(null);
-    try {
-      await updateAddress(savedAddress.id, profile.id, {
-        zonecode: address.zonecode,
-        roadAddress: address.roadAddress,
-        apartmentName: address.apartmentName,
-        detailAddress: address.detailAddress.trim(),
-        entranceMethod: address.entranceMethod.trim(),
-        memo: address.memo.trim() || undefined,
-      });
-      setAddressSaved(true);
-      setTimeout(() => setAddressSaved(false), 1800);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "배송지 저장 중 오류가 발생했어요.");
-    } finally {
-      setSavingAddress(false);
     }
   }
 
@@ -338,33 +350,38 @@ function ProfilePanel({
         {!editing ? (
           <>
             <div className="mt-1 text-[12.5px] text-text-muted">{profile.phone}</div>
-            <button
-              className="mt-3 rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-semibold"
-              onClick={() => {
-                setNickname(profile.nickname);
-                setPhone(profile.phone);
-                setNewPassword("");
-                setError(null);
-                setEditing(true);
-              }}
-            >
+            {saved && <p className="mt-2 text-[11.5px] font-semibold text-accent-dark">저장했어요.</p>}
+            <button className="mt-3 rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-semibold" onClick={startEditing}>
               정보 수정
             </button>
           </>
         ) : (
-          <div className="mt-3 flex flex-col gap-2">
-            <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="오픈채팅 닉네임" value={nickname} onChange={(e) => setNickname(e.target.value)} />
-            <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="휴대폰번호" value={phone} onChange={(e) => setPhone(e.target.value)} />
-            <input
-              className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-              placeholder="새 비밀번호 (변경 시에만 입력)"
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-            />
+          <div className="mt-3 flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <p className="text-[11.5px] font-bold text-text-muted">기본 정보</p>
+              <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="오픈채팅 닉네임" value={nickname} onChange={(e) => setNickname(e.target.value)} />
+              <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="휴대폰번호" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <p className="text-[11.5px] font-bold text-text-muted">배송지</p>
+              <AddressFields value={address} onChange={(patch) => setAddress((v) => ({ ...v, ...patch }))} />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <p className="text-[11.5px] font-bold text-text-muted">비밀번호 변경</p>
+              <input
+                className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+                placeholder="새 비밀번호 (변경 시에만 입력)"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+            </div>
+
             {error && <p className="text-[12px] font-semibold text-red-600">{error}</p>}
             <div className="flex gap-2">
-              <button className="flex-1 rounded-[8px] bg-accent py-2 text-[12.5px] font-bold text-white disabled:opacity-50" disabled={saving} onClick={saveInfo}>
+              <button className="flex-1 rounded-[8px] bg-accent py-2 text-[12.5px] font-bold text-white disabled:opacity-50" disabled={saving} onClick={saveAll}>
                 {saving ? "저장 중..." : "저장"}
               </button>
               <button className="flex-1 rounded-[8px] border border-border py-2 text-[12.5px] font-semibold" onClick={() => setEditing(false)}>
@@ -373,19 +390,6 @@ function ProfilePanel({
             </div>
           </div>
         )}
-      </div>
-
-      <p className="mt-5 mb-2 text-[12.5px] font-bold text-text-muted">기본 배송지</p>
-      <div className="flex flex-col gap-2 rounded-xl border border-border p-3">
-        <AddressFields value={address} onChange={(patch) => setAddress((v) => ({ ...v, ...patch }))} />
-        {addressSaved && <p className="text-[11.5px] font-semibold text-accent-dark">배송지를 저장했어요.</p>}
-        <button
-          className="rounded-[8px] bg-accent py-2 text-[12.5px] font-bold text-white disabled:opacity-50"
-          disabled={savingAddress || !savedAddress}
-          onClick={saveAddressInfo}
-        >
-          {savingAddress ? "저장 중..." : "배송지 저장"}
-        </button>
       </div>
 
       {profile.isAdmin && (
