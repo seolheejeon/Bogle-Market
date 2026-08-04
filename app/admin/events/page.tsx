@@ -32,8 +32,12 @@ export default function AdminEventsPage() {
 
   async function onDelete(id: string) {
     if (!confirm("이 이벤트와 소속 상품을 모두 삭제할까요?")) return;
-    await deleteEvent(id);
-    refresh();
+    try {
+      await deleteEvent(id);
+      refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "삭제 중 오류가 발생했어요.");
+    }
   }
 
   // 종료는 deadlineAt과 무관하게 별도 상태(status)로 관리한다 — 배송방식별

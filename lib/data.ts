@@ -223,7 +223,14 @@ export async function deleteEvent(id: string): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     const { error } = await supabase.from("events").delete().eq("id", id);
-    if (error) throw error;
+    if (error) {
+      // orders.event_id는 on delete를 일부러 안 걸어둬서(schema.sql 참고),
+      // 그 이벤트로 들어온 주문이 하나라도 있으면 FK 위반으로 삭제가 막힌다 —
+      // 과거 주문의 이벤트 연결이 조용히 끊기는 걸 막기 위한 의도된 제한이라,
+      // 여기서 이유를 알려주고 "종료"를 대안으로 안내한다.
+      if (error.code === "23503") throw new Error("이 이벤트는 주문 내역이 있어서 삭제할 수 없어요. 대신 이벤트를 종료 처리해 주세요.");
+      throw error;
+    }
     return;
   }
   saveEvents(loadEvents().filter((e) => e.id !== id));

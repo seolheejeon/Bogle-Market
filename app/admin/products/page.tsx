@@ -508,7 +508,11 @@ function ConnectedEventsPanel({ catalogProduct }: { catalogProduct: CatalogProdu
           {linked.map(({ event, listing }) => (
             <div key={listing.id} className="flex items-center justify-between gap-2 rounded-[7px] bg-bg-card px-2.5 py-1.5">
               <span className="min-w-0 truncate text-[12.5px]">
-                {event.title} <span className="text-text-muted">· {EVENT_TYPE_LABEL[event.type]} · {formatEventDateChip(event.deliveryAt)} · {formatPrice(listing.price)}</span>
+                {event.title}{" "}
+                <span className="text-text-muted">
+                  · {EVENT_TYPE_LABEL[event.type]}
+                  {event.type !== "PARCEL" && ` · ${formatEventDateChip(event.deliveryAt)}`} · {formatPrice(listing.price)}
+                </span>
               </span>
               <button
                 onClick={() => unlink(listing.id, event.title)}
@@ -532,7 +536,8 @@ function ConnectedEventsPanel({ catalogProduct }: { catalogProduct: CatalogProdu
             <option value="">이벤트에 바로 추가...</option>
             {addableEvents.map((e) => (
               <option key={e.id} value={e.id}>
-                {e.title} ({formatEventDateChip(e.deliveryAt)})
+                {e.title}
+                {e.type !== "PARCEL" && ` (${formatEventDateChip(e.deliveryAt)})`}
               </option>
             ))}
           </select>
