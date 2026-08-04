@@ -45,7 +45,15 @@ function toInternalEmail(username: string): string {
 }
 
 function mapProfileRow(row: Record<string, any>): Profile {
-  return { id: row.id, username: row.username, name: row.name ?? "", nickname: row.nickname, phone: row.phone, isAdmin: row.is_admin };
+  return {
+    id: row.id,
+    username: row.username,
+    name: row.name ?? "",
+    nickname: row.nickname,
+    phone: row.phone,
+    isAdmin: row.is_admin,
+    createdAt: row.created_at,
+  };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -98,14 +106,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         memo: address.memo,
         isDefault: true,
       });
-      const newProfile: Profile = { id: userId, username, name, nickname, phone, isAdmin: false };
+      const newProfile: Profile = { id: userId, username, name, nickname, phone, isAdmin: false, createdAt: new Date().toISOString() };
       setProfile(newProfile);
       return {};
     }
     const accounts = loadAccounts();
     if (accounts[username]) return { error: "이미 사용 중인 아이디예요." };
     if (Object.values(accounts).some((a) => a.profile.phone === phone)) return { error: "이미 가입된 휴대폰번호예요." };
-    const newProfile: Profile = { id: genId("user"), username, name, nickname, phone, isAdmin: Boolean(asAdmin) };
+    const newProfile: Profile = { id: genId("user"), username, name, nickname, phone, isAdmin: Boolean(asAdmin), createdAt: new Date().toISOString() };
     accounts[username] = { password, profile: newProfile };
     saveAccounts(accounts);
     saveAuthProfile(newProfile);

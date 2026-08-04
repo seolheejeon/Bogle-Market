@@ -285,6 +285,8 @@ export interface Profile {
   nickname: string;
   phone: string;
   isAdmin: boolean;
+  // 가입일 — 관리자 고객 관리 화면(가입일 표시)에만 쓰인다.
+  createdAt: string; // ISO
 }
 
 // 주문 시점에 고른 옵션 하나의 스냅샷 — 화면에 보여주는 이름/가격조정은
@@ -331,7 +333,17 @@ export interface Order {
   guestName: string | null;
   guestPhone: string | null;
   guestPin: string | null;
+  // 도로명주소 + 상세주소 + 출입방법/메모를 사람이 읽는 한 줄로 합친 스냅샷
+  // (formatAddress) — 주문 목록 등 한 줄 표시에 계속 쓴다.
   addressSnapshot: string;
+  // addressSnapshot과 별개로 각 구성요소를 따로 저장해둔 것 — 관리자 주문
+  // 상세 화면에서 주소/상세주소/출입방법/배송메모를 각각 보여주고 개별
+  // 복사할 수 있어야 해서 추가했다. 이 필드가 생기기 전 주문은 null이라
+  // 그런 주문은 addressSnapshot 한 줄로만 표시된다(하위호환).
+  roadAddress: string | null;
+  detailAddress: string | null;
+  entranceMethod: string | null;
+  deliveryMemo: string | null;
   // 주문 시점 배송지의 아파트명 스냅샷(없으면 null) — 관리자가 아파트 단지별로
   // 주문을 필터링/일괄 배송처리할 때 쓴다. addressSnapshot과 마찬가지로
   // 주문 이후 회원이 배송지를 바꿔도 이 값은 그대로 남는다.

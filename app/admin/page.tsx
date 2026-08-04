@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { listAllOrders, listEvents, updateOrderStatus, createNotification, approveCancelRequest, rejectCancelRequest } from "@/lib/data";
-import type { EventType, MarketEvent, Order, OrderStatus } from "@/types";
+import { listAllOrders, listEvents, listAllProfiles, updateOrderStatus, createNotification, approveCancelRequest, rejectCancelRequest } from "@/lib/data";
+import type { EventType, MarketEvent, Order, OrderStatus, Profile } from "@/types";
 import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL, COURIER_OPTIONS, COURIER_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
+import { OrderDetailModal } from "@/components/admin/OrderDetailModal";
 import { getAccessToken, sendPushToProfile } from "@/lib/push";
 
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", paid: "confirmed", confirmed: "ship", ship: "done" };
@@ -55,10 +56,13 @@ function isToday(iso: string): boolean {
 }
 
 export default function AdminHomePage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [orders, setOrders] = useState<Order[]>([]);
   const [events, setEvents] = useState<MarketEvent[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
   const [typeFilter, setTypeFilter] = useState<EventType | "">("");
   const [subFilter, setSubFilter] = useState("");
@@ -84,8 +88,12 @@ export default function AdminHomePage() {
   useEffect(() => {
     listEvents().then(setEvents);
   }, []);
+  useEffect(() => {
+    listAllProfiles().then(setProfiles);
+  }, []);
 
   const eventById = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
+  const profileById = useMemo(() => new Map(profiles.map((p) => [p.id, p])), [profiles]);
 
   // /admin/events에서 "주문 바로 보기"로 들어온 경우 그 이벤트로 필터를 미리 세팅.
   useEffect(() => {
@@ -97,6 +105,12 @@ export default function AdminHomePage() {
     setSubFilter(ev.type === "PARCEL" ? "" : eventId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, events]);
+
+  // 고객 상세 모달에서 "주문 보기"로 들어온 경우 그 주문 상세를 바로 연다.
+  useEffect(() => {
+    const orderId = searchParams.get("order");
+    if (orderId) setSelectedOrderId(orderId);
+  }, [searchParams]);
 
   async function advance(order: Order) {
     const next = NEXT_STATUS[order.status];
@@ -410,7 +424,7 @@ export default function AdminHomePage() {
       {!loading && filtered.length === 0 && <p className="text-sm text-text-muted">해당하는 주문이 없어요.</p>}
       <div className="flex flex-col gap-2">
         {filtered.map((o) => (
-          <div key={o.id} className="rounded-xl border border-border p-3.5">
+          <div key={o.id} onClick={() => setSelectedOrderId(o.id)} className="cursor-pointer rounded-xl border border-border p-3.5">
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-[12px] text-text-muted">
                 {o.orderNumber} · {formatDateTime(o.createdAt)}
@@ -424,6 +438,7 @@ export default function AdminHomePage() {
             <p className="text-[13px]">
               {o.recipientName} ({o.recipientPhone}) · {PAYMENT_METHOD_LABEL[o.paymentMethod]}
             </p>
+            {o.apartmentName && <p className="mt-1 text-[12.5px] font-semibold text-text-muted">🏢 {o.apartmentName}</p>}
             <p className="mt-1 text-[12.5px] text-text-muted">{o.addressSnapshot}</p>
             <p className="mt-1 text-[12.5px] text-text-muted">
               {o.items
@@ -438,7 +453,7 @@ export default function AdminHomePage() {
             {o.cancelRequested && o.cancelReason && <p className="mt-1 text-[12px] font-semibold text-red-600">고객 취소 사유: {o.cancelReason}</p>}
             <div className="mt-1.5 flex items-center justify-between">
               <strong className="text-[14px]">{formatPrice(o.total)}</strong>
-              <div className="flex gap-1.5">
+              <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
                 {o.cancelRequested ? (
                   <>
                     <button onClick={() => approveCancel(o)} className="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white">
@@ -479,15 +494,32 @@ export default function AdminHomePage() {
               </div>
             </div>
             {shippingId === o.id && (
-              <ShippingForm
-                defaultMethod={eventById.get(o.eventId)?.type ?? "PARCEL"}
-                onSubmit={(shipping) => submitShipping(o, shipping)}
-                onCancel={() => setShippingId(null)}
-              />
+              <div onClick={(e) => e.stopPropagation()}>
+                <ShippingForm
+                  defaultMethod={eventById.get(o.eventId)?.type ?? "PARCEL"}
+                  onSubmit={(shipping) => submitShipping(o, shipping)}
+                  onCancel={() => setShippingId(null)}
+                />
+              </div>
             )}
           </div>
         ))}
       </div>
+
+      {selectedOrderId &&
+        (() => {
+          const order = orders.find((o) => o.id === selectedOrderId);
+          if (!order) return null;
+          return (
+            <OrderDetailModal
+              order={order}
+              event={eventById.get(order.eventId)}
+              ordererProfile={order.profileId ? profileById.get(order.profileId) : undefined}
+              onClose={() => setSelectedOrderId(null)}
+              onViewCustomer={(profileId) => router.push(`/admin/customers?customer=${profileId}`)}
+            />
+          );
+        })()}
     </div>
   );
 }

@@ -239,6 +239,14 @@ create table if not exists orders (
   recipient_name text not null,
   recipient_phone text not null,
   address_snapshot text not null,
+  -- address_snapshot(한 줄 요약)과 별개로 구성요소를 각각 저장 — 관리자 주문
+  -- 상세 화면에서 주소/상세주소/출입방법/배송메모를 따로 보여주고 개별
+  -- 복사할 수 있어야 해서 추가했다. 이 컬럼들이 생기기 전 주문은 전부
+  -- null이라 address_snapshot 한 줄로만 표시된다(하위호환).
+  road_address text,
+  detail_address text,
+  entrance_method text,
+  delivery_memo text,
   -- 주문 시점 배송지의 아파트명 스냅샷(공동주택이 아니면 null) — 관리자가
   -- 아파트 단지별로 주문을 필터링/일괄 배송처리할 때 쓴다.
   apartment_name text,
@@ -708,10 +716,11 @@ $$;
 -- 완전히 우회해서 이 문제를 근본적으로 없앤다. 회원 주문의 profile_id
 -- 검증(자기 자신 것만 만들 수 있어야 함)은 기존 INSERT 정책이 하던 일을
 -- 함수 안에서 그대로 재현한다.
--- p_shipping_fee가 새로 추가된 파라미터라 인자 개수가 달라져서 create or
--- replace만으로는 기존 16개짜리 시그니처가 별도 오버로드로 남을 수 있다 —
--- 먼저 지우고 새로 만든다(schema.sql 히스토리의 다른 함수들과 동일한 패턴).
-drop function if exists create_order(uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, text, text, integer, timestamptz, jsonb);
+-- p_road_address/p_detail_address/p_entrance_method/p_delivery_memo가 새로
+-- 추가된 파라미터라 인자 개수가 달라져서 create or replace만으로는 기존
+-- 17개짜리 시그니처가 별도 오버로드로 남을 수 있다 — 먼저 지우고 새로
+-- 만든다(schema.sql 히스토리의 다른 함수들과 동일한 패턴).
+drop function if exists create_order(uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, text, text, integer, timestamptz, jsonb, integer);
 create or replace function create_order(
   p_id uuid,
   p_order_number text,
@@ -729,7 +738,11 @@ create or replace function create_order(
   p_total integer,
   p_created_at timestamptz,
   p_items jsonb,
-  p_shipping_fee integer default 0
+  p_shipping_fee integer default 0,
+  p_road_address text default null,
+  p_detail_address text default null,
+  p_entrance_method text default null,
+  p_delivery_memo text default null
 )
 returns void
 language plpgsql
@@ -782,10 +795,12 @@ begin
 
   insert into orders (
     id, order_number, event_id, batch_id, profile_id, guest_name, guest_phone, guest_pin,
-    recipient_name, recipient_phone, address_snapshot, apartment_name, payment_method, status, total, shipping_fee, created_at
+    recipient_name, recipient_phone, address_snapshot, road_address, detail_address, entrance_method, delivery_memo,
+    apartment_name, payment_method, status, total, shipping_fee, created_at
   ) values (
     p_id, p_order_number, p_event_id, p_batch_id, p_profile_id, p_guest_name, p_guest_phone, p_guest_pin,
-    p_recipient_name, p_recipient_phone, p_address_snapshot, p_apartment_name, p_payment_method, 'wait', p_total, p_shipping_fee, p_created_at
+    p_recipient_name, p_recipient_phone, p_address_snapshot, p_road_address, p_detail_address, p_entrance_method, p_delivery_memo,
+    p_apartment_name, p_payment_method, 'wait', p_total, p_shipping_fee, p_created_at
   );
 
   insert into order_items (order_id, event_product_id, product_name, price_snapshot, quantity, options, stock_value_ids)

@@ -240,6 +240,10 @@ export function CheckoutView() {
             entranceMethod: groupNeedsEntranceMethod ? address.entranceMethod.trim() || undefined : undefined,
             memo: address.memo.trim() || undefined,
           }),
+          roadAddress: address.roadAddress,
+          detailAddress: address.detailAddress.trim(),
+          entranceMethod: groupNeedsEntranceMethod ? address.entranceMethod.trim() || undefined : undefined,
+          deliveryMemo: address.memo.trim() || undefined,
           apartmentName: address.apartmentName || undefined,
           paymentMethod: methodFor(groupType),
           items: group.items.map((i) => ({

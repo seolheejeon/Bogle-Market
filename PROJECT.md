@@ -529,6 +529,115 @@ alter table profiles add column if not exists name text not null default '';
 -- update profiles set name = nickname where name = '';
 ```
 
+**관리자 주문/고객 상세 모달 + 상호 연결 + 복사/지도 편의기능**
+- 배경: 주문 관리 목록·고객 관리 목록에 일부 정보만 보여서 확인이 불편하고, 두 화면이 서로 연결돼 있지 않아 왔다갔다 검색해야 했던 문제. 문고리 배송 다닐 때 주소/전화번호/닉네임을 자주 복사하고 지도 앱을 열어야 하는데 그때마다 다른 화면(카카오톡, 메모장 등)을 오가야 했던 불편함
+- **주문 상세 모달(`components/admin/OrderDetailModal.tsx`)**: 운영 메인(`/admin`)의 주문 카드를 클릭하면 열림(상태 변경 등 기존 액션 버튼은 클릭이 모달을 열지 않도록 `stopPropagation` 처리). 주문번호/주문일시/주문상태/배송방식/이벤트명, 상품 전체(옵션·수량·상품별 금액·합계), 주문자(회원이면 실명+연락처, 비회원이면 guest 정보)와 수령인(이름+연락처)을 따로 표시, 배송지(건물명/주소/상세주소/출입방법/배송메모 각각 + 복사 버튼 + 네이버지도/카카오맵 링크), 결제수단. 회원 주문이면 주문자 이름 옆에 "고객상세" 버튼으로 고객 상세 모달로 바로 이동
+- **고객 상세 모달(`components/admin/CustomerDetailModal.tsx`)**: 고객 관리(`/admin/customers`)의 카드를 클릭하면 열림. 이름/아이디/오픈채팅 닉네임/연락처/가입일/최근 주문일, 기본 배송지(건물명/주소/상세주소/출입방법/배송메모 + 복사/지도), 주문 통계(총 주문 건수/총 구매 금액/최근 주문일), 주문내역(최신순, 클릭하면 그 주문의 상세 모달로 이동)
+- **두 모달의 상호 연결**: 서로 다른 라우트(`/admin`, `/admin/customers`)에 있어서, 기존에 이벤트→주문 필터링에 쓰던 것과 같은 방식(쿼리 파라미터)으로 연결했다 — 주문상세의 "고객상세" 버튼은 `/admin/customers?customer={id}`로, 고객상세의 주문 클릭은 `/admin?order={id}`로 이동하고, 각 페이지가 그 쿼리를 읽어 도착하자마자 해당 모달을 자동으로 연다
+- **주문 목록/고객 목록에 건물명 표시**: 기존에도 `apartment_name`(다음 주소검색 API가 공동주택일 때만 자동으로 채워주는 값, 사용자가 직접 입력하는 항목 아님)을 배송 그룹핑에 쓰고 있었지만 화면엔 안 보였음 — 이제 주소 줄 위에 "🏢 {건물명}"으로 표시(단독주택 등 건물명이 없는 주소는 표시 안 함)
+- **주문에 구조화된 배송지 필드 추가**: 예전엔 주소가 `address_snapshot`(도로명+상세주소+출입방법+배송메모를 한 줄로 합친 문자열) 하나로만 저장돼서, 주문 상세에서 각각 따로 보여주거나 개별로 복사할 수가 없었음. `orders`에 `road_address`/`detail_address`/`entrance_method`/`delivery_memo` 컬럼을 추가하고 `create_order` RPC와 체크아웃에서 같이 저장하도록 함(`address_snapshot`은 목록 등 한 줄 표시용으로 그대로 유지). 이 컬럼들이 생기기 전 주문은 값이 없어서, 주문 상세 모달이 자동으로 감지해 예전처럼 `address_snapshot` 한 줄로만 보여줌(하위호환)
+- **복사/지도 유틸(`lib/clipboard.ts`, `lib/maps.ts`, `components/admin/CopyButton.tsx`)**: 주소·전화번호·닉네임 옆의 작은 "복사" 버튼(`navigator.clipboard` 실패 시 `execCommand` 폴백까지) + 네이버지도/카카오맵 검색 링크(별도 API 키 불필요)
+- `Profile`에 `createdAt`(가입일) 추가 — DB 컬럼(`profiles.created_at`)은 이미 있었는데 타입/매핑에 안 실려 있던 것이라 마이그레이션은 불필요
+- `tsc`/`build` 통과 확인. 관리자 화면은 로그인이 필요해 이번 세션에서도 브라우저로 직접 열어보지는 못함(기존과 동일한 한계) — 코드 리뷰 + 타입체크로 검증
+- **DB 마이그레이션 필요**: 아래 SQL을 실 Supabase 프로젝트에 실행해야 함(`orders` 테이블에 컬럼 추가 + `create_order` 함수를 새 파라미터를 받도록 교체)
+
+```sql
+-- 1) orders: 구조화된 배송지 컬럼 추가
+alter table orders add column if not exists road_address text;
+alter table orders add column if not exists detail_address text;
+alter table orders add column if not exists entrance_method text;
+alter table orders add column if not exists delivery_memo text;
+
+-- 2) create_order 함수 교체 (새 파라미터 4개 추가, 기존 시그니처 먼저 삭제)
+drop function if exists create_order(uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, text, text, integer, timestamptz, jsonb, integer);
+create or replace function create_order(
+  p_id uuid,
+  p_order_number text,
+  p_event_id uuid,
+  p_batch_id uuid,
+  p_profile_id uuid,
+  p_guest_name text,
+  p_guest_phone text,
+  p_guest_pin text,
+  p_recipient_name text,
+  p_recipient_phone text,
+  p_address_snapshot text,
+  p_apartment_name text,
+  p_payment_method text,
+  p_total integer,
+  p_created_at timestamptz,
+  p_items jsonb,
+  p_shipping_fee integer default 0,
+  p_road_address text default null,
+  p_detail_address text default null,
+  p_entrance_method text default null,
+  p_delivery_memo text default null
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_bad_item record;
+  v_item jsonb;
+  v_event_product_id uuid;
+  v_qty integer;
+  v_stock_value_ids uuid[];
+begin
+  if p_profile_id is not null and p_profile_id <> auth.uid() then
+    raise exception 'profile_id must match the authenticated user';
+  end if;
+
+  select i->>'product_name' as name, (i->>'quantity')::integer as qty, p.min_qty as min_qty
+  into v_bad_item
+  from jsonb_array_elements(p_items) as i
+  join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
+  join products p on p.id = ep.product_id
+  where (i->>'quantity')::integer < p.min_qty
+  limit 1;
+
+  if v_bad_item.name is not null then
+    raise exception '%은(는) 최소 %개부터 주문할 수 있어요.', v_bad_item.name, v_bad_item.min_qty;
+  end if;
+
+  for v_item in select * from jsonb_array_elements(p_items) loop
+    v_event_product_id := nullif(v_item->>'event_product_id', '')::uuid;
+    if v_event_product_id is null then
+      continue;
+    end if;
+    v_qty := (v_item->>'quantity')::integer;
+    perform decrement_stock(v_event_product_id, v_qty);
+    v_stock_value_ids := (select array_agg(x::uuid) from jsonb_array_elements_text(coalesce(v_item->'stock_value_ids', '[]'::jsonb)) x);
+    if v_stock_value_ids is not null and array_length(v_stock_value_ids, 1) > 0 then
+      perform decrement_option_stock(v_event_product_id, v_stock_value_ids, v_qty);
+    end if;
+  end loop;
+
+  insert into orders (
+    id, order_number, event_id, batch_id, profile_id, guest_name, guest_phone, guest_pin,
+    recipient_name, recipient_phone, address_snapshot, road_address, detail_address, entrance_method, delivery_memo,
+    apartment_name, payment_method, status, total, shipping_fee, created_at
+  ) values (
+    p_id, p_order_number, p_event_id, p_batch_id, p_profile_id, p_guest_name, p_guest_phone, p_guest_pin,
+    p_recipient_name, p_recipient_phone, p_address_snapshot, p_road_address, p_detail_address, p_entrance_method, p_delivery_memo,
+    p_apartment_name, p_payment_method, 'wait', p_total, p_shipping_fee, p_created_at
+  );
+
+  insert into order_items (order_id, event_product_id, product_name, price_snapshot, quantity, options, stock_value_ids)
+  select
+    p_id,
+    nullif(i->>'event_product_id', '')::uuid,
+    i->>'product_name',
+    (i->>'price_snapshot')::integer,
+    (i->>'quantity')::integer,
+    coalesce(i->'options', '[]'::jsonb),
+    (select array_agg(x::uuid) from jsonb_array_elements_text(coalesce(i->'stock_value_ids', '[]'::jsonb)) x)
+  from jsonb_array_elements(p_items) as i;
+end;
+$$;
+```
+
 # 진행 중인 기능
 
 - **카드/카카오페이 결제**: Toss Payments 키가 없어서 지금은 무통장입금과 동일하게 관리자가 수동으로 확인하는 방식으로 대체 중
@@ -576,7 +685,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 
 | 테이블 | 주요 컬럼 | 설명 |
 | --- | --- | --- |
-| `profiles` | id(=auth.users.id), username(unique), nickname, phone(unique), is_admin | 1:1 auth 연동. 이메일은 auth.users에만 있고 이 테이블엔 없음(사용자에게 절대 노출 안 함). `is_admin=true`가 관리자 |
+| `profiles` | id(=auth.users.id), username(unique), name, nickname, phone(unique), is_admin, created_at | 1:1 auth 연동. 이메일은 auth.users에만 있고 이 테이블엔 없음(사용자에게 절대 노출 안 함). `is_admin=true`가 관리자. `name`은 실명(회원가입 필수), `nickname`은 오픈채팅 닉네임 — 서로 별개 값. `created_at`은 가입일(관리자 고객 상세에서만 표시) |
 | `addresses` | id, profile_id, name, phone, zonecode, road_address, apartment_name, detail_address, entrance_method, memo, is_default | 회원 배송지. Daum 주소검색으로만 입력받음 — `road_address`/`zonecode`는 검색 결과 그대로, `apartment_name`은 검색 결과가 공동주택일 때만 채워지는 값(사용자가 입력하는 항목 아님, 관리자 아파트별 필터용), `detail_address`(동/호 등)만 사용자가 직접 입력. 현재는 회원당 1개(기본 배송지)만 쓰지만 `is_default` 덕분에 다중 배송지로 확장 가능. `profile_id`가 null이면 게스트(직접 입력, 체크아웃에서만 스냅샷) |
 | `events` | id, type(DOOR/GROUP_BUY/PARCEL), title, flash_sale(boolean), status(open/ended), deadline_at, delivery_at, notice | 공동구매 회차. `flash_sale`이 true면 배송방식과 무관하게 `deadline_at`이 지나는 즉시 주문이 막히고(`lib/order-policy.ts`의 `STRICT_DEADLINE`) 홈 화면 "1시간 특가" 히어로에 노출됨 — 예전엔 이벤트 표시용 뱃지(`badge`, NONE/SALE/HOT/NEW/RESERVE/DEADLINE)를 겸했지만, 상품마다 다른 뱃지를 붙이고 싶다는 요청으로 표시용 뱃지는 `products.badge`로 옮기고 여기는 순수 정책 플래그만 남음. `status`는 관리자 "종료" 버튼이 세우는 값 — `deadline_at`과 별개로 배송방식 정책보다 항상 우선해서 주문을 막는다(`isEventOrderable`). 택배(PARCEL)는 상품 단위로 운영돼 `deadline_at`/`delivery_at`을 관리 화면에서 입력받지 않고 생성 시점으로 채움(값 자체는 정책 판단에 쓰이지 않음) |
 | `products` | id, name, emoji, photos(jsonb), detail_blocks(jsonb), origin, weight, storage, eat, description, base_price, stock, min_qty, badge(NONE/SALE/HOT/NEW/RESERVE/DEADLINE), shipping_fee, shipping_fee_type, free_shipping_threshold, shipping_fee_qty_unit, courier_code, fulfillment_type, ships_at | **카탈로그 상품** — 이벤트와 무관하게 상품당 한 행만 존재하는 "내용물"(사진/설명/원산지 등). 같은 상품이 여러 회차에 걸려도 여기엔 한 번만 있고, 아래 `event_products`가 이 id를 재사용함. 삭제하려는 상품이 `event_products`에서 쓰이고 있으면 FK가 막음(에러코드 `23503`). `base_price`는 새 이벤트에 추가할 때 기본값으로 복사되는 기준 판매가(공개 정보). `stock`은 이 상품을 파는 모든 이벤트가 공유하는 재고(Epic 1 Phase 3) — null이면 무제한, 값이 있으면 그 수량만큼만 판매되고 0이면 전 회차 동시 품절. `min_qty`(기본 1)는 이 상품을 한 번에 주문할 수 있는 최소 수량 — 장바구니/상품상세/체크아웃 전부 이 값 밑으로는 못 내려가고 서버(`create_order`)에서도 강제됨. `badge`는 홈/카테고리/상품상세 카드에 붙는 순수 표시용 뱃지 — 이 상품을 쓰는 모든 이벤트에서 항상 같게 보이고, 주문/마감 정책과는 무관함(`events.flash_sale`과는 "특가"라는 이름만 같을 뿐 별개). `shipping_fee`/`courier_code`/`fulfillment_type`(same_day/rolling/scheduled)/`ships_at`은 **상품 단위** 택배 배송 정책(이벤트 단위 아님). `shipping_fee_type`(기본 `fixed`)이 부과 방식을 정하고 나머지 두 컬럼은 그 방식에 필요한 값만 씀 — `fixed`는 `shipping_fee`만, `free_threshold`는 `free_shipping_threshold`(이 상품의 주문 내 소계가 이 금액 이상이면 배송비 0원)까지, `per_quantity`는 `shipping_fee_qty_unit`(이 수량마다 배송비를 한 번씩 더 부과)까지 (`lib/shipping.ts` 참고). `courier_code`는 기본 목록(`COURIER_OPTIONS`) 코드값이거나 관리자가 직접 입력한 자유 텍스트일 수 있음 — 상품 상세 안내용일 뿐 주문 송장 조회와는 무관 |
@@ -586,7 +695,7 @@ Supabase Postgres, RLS 활성화. 전체 정의는 `lib/supabase/schema.sql` 참
 | `product_option_groups` | id, product_id(→products), name, required, multi, sort_order | 카탈로그 상품의 **옵션 그룹**(색상/사이즈/중량/추가옵션 등) — origin/weight처럼 카탈로그 전용 값이라 이 상품을 파는 모든 이벤트가 그대로 공유하고 회차별로 달라지지 않음. `required`는 반드시 하나 이상 골라야 담을 수 있는지, `multi`는 여러 값 동시 선택 가능 여부. 공개 조회(고객도 옵션 목록 자체는 봐야 하니까) |
 | `product_option_values` | id, group_id(→product_option_groups), name, price_delta, has_stock, default_stock, sort_order | 그룹에 속한 선택지 하나(예: 색상 그룹의 "빨강"). `price_delta`는 이 값을 고르면 기준가에 더해지는 금액(음수 가능). `has_stock=false`면 재고 제한이 없다는 뜻이라 `event_option_stock`에 행을 아예 안 만듦. `default_stock`은 새 이벤트에 리스팅을 추가할 때 `event_option_stock`의 초기값으로만 쓰이고, 이후로는 서로 독립적으로 움직임 |
 | `event_option_stock` | id, event_product_id(→event_products), value_ids(uuid[]), stock | 이벤트 리스팅별 **옵션 조합(SKU) 재고 스냅샷** — 예전엔 `option_value_id` 하나였는데(Epic 1 이전), 색상×사이즈처럼 재고관리 그룹이 2개 이상이면 값 하나하나가 아니라 **조합**(예: `[블랙id, 260id]`) 단위로 재고를 관리해야 해서 배열로 바꿈(`value_ids`는 재고관리 대상 값 id를 오름차순 정렬). 그룹이 1개뿐이면 배열 길이가 항상 1이라 예전과 동일하게 동작함. `unique(event_product_id, value_ids)`로 조합별 유일성 보장. 리스팅을 이벤트에 추가하는 시점에 재고관리 그룹들의 카티션 곱만큼 행이 만들어지고, 각 조합의 기본값은 구성 값들의 `default_stock` 중 최솟값. `value_ids`는 여러 값을 가리켜 단일 컬럼 FK를 못 걸어(on delete cascade 없음) 옵션값이 지워져도 자동 정리되진 않음(문제 없는 죽은 행으로만 남음) |
-| `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, apartment_name, payment_method, status, cancel_requested, cancel_reason, courier_code, tracking_number, total, shipping_fee | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용). `status`는 `wait`→`paid`→`confirmed`(발주확인)→`ship`→`done` 순서로 진행하고, `done` 이후 `refund_requested`/`refunded`가 곁가지로 붙을 수 있으며 `wait`/`paid` 단계에서는 고객이 직접 `cancelled`로 바꿀 수 있음(RLS/RPC로 서버에서도 강제). `cancel_requested`는 발주확인 이후 고객이 취소를 "요청"했는지 나타내는 플래그 — status는 그대로 두고(배송 준비 계속 진행) 관리자가 승인(cancelled로 전환)하거나 거절(플래그만 해제)할 때까지 대기. `cancel_reason`은 고객이 남긴 취소 사유(선택). `courier_code`/`tracking_number`는 배송중(ship) 처리 시 관리자가 입력 — 스마트택배 API의 택배사 코드 기준(`types/index.ts`의 `COURIER_LABEL`), 문고리/사다드림 주문은 항상 null. `shipping_fee`는 주문 생성 시점에 계산된 택배 배송비 스냅샷(이미 `total`에 포함된 값 — 이후 상품 배송정책이 바뀌어도 과거 주문 금액엔 영향 없음) |
+| `orders` | id, order_number, event_id, batch_id, profile_id, guest_name/phone/pin, recipient_name/phone, address_snapshot, road_address, detail_address, entrance_method, delivery_memo, apartment_name, payment_method, status, cancel_requested, cancel_reason, courier_code, tracking_number, total, shipping_fee | 주문. **한 주문은 반드시 이벤트 하나에만 속함**(`event_id`) — 장바구니에 여러 이벤트가 섞여 있으면 체크아웃이 이벤트별로 주문을 나눠 만듦. `batch_id`는 한 번의 결제로 같이 생성된 주문들을 묶는 키(FK 아님). 게스트는 `profile_id=null`, `guest_pin`은 비회원 주문조회용 4자리. `address_snapshot`은 주소 전체를 한 줄로 합친 표시용 문자열이고, `road_address`/`detail_address`/`entrance_method`/`delivery_memo`는 그 구성요소를 각각 저장한 것(관리자 주문 상세에서 개별 표시/복사용 — 이 컬럼들이 생기기 전 주문은 null이라 그런 주문은 `address_snapshot` 한 줄로만 표시됨). `apartment_name`은 주문 시점 배송지의 아파트명 스냅샷(관리자 아파트별 필터/일괄 배송처리용, 목록/상세 화면에 🏢로 표시). `status`는 `wait`→`paid`→`confirmed`(발주확인)→`ship`→`done` 순서로 진행하고, `done` 이후 `refund_requested`/`refunded`가 곁가지로 붙을 수 있으며 `wait`/`paid` 단계에서는 고객이 직접 `cancelled`로 바꿀 수 있음(RLS/RPC로 서버에서도 강제). `cancel_requested`는 발주확인 이후 고객이 취소를 "요청"했는지 나타내는 플래그 — status는 그대로 두고(배송 준비 계속 진행) 관리자가 승인(cancelled로 전환)하거나 거절(플래그만 해제)할 때까지 대기. `cancel_reason`은 고객이 남긴 취소 사유(선택). `courier_code`/`tracking_number`는 배송중(ship) 처리 시 관리자가 입력 — 스마트택배 API의 택배사 코드 기준(`types/index.ts`의 `COURIER_LABEL`), 문고리/사다드림 주문은 항상 null. `shipping_fee`는 주문 생성 시점에 계산된 택배 배송비 스냅샷(이미 `total`에 포함된 값 — 이후 상품 배송정책이 바뀌어도 과거 주문 금액엔 영향 없음) |
 | `order_items` | id, order_id, event_product_id(→event_products), product_name, price_snapshot, quantity, options(jsonb), stock_value_ids(uuid[]) | 주문 상품 스냅샷. `event_product_id`는 카탈로그 분리 이전엔 `product_id`였던 컬럼 — 가리키는 대상(리스팅 id)은 동일해서 주문/재고/취소 로직은 변경 없음. TS 쪽 `OrderItem.productId` 필드명은 그대로 유지(DB 컬럼명만 바뀜). `options`는 주문 시점에 고른 옵션들의 스냅샷 배열(`[{optionValueId, groupName, valueName, priceDelta}, ...]`, 화면 표시용). `stock_value_ids`는 그중 재고관리 대상이었던 값들만 정렬해 담은 배열(Epic 1) — 취소/환불 시 `event_option_stock`의 어느 조합 행을 복구할지 이 값 그대로 찾는다. 카탈로그의 `has_stock` 설정이 주문 이후 바뀌어도 차감 때 쓴 것과 항상 같은 키로 복구되도록 주문 시점에 스냅샷으로 고정해둔 것 |
 | `notifications` | id, profile_id(nullable), icon, title, message, link_type(PRODUCT/EVENT/ORDER/NONE), link_id, created_at | 알림. `profile_id`가 null이면 전체 공지, 값이 있으면 그 회원 전용(배송 시작/완료 등). 읽음/삭제 여부는 DB가 아니라 브라우저 localStorage에서 관리(`lib/notification-state.ts`) |
 | `store_settings` | id(boolean, 항상 true — 싱글턴 강제), bank_name, account_number, account_holder, inquiry_chat_url, kakao_channel_url, opentalk_url, updated_at | 운영 중 자주 바뀌는 매장 전체 설정값(싱글턴 행 하나). 무통장입금 계좌 정보와, 코드 배포 없이 관리자 설정에서 바로 바꾸는 고객 문의/오픈톡방 링크(전부 선택값, 비어있으면 해당 고객 화면 버튼이 안 보임)가 이 한 행에 같이 들어있음. 새 설정 항목(사업자정보, 고객센터 운영시간, 배송/환불 안내 문구 등)을 추가하고 싶으면 이 테이블에 컬럼만 추가하면 되는 구조. 조회는 게스트 포함 전체 공개, 수정은 관리자만 |

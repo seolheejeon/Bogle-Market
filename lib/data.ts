@@ -709,6 +709,12 @@ export interface NewOrderInput {
   recipientName: string;
   recipientPhone: string;
   addressSnapshot: string;
+  // addressSnapshot을 만들 때 쓴 구성요소를 각각도 저장해둔다 — 관리자 주문
+  // 상세에서 개별로 보여주고 복사할 수 있도록.
+  roadAddress?: string;
+  detailAddress?: string;
+  entranceMethod?: string;
+  deliveryMemo?: string;
   apartmentName?: string;
   paymentMethod: PaymentMethod;
   items: OrderItem[];
@@ -788,6 +794,10 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
         stock_value_ids: item.stockComboValueIds ?? [],
       })),
       p_shipping_fee: input.shippingFee ?? 0,
+      p_road_address: input.roadAddress ?? null,
+      p_detail_address: input.detailAddress ?? null,
+      p_entrance_method: input.entranceMethod || null,
+      p_delivery_memo: input.deliveryMemo || null,
     });
     if (error) throw error;
     const orderRow = {
@@ -802,6 +812,10 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       recipient_name: input.recipientName,
       recipient_phone: input.recipientPhone,
       address_snapshot: input.addressSnapshot,
+      road_address: input.roadAddress ?? null,
+      detail_address: input.detailAddress ?? null,
+      entrance_method: input.entranceMethod || null,
+      delivery_memo: input.deliveryMemo || null,
       apartment_name: input.apartmentName || null,
       payment_method: input.paymentMethod,
       status: "wait",
@@ -837,6 +851,10 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     guestPhone: input.guestPhone ?? null,
     guestPin: input.guestPin ?? null,
     addressSnapshot: input.addressSnapshot,
+    roadAddress: input.roadAddress ?? null,
+    detailAddress: input.detailAddress ?? null,
+    entranceMethod: input.entranceMethod || null,
+    deliveryMemo: input.deliveryMemo || null,
     apartmentName: input.apartmentName || null,
     recipientName: input.recipientName,
     recipientPhone: input.recipientPhone,
@@ -1147,7 +1165,15 @@ export async function listAllProfiles(): Promise<Profile[]> {
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
     if (error) throw error;
-    return (data ?? []).map((row) => ({ id: row.id, username: row.username, name: row.name ?? "", nickname: row.nickname, phone: row.phone, isAdmin: row.is_admin }));
+    return (data ?? []).map((row) => ({
+      id: row.id,
+      username: row.username,
+      name: row.name ?? "",
+      nickname: row.nickname,
+      phone: row.phone,
+      isAdmin: row.is_admin,
+      createdAt: row.created_at,
+    }));
   }
   return Object.values(loadAccounts()).map((a) => a.profile);
 }
@@ -1574,6 +1600,10 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     guestPhone: row.guest_phone,
     guestPin: row.guest_pin,
     addressSnapshot: row.address_snapshot,
+    roadAddress: row.road_address ?? null,
+    detailAddress: row.detail_address ?? null,
+    entranceMethod: row.entrance_method ?? null,
+    deliveryMemo: row.delivery_memo ?? null,
     apartmentName: row.apartment_name ?? null,
     recipientName: row.recipient_name,
     recipientPhone: row.recipient_phone,
