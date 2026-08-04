@@ -9,8 +9,12 @@ import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 function makeValue(sortOrder: number): ProductOptionValue {
   return { id: crypto.randomUUID(), name: "", priceDelta: 0, hasStock: false, sortOrder };
 }
+// required 기본값은 false — 예전엔 true로 시작해서, 관리자가 "필수" 체크를
+// 직접 끄지 않으면 의도치 않게 고객이 옵션을 안 고르면 담기 자체가 막히는
+// 문제가 있었다(체크박스가 이미 켜진 채로 시작해서 "안 건드렸으니 선택
+// 안 함"이라고 생각하기 쉬움). 정말 필수로 만들고 싶으면 직접 체크하면 된다.
 function makeGroup(sortOrder: number): ProductOptionGroup {
-  return { id: crypto.randomUUID(), name: "", required: true, multi: false, sortOrder, values: [makeValue(0)] };
+  return { id: crypto.randomUUID(), name: "", required: false, multi: false, sortOrder, values: [makeValue(0)] };
 }
 
 // 색상/사이즈/중량/추가옵션처럼 상품마다 다른 옵션 그룹을 자유롭게 추가·삭제·
