@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { listAllOrders, listEvents, listAllProfiles, updateOrderStatus, createNotification, approveCancelRequest, rejectCancelRequest } from "@/lib/data";
+import { listAllOrders, listEvents, listAllProfiles, updateOrderStatus, createNotification, approveCancelRequest, rejectCancelRequest, rejectRefund } from "@/lib/data";
 import type { EventType, MarketEvent, Order, OrderStatus, Profile } from "@/types";
-import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL, COURIER_OPTIONS, COURIER_LABEL } from "@/types";
+import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL, COURIER_OPTIONS, COURIER_LABEL, REFUND_REASON_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { OrderDetailModal } from "@/components/admin/OrderDetailModal";
@@ -13,7 +13,7 @@ import { getAccessToken, sendPushToProfile } from "@/lib/push";
 
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", paid: "confirmed", confirmed: "ship", ship: "done" };
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = { wait: "입금확인", paid: "발주확인", confirmed: "배송시작", ship: "배송완료 처리" };
-const STATUS_OPTIONS: (OrderStatus | "all")[] = ["all", "wait", "paid", "confirmed", "ship", "done", "refund_requested", "refunded", "cancelled"];
+const STATUS_OPTIONS: (OrderStatus | "all")[] = ["all", "wait", "paid", "confirmed", "ship", "done", "refund_requested", "refunded", "refund_rejected", "cancelled"];
 const PERIOD_DAYS: Record<string, number> = { "7": 7, "30": 30, "90": 90, "365": 365 };
 
 // 주요 상태 전환 시 해당 주문 고객에게만(비회원 제외) 알림을 보낸다. 발주확인은
@@ -136,6 +136,22 @@ export default function AdminHomePage() {
     if (!confirm("환불 처리를 완료했나요?")) return;
     await updateOrderStatus(order.id, "refunded");
     await notifyStatusChange(order, "refunded", eventById.get(order.eventId)?.title);
+    refresh();
+  }
+  async function rejectRefundRequest(order: Order) {
+    const reason = window.prompt("반려 사유를 입력해주세요. 고객에게 그대로 전달돼요. (선택, 비워두고 확인해도 돼요)");
+    if (reason === null) return;
+    await rejectRefund(order.id, reason.trim() || undefined);
+    if (order.profileId) {
+      await createNotification({
+        title: "반품/환불 신청이 반려됐어요",
+        message: `주문번호 ${order.orderNumber} 반품/환불 신청이 반려됐어요.${reason.trim() ? ` 사유: ${reason.trim()}` : ""}`,
+        icon: "🙏",
+        linkType: "ORDER",
+        linkId: order.id,
+        profileId: order.profileId,
+      });
+    }
     refresh();
   }
   async function approveCancel(order: Order) {
@@ -451,6 +467,17 @@ export default function AdminHomePage() {
               </p>
             )}
             {o.cancelRequested && o.cancelReason && <p className="mt-1 text-[12px] font-semibold text-red-600">고객 취소 사유: {o.cancelReason}</p>}
+            {(o.status === "refund_requested" || o.status === "refund_rejected") && o.refundReason && (
+              <p className="mt-1 text-[12px] font-semibold text-red-600">
+                반품/환불 사유: {REFUND_REASON_LABEL[o.refundReason]}
+                {o.refundReasonDetail ? ` — ${o.refundReasonDetail}` : ""}
+                {o.refundRequestedAt ? ` (${formatDateTime(o.refundRequestedAt)} 신청)` : ""}
+              </p>
+            )}
+            {o.status === "refund_requested" && o.refundPhotoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element -- source domain unknown ahead of time
+              <img src={o.refundPhotoUrl} alt="첨부 사진" className="mt-1.5 h-14 w-14 rounded-[7px] object-cover" onClick={(e) => e.stopPropagation()} />
+            )}
             <div className="mt-1.5 flex items-center justify-between">
               <strong className="text-[14px]">{formatPrice(o.total)}</strong>
               <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -480,11 +507,20 @@ export default function AdminHomePage() {
                       )
                     )}
                     {o.status === "refund_requested" && (
-                      <button onClick={() => markRefunded(o)} className="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white">
-                        환불완료 처리
-                      </button>
+                      <>
+                        <button onClick={() => markRefunded(o)} className="rounded-[8px] bg-accent px-3 py-1.5 text-[12px] font-bold text-white">
+                          환불완료 처리
+                        </button>
+                        <button onClick={() => rejectRefundRequest(o)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-semibold text-red-600">
+                          반려
+                        </button>
+                      </>
                     )}
-                    {o.status !== "done" && o.status !== "cancelled" && o.status !== "refund_requested" && o.status !== "refunded" && (
+                    {o.status !== "done" &&
+                      o.status !== "cancelled" &&
+                      o.status !== "refund_requested" &&
+                      o.status !== "refunded" &&
+                      o.status !== "refund_rejected" && (
                       <button onClick={() => cancel(o)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-semibold text-red-600">
                         취소
                       </button>

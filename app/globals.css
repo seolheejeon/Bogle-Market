@@ -43,6 +43,8 @@
   --status-refund-requested-fg: #9c5a1f;
   --status-refunded-bg: #eee4d4;
   --status-refunded-fg: #6b5d4a;
+  --status-refund-rejected-bg: #f8d9d2;
+  --status-refund-rejected-fg: #b8402a;
 }
 
 @media (prefers-color-scheme: dark) {

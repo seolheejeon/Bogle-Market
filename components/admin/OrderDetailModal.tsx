@@ -1,7 +1,7 @@
 "use client";
 
 import type { MarketEvent, Order, Profile } from "@/types";
-import { EVENT_TYPE_LABEL, PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL } from "@/types";
+import { EVENT_TYPE_LABEL, PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL, REFUND_REASON_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { Modal } from "@/components/admin/Modal";
@@ -199,6 +199,23 @@ export function OrderDetailModal({
         {order.courierCode && order.trackingNumber && <Row label="송장번호">{order.trackingNumber}</Row>}
         {order.cancelRequested && order.cancelReason && <Row label="취소 사유">{order.cancelReason}</Row>}
       </Section>
+
+      {(order.status === "refund_requested" || order.status === "refunded" || order.status === "refund_rejected") && (
+        <Section title="반품/환불">
+          <Row label="신청일">{order.refundRequestedAt ? formatDateTime(order.refundRequestedAt) : "-"}</Row>
+          {order.refundReason && <Row label="사유">{REFUND_REASON_LABEL[order.refundReason]}</Row>}
+          {order.refundReasonDetail && <Row label="상세">{order.refundReasonDetail}</Row>}
+          {order.refundPhotoUrl && (
+            <Row label="첨부 사진">
+              <a href={order.refundPhotoUrl} target="_blank" rel="noreferrer">
+                {/* eslint-disable-next-line @next/next/no-img-element -- source domain unknown ahead of time */}
+                <img src={order.refundPhotoUrl} alt="첨부 사진" className="h-16 w-16 rounded-[8px] object-cover" />
+              </a>
+            </Row>
+          )}
+          {order.status === "refund_rejected" && order.refundRejectReason && <Row label="반려 사유">{order.refundRejectReason}</Row>}
+        </Section>
+      )}
     </Modal>
   );
 }

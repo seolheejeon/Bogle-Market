@@ -22,7 +22,7 @@ export function ProductGridCard({ product, rankBadge, closed }: { product: Produ
           className="flex aspect-square w-full items-center justify-center rounded-xl bg-accent-soft text-[58px] leading-none"
         />
         {rankBadge && (
-          <span className="absolute top-1.5 left-1.5 rounded-md bg-accent px-1.5 py-0.5 text-[10px] font-extrabold text-white">{rankBadge}</span>
+          <span className="absolute top-1.5 left-1.5 rounded-md bg-accent px-2 py-1 text-[12px] font-extrabold text-white">{rankBadge}</span>
         )}
         {product.badge && product.badge !== "NONE" && (
           <span className="absolute top-1.5 right-1.5">

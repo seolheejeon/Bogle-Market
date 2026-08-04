@@ -38,3 +38,21 @@ export async function uploadProductPhotos(files: File[]): Promise<string[]> {
 // 종류를 가리지 않고 업로드 후 공개 URL을 돌려주는 함수라 이름만 일반화한
 // 별칭으로 노출한다(내부 동작은 uploadProductPhoto와 동일).
 export const uploadProductFile = uploadProductPhoto;
+
+const REFUND_BUCKET = "refund-photos";
+
+// 반품/환불 신청 시 고객(회원/게스트 모두)이 첨부하는 사진 — product-photos와
+// 달리 업로드 주체가 관리자가 아니라서 별도 버킷(refund-photos, 업로드는
+// 인증 여부와 무관하게 허용, 삭제만 관리자 전용)을 쓴다.
+export async function uploadRefundPhoto(file: File): Promise<string> {
+  if (!isSupabaseConfigured) {
+    return fileToDataUrl(file);
+  }
+  const supabase = getSupabaseBrowserClient()!;
+  const ext = file.name.split(".").pop() || "jpg";
+  const path = `${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage.from(REFUND_BUCKET).upload(path, file, { cacheControl: "3600", upsert: false });
+  if (error) throw error;
+  const { data } = supabase.storage.from(REFUND_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}

@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { listOrdersForProfile, lookupGuestOrders, getEvent, cancelOrder, requestCancellation, requestRefund } from "@/lib/data";
-import type { MarketEvent, Order, OrderStatus } from "@/types";
-import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL, COURIER_LABEL, COURIER_TRACKING_URL } from "@/types";
+import { uploadRefundPhoto } from "@/lib/supabase/storage";
+import type { MarketEvent, Order, OrderStatus, RefundReasonCode } from "@/types";
+import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL, COURIER_LABEL, COURIER_TRACKING_URL, REFUND_REASON_LABEL } from "@/types";
 import { formatDateTime, formatPrice, formatEventDateChip } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
@@ -31,6 +32,11 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
   const [cancelling, setCancelling] = useState(false);
   const [requestingRefund, setRequestingRefund] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [refundFormOpen, setRefundFormOpen] = useState(false);
+  const [refundReasonCode, setRefundReasonCode] = useState<RefundReasonCode | "">("");
+  const [refundDetail, setRefundDetail] = useState("");
+  const [refundPhotoFile, setRefundPhotoFile] = useState<File | null>(null);
+  const [refundPhotoPreview, setRefundPhotoPreview] = useState<string | null>(null);
 
   function apply(all: Order[]) {
     const found = all.find((o) => o.id === orderId) ?? null;
@@ -59,10 +65,11 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
     getEvent(order.eventId).then(setEvent);
   }, [order]);
 
-  // done 이후 refund_requested/refunded로 갈라져도(STEPS엔 없는 상태) 스테퍼는
-  // "배송완료"까지 다 밟은 것으로 표시 — 실제로 그 단계를 다 거쳐야 도달하는 상태라서.
+  // done 이후 refund_requested/refunded/refund_rejected로 갈라져도(STEPS엔 없는
+  // 상태) 스테퍼는 "배송완료"까지 다 밟은 것으로 표시 — 실제로 그 단계를 다
+  // 거쳐야 도달하는 상태라서.
   const stepIndex = order
-    ? order.status === "refund_requested" || order.status === "refunded"
+    ? order.status === "refund_requested" || order.status === "refunded" || order.status === "refund_rejected"
       ? STEPS.length - 1
       : STEPS.findIndex((s) => s.value === order.status)
     : -1;
@@ -71,7 +78,8 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
   const canSelfCancel = order?.status === "wait" || order?.status === "paid";
   const cancelPending = order?.cancelRequested ?? false;
   const canRequestCancel = (order?.status === "confirmed" || order?.status === "ship") && !cancelPending;
-  const canRequestRefund = order?.status === "done";
+  // 반려된 후에도 재신청할 수 있게 둔다(연락 없이 막다른 상태가 되지 않도록).
+  const canRequestRefund = order?.status === "done" || order?.status === "refund_rejected";
 
   async function handleCancel() {
     if (!order) return;
@@ -105,13 +113,33 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
     }
   }
 
-  async function handleRequestRefund() {
+  function pickRefundPhoto(file: File | null) {
+    setRefundPhotoFile(file);
+    setRefundPhotoPreview(file ? URL.createObjectURL(file) : null);
+  }
+
+  async function handleSubmitRefundRequest() {
     if (!order) return;
-    if (!confirm("반품/환불을 신청할까요? 확인 후 처리해드릴게요.")) return;
+    if (!refundReasonCode) {
+      setActionError("반품/환불 사유를 선택해 주세요.");
+      return;
+    }
     setActionError(null);
     setRequestingRefund(true);
     try {
-      await requestRefund(order.id);
+      const photoUrl = refundPhotoFile ? await uploadRefundPhoto(refundPhotoFile) : undefined;
+      await requestRefund(order.id, {
+        profileId: profile?.id ?? null,
+        guestName,
+        guestPin,
+        reason: refundReasonCode,
+        reasonDetail: refundDetail.trim() || undefined,
+        photoUrl,
+      });
+      setRefundFormOpen(false);
+      setRefundReasonCode("");
+      setRefundDetail("");
+      pickRefundPhoto(null);
       refresh();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "신청 중 오류가 발생했어요.");
@@ -199,19 +227,97 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
                 취소 요청이 접수됐어요. 확인 후 승인되면 취소 처리되고, 어려운 경우 사유와 함께 알려드릴게요.
               </p>
             )}
-            {canRequestRefund && (
+            {canRequestRefund && !refundFormOpen && (
               <button
-                onClick={handleRequestRefund}
-                disabled={requestingRefund}
-                className="mb-4 w-full rounded-[10px] border border-border py-2.5 text-[13px] font-semibold disabled:opacity-50"
+                onClick={() => setRefundFormOpen(true)}
+                className="mb-4 w-full rounded-[10px] border border-border py-2.5 text-[13px] font-semibold"
               >
-                {requestingRefund ? "신청 처리 중..." : "반품/환불 신청"}
+                {order.status === "refund_rejected" ? "반품/환불 다시 신청" : "반품/환불 신청"}
               </button>
             )}
+            {canRequestRefund && refundFormOpen && (
+              <div className="mb-4 rounded-[10px] border border-border p-3">
+                <p className="mb-2 text-[12.5px] font-bold">반품/환불 신청</p>
+                <p className="mb-1.5 text-[11.5px] font-semibold text-text-muted">사유 선택</p>
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                  {(Object.entries(REFUND_REASON_LABEL) as [RefundReasonCode, string][]).map(([code, label]) => (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => setRefundReasonCode(code)}
+                      className={`rounded-full border px-3 py-1.5 text-[12px] font-semibold ${
+                        refundReasonCode === code ? "border-accent bg-accent text-white" : "border-border text-text-muted"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={refundDetail}
+                  onChange={(e) => setRefundDetail(e.target.value)}
+                  placeholder="자세한 사유를 직접 입력할 수 있어요 (선택)"
+                  rows={3}
+                  className="mb-3 w-full rounded-[8px] border border-border bg-bg-card px-2.5 py-2 text-[12.5px]"
+                />
+                <p className="mb-1.5 text-[11.5px] font-semibold text-text-muted">사진 첨부 (선택)</p>
+                <div className="mb-3 flex items-center gap-2">
+                  {refundPhotoPreview ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- 로컬 미리보기(object URL)
+                    <img src={refundPhotoPreview} alt="첨부 사진" className="h-16 w-16 rounded-[8px] object-cover" />
+                  ) : (
+                    <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded-[8px] border border-dashed border-border text-[11px] text-text-muted">
+                      + 사진
+                      <input type="file" accept="image/*" className="hidden" onChange={(e) => pickRefundPhoto(e.target.files?.[0] ?? null)} />
+                    </label>
+                  )}
+                  {refundPhotoPreview && (
+                    <button type="button" onClick={() => pickRefundPhoto(null)} className="text-[11.5px] font-semibold text-text-muted">
+                      제거
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRefundFormOpen(false);
+                      setActionError(null);
+                    }}
+                    className="flex-1 rounded-[9px] border border-border py-2 text-[12.5px] font-semibold text-text-muted"
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSubmitRefundRequest}
+                    disabled={requestingRefund}
+                    className="flex-1 rounded-[9px] bg-accent py-2 text-[12.5px] font-bold text-white disabled:opacity-50"
+                  >
+                    {requestingRefund ? "신청 처리 중..." : "신청하기"}
+                  </button>
+                </div>
+              </div>
+            )}
             {order.status === "refund_requested" && (
-              <p className="mb-4 rounded-[10px] bg-bg-sunken p-3 text-[12.5px] text-text-muted">
-                반품/환불 신청이 접수됐어요. 확인 후 처리해드릴게요.
-              </p>
+              <div className="mb-4 rounded-[10px] bg-bg-sunken p-3 text-[12.5px] text-text-muted">
+                <p className="font-semibold">반품/환불 신청이 접수됐어요. 확인 후 처리해드릴게요.</p>
+                {order.refundReason && <p className="mt-1">사유: {REFUND_REASON_LABEL[order.refundReason]}</p>}
+                {order.refundReasonDetail && <p className="mt-0.5">{order.refundReasonDetail}</p>}
+                {order.refundPhotoUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element -- source domain unknown ahead of time
+                  <img src={order.refundPhotoUrl} alt="첨부 사진" className="mt-2 h-16 w-16 rounded-[8px] object-cover" />
+                )}
+              </div>
+            )}
+            {order.status === "refund_rejected" && (
+              <div className="mb-4 rounded-[10px] bg-bg-sunken p-3 text-[12.5px] text-text-muted">
+                <p className="font-semibold text-red-600">반품/환불 신청이 반려됐어요.</p>
+                {order.refundRejectReason && <p className="mt-1">사유: {order.refundRejectReason}</p>}
+              </div>
+            )}
+            {order.status === "refunded" && (
+              <p className="mb-4 rounded-[10px] bg-bg-sunken p-3 text-[12.5px] font-semibold text-text-muted">환불이 완료됐어요.</p>
             )}
 
             <SupportLinks />

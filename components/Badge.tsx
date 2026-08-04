@@ -25,7 +25,7 @@ const EVENT_MERCHANDISE_BADGE_CLASS: Record<Exclude<EventBadge, "NONE">, string>
 export function EventBadgeTag({ badge }: { badge?: EventBadge }) {
   if (!badge || badge === "NONE") return null;
   const label = badge === "SALE" ? "🔥 1시간 특가" : EVENT_BADGE_LABEL[badge];
-  return <span className={`rounded-md px-2 py-0.5 text-[11px] font-bold ${EVENT_MERCHANDISE_BADGE_CLASS[badge]}`}>{label}</span>;
+  return <span className={`rounded-md px-2.5 py-1 text-[13px] font-extrabold ${EVENT_MERCHANDISE_BADGE_CLASS[badge]}`}>{label}</span>;
 }
 
 const STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
@@ -36,6 +36,7 @@ const STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
   done: "bg-[var(--status-done-bg)] text-[var(--status-done-fg)]",
   refund_requested: "bg-[var(--status-refund-requested-bg)] text-[var(--status-refund-requested-fg)]",
   refunded: "bg-[var(--status-refunded-bg)] text-[var(--status-refunded-fg)]",
+  refund_rejected: "bg-[var(--status-refund-rejected-bg)] text-[var(--status-refund-rejected-fg)]",
   cancelled: "bg-[var(--badge-flash-bg)] text-[var(--badge-flash-fg)]",
 };
 

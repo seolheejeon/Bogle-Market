@@ -195,6 +195,19 @@ create table if not exists product_option_values (
   created_at timestamptz not null default now()
 );
 
+-- 옵션값별 공급가(원가) 조정분 — price_delta(판매가 조정)와 같은 방식으로
+-- 기준 원가(product_costs.cost_price)에 더해진다. product_option_values는
+-- 고객도 읽어야 해서(가격조정 표시) RLS가 공개 조회로 열려 있는데, 같은
+-- 테이블에 원가 컬럼을 얹으면 행 단위 RLS로는 그 컬럼만 따로 숨길 방법이
+-- 없다 — 그래서 product_costs/event_product_costs와 똑같이 관리자 전용
+-- 별도 테이블로 분리한다. option_value_id가 PK 겸 FK라 값 하나당 원가
+-- 행이 최대 하나(on delete cascade로 옵션값이 지워지면 같이 정리됨).
+create table if not exists product_option_costs (
+  option_value_id uuid primary key references product_option_values(id) on delete cascade,
+  cost_delta integer not null default 0,
+  updated_at timestamptz not null default now()
+);
+
 -- 이벤트 리스팅별 "옵션 조합" 재고 스냅샷 — event_products.stock과 같은 이유로
 -- 분리한다: 같은 카탈로그 옵션값이라도 이벤트마다 독립된 재고를 가져야 하기
 -- 때문. value_ids는 재고관리(has_stock=true) 대상 옵션값 id들을 오름차순
@@ -253,15 +266,26 @@ create table if not exists orders (
   payment_method text not null check (payment_method in ('bank_transfer', 'card', 'kakaopay', 'incheon_eum')),
   -- wait(입금대기) -> paid(입금완료) -> confirmed(발주확인, 사장님이 실제 발주를
   -- 넣은 시점 — 이후로는 고객 셀프취소 불가) -> ship(배송중) -> done(배송완료).
-  -- refund_requested/refunded는 done 이후 반품/환불 요청이 있을 때만 곁가지로
-  -- 붙는 상태. cancelled는 wait/paid 단계에서만 고객이 스스로 취소하거나
-  -- 관리자가 언제든 취소할 때.
-  status text not null default 'wait' check (status in ('wait', 'paid', 'confirmed', 'ship', 'done', 'refund_requested', 'refunded', 'cancelled')),
+  -- refund_requested/refunded/refund_rejected는 done 이후 반품/환불 요청이
+  -- 있을 때만 곁가지로 붙는 상태(승인=refunded, 반려=refund_rejected — 반려
+  -- 후에도 굳이 done으로 되돌리지 않고 반려 이력 자체를 남겨둔다). cancelled는
+  -- wait/paid 단계에서만 고객이 스스로 취소하거나 관리자가 언제든 취소할 때.
+  status text not null default 'wait' check (status in ('wait', 'paid', 'confirmed', 'ship', 'done', 'refund_requested', 'refunded', 'refund_rejected', 'cancelled')),
   -- 발주확인(confirmed) 이후 고객이 취소를 "요청"하면 true — status는 그대로 두고
   -- (배송 준비는 계속 진행) 이 플래그만 세워서, 관리자가 승인(cancelled로 전환 +
   -- 재고 복구) 하거나 거절(플래그만 해제 + 사유와 함께 알림)할 때까지 대기시킨다.
   cancel_requested boolean not null default false,
   cancel_reason text,
+  -- 배송완료(done) 이후 반품/환불 신청 시 채워지는 값들 — refund_reason은
+  -- types/index.ts의 RefundReasonCode 키(예: 'defective'), refund_reason_detail은
+  -- 고객이 직접 입력한 자유 텍스트(선택), refund_photo_url은 첨부 사진(선택,
+  -- product-photos 버킷 재사용). 신청 시각도 같이 남겨 관리자 목록에서 정렬/확인.
+  refund_reason text,
+  refund_reason_detail text,
+  refund_photo_url text,
+  refund_requested_at timestamptz,
+  -- 관리자가 반려 처리 시 남기는 사유(선택).
+  refund_reject_reason text,
   -- 배송중(ship) 처리 시 관리자가 입력하는 택배사 코드(스마트택배 API 기준,
   -- types/index.ts의 COURIER_LABEL 참고)와 송장번호. 문고리/사다드림처럼 직접
   -- 배송하는 주문은 비어있다.
@@ -388,6 +412,7 @@ alter table product_costs enable row level security;
 alter table event_product_costs enable row level security;
 alter table product_option_groups enable row level security;
 alter table product_option_values enable row level security;
+alter table product_option_costs enable row level security;
 alter table event_option_stock enable row level security;
 
 -- SECURITY DEFINER helper: checks admin status while bypassing RLS itself.
@@ -468,6 +493,10 @@ drop policy if exists "admins manage event product costs" on event_product_costs
 create policy "admins manage event product costs" on event_product_costs for all
   using (is_admin())
   with check (is_admin());
+drop policy if exists "admins manage product option costs" on product_option_costs;
+create policy "admins manage product option costs" on product_option_costs for all
+  using (is_admin())
+  with check (is_admin());
 
 -- Profiles: user manages their own row; admins can read all
 -- signUp() creates the auth.users row first, then inserts the matching
@@ -519,6 +548,14 @@ drop policy if exists "user requests cancel" on orders;
 create policy "user requests cancel" on orders for update
   using (profile_id = auth.uid() and status in ('confirmed', 'ship') and cancel_requested = false)
   with check (status in ('confirmed', 'ship') and cancel_requested = true);
+-- 배송완료(done) 이후 회원 본인이 반품/환불을 신청할 수 있다 — status를
+-- refund_requested로 바꾸는 것만 허용(승인/반려/환불완료는 관리자 전용
+-- 정책으로 처리). 게스트 신청은 인증이 없어 이 정책이 아니라 별도
+-- RPC(request_guest_refund)로 처리한다(cancel 흐름과 동일한 이유).
+drop policy if exists "user requests refund" on orders;
+create policy "user requests refund" on orders for update
+  using (profile_id = auth.uid() and status = 'done')
+  with check (status = 'refund_requested');
 drop policy if exists "admins manage orders" on orders;
 create policy "admins manage orders" on orders for all
   using (is_admin())
@@ -611,6 +648,8 @@ returns table (
   guest_name text, guest_phone text, guest_pin text, recipient_name text, recipient_phone text,
   address_snapshot text, apartment_name text, payment_method text, status text,
   cancel_requested boolean, cancel_reason text, courier_code text, tracking_number text,
+  refund_reason text, refund_reason_detail text, refund_photo_url text, refund_requested_at timestamptz,
+  refund_reject_reason text,
   total integer, created_at timestamptz, items jsonb
 )
 language sql
@@ -622,6 +661,8 @@ as $$
     o.guest_name, o.guest_phone, o.guest_pin, o.recipient_name, o.recipient_phone,
     o.address_snapshot, o.apartment_name, o.payment_method, o.status,
     o.cancel_requested, o.cancel_reason, o.courier_code, o.tracking_number,
+    o.refund_reason, o.refund_reason_detail, o.refund_photo_url, o.refund_requested_at,
+    o.refund_reject_reason,
     o.total, o.created_at,
     coalesce(
       (select jsonb_agg(jsonb_build_object(
@@ -703,6 +744,31 @@ begin
     and lower(coalesce(guest_name, recipient_name)) = lower(p_name)
     and status in ('confirmed', 'ship')
     and cancel_requested = false;
+end;
+$$;
+
+-- 게스트의 배송완료(done) 이후 반품/환불 신청 — request_guest_cancel과 같은
+-- 이유로 인증 없이 이름+PIN만으로 호출되는 SECURITY DEFINER RPC. 승인/반려는
+-- 관리자가 관리자 세션으로 직접 orders를 업데이트하므로 별도 RPC가 필요 없다.
+create or replace function request_guest_refund(
+  p_order_id uuid, p_name text, p_pin text, p_reason text, p_reason_detail text, p_photo_url text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update orders
+  set status = 'refund_requested',
+      refund_reason = p_reason,
+      refund_reason_detail = p_reason_detail,
+      refund_photo_url = p_photo_url,
+      refund_requested_at = now()
+  where id = p_order_id
+    and guest_pin = p_pin
+    and lower(coalesce(guest_name, recipient_name)) = lower(p_name)
+    and status = 'done';
 end;
 $$;
 
@@ -998,6 +1064,27 @@ create policy "admins update product photos" on storage.objects for update
 drop policy if exists "admins delete product photos" on storage.objects;
 create policy "admins delete product photos" on storage.objects for delete
   using (bucket_id = 'product-photos' and is_admin());
+
+-- Storage: 반품/환불 신청 시 고객이 첨부하는 사진 — product-photos와 달리
+-- 업로드 주체가 관리자가 아니라 회원/게스트(비로그인)라서 별도 버킷을 둔다.
+-- 게스트는 auth.uid()가 없어 "본인 것만" 같은 조건을 걸 방법이 없으므로,
+-- 다른 게스트 전용 쓰기(주문 생성 등)와 마찬가지로 인증 여부와 무관하게
+-- 업로드를 허용하고, 삭제만 관리자 전용으로 잠근다(악용 시 수동 정리).
+insert into storage.buckets (id, name, public)
+values ('refund-photos', 'refund-photos', true)
+on conflict (id) do nothing;
+
+drop policy if exists "refund photos are publicly readable" on storage.objects;
+create policy "refund photos are publicly readable" on storage.objects for select
+  using (bucket_id = 'refund-photos');
+
+drop policy if exists "anyone uploads refund photos" on storage.objects;
+create policy "anyone uploads refund photos" on storage.objects for insert
+  with check (bucket_id = 'refund-photos');
+
+drop policy if exists "admins delete refund photos" on storage.objects;
+create policy "admins delete refund photos" on storage.objects for delete
+  using (bucket_id = 'refund-photos' and is_admin());
 
 -- Create the first admin manually after signing up, e.g.:
 -- update profiles set is_admin = true where username = 'bogle123';

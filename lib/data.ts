@@ -39,6 +39,7 @@ import type {
   ProductOptionGroup,
   ProductOptionValue,
   Profile,
+  RefundReasonCode,
   StoreSettings,
 } from "@/types";
 import { EMPTY_STORE_SETTINGS } from "@/types";
@@ -85,11 +86,18 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
 
 // 카탈로그의 옵션 그룹/값(구조)에 이 리스팅의 옵션값별 재고 스냅샷을 채워
 // 넣는다. hasStock=false인 옵션값은 재고 제한이 없어 stock을 아예 안 채운다.
+// costDelta(공급가)는 항상 지운다 — mock 모드는 카탈로그 원본(costDelta 포함)을
+// localStorage에 그대로 저장해두지만, 고객 화면이 받는 Product는 Supabase
+// 모드와 동일하게 원가를 절대 포함하지 않아야 한다(costPrice가 Product 타입에
+// 아예 없는 것과 같은 이유).
 function mergeOptionStock(groups: ProductOptionGroup[] | undefined, optionStock: Record<string, number> | undefined): ProductOptionGroup[] | undefined {
   if (!groups) return undefined;
   return groups.map((g) => ({
     ...g,
-    values: g.values.map((v) => (v.hasStock ? { ...v, stock: optionStock?.[v.id] ?? v.defaultStock ?? 0 } : v)),
+    values: g.values.map((v) => {
+      const { costDelta: _costDelta, ...rest } = v;
+      return rest.hasStock ? { ...rest, stock: optionStock?.[rest.id] ?? rest.defaultStock ?? 0 } : rest;
+    }),
   }));
 }
 
@@ -232,7 +240,7 @@ export async function listCatalogProducts(): Promise<CatalogProduct[]> {
     // 안전하다(RLS가 어차피 비관리자에게는 이 조인을 null로 돌려준다).
     const { data, error } = await supabase
       .from("products")
-      .select("*, product_costs(cost_price), product_option_groups(*, product_option_values(*))")
+      .select("*, product_costs(cost_price), product_option_groups(*, product_option_values(*, product_option_costs(cost_delta)))")
       .order("name", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(mapSupabaseCatalogProduct);
@@ -408,6 +416,15 @@ async function saveOptionGroupsForProduct(supabase: ReturnType<typeof getSupabas
     const delValues = sb.from("product_option_values").delete().in("group_id", keepGroupIds);
     const { error: delValueError } = await (keepValueIds.length > 0 ? delValues.not("id", "in", `(${keepValueIds.join(",")})`) : delValues);
     if (delValueError) throw delValueError;
+  }
+
+  // 공급가(costDelta)도 별도 admin-only 테이블(product_option_costs)에
+  // upsert한다 — 값을 지운 옵션은 위에서 이미 product_option_values가 지워져
+  // on delete cascade로 같이 정리되므로 여기선 upsert만 하면 된다.
+  const costRows = groups.flatMap((g) => g.values.filter((v) => v.costDelta !== undefined).map((v) => ({ option_value_id: v.id, cost_delta: v.costDelta })));
+  if (costRows.length > 0) {
+    const { error } = await sb.from("product_option_costs").upsert(costRows);
+    if (error) throw error;
   }
 }
 
@@ -862,6 +879,11 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     status: "wait",
     cancelRequested: false,
     cancelReason: null,
+    refundReason: null,
+    refundReasonDetail: null,
+    refundPhotoUrl: null,
+    refundRequestedAt: null,
+    refundRejectReason: null,
     courierCode: null,
     trackingNumber: null,
     items: input.items,
@@ -1146,16 +1168,77 @@ export async function rejectCancelRequest(orderId: string): Promise<void> {
   saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, cancelRequested: false } : o)));
 }
 
-// 고객이 배송완료 후 반품/환불을 신청 — 관리자가 확인 후 수동으로 환불완료
-// 처리한다(입금확인 등 다른 상태 전환과 같은 패턴).
-export async function requestRefund(orderId: string): Promise<void> {
+// 고객이 배송완료(done) 후 반품/환불을 신청 — 관리자가 확인 후 승인(환불완료)
+// 또는 반려 처리한다(입금확인 등 다른 상태 전환과 같은 패턴). 회원은 RLS가,
+// 게스트는 SECURITY DEFINER RPC(request_guest_refund)가 "done 상태에서만
+// 신청 가능"을 서버 측에서도 강제한다 — 예전엔 인증 없이 그냥 orders를 직접
+// update했는데, 이 update를 허용하는 RLS 정책 자체가 없어서 조용히 아무
+// 일도 안 일어나는 버그가 있었다(고객 입장에선 버튼이 반응 없는 것처럼 보임).
+export async function requestRefund(
+  orderId: string,
+  opts: { profileId?: string | null; guestName?: string; guestPin?: string; reason: RefundReasonCode; reasonDetail?: string; photoUrl?: string },
+): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { error } = await supabase.from("orders").update({ status: "refund_requested" }).eq("id", orderId);
+    if (opts.profileId) {
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          status: "refund_requested",
+          refund_reason: opts.reason,
+          refund_reason_detail: opts.reasonDetail || null,
+          refund_photo_url: opts.photoUrl || null,
+          refund_requested_at: new Date().toISOString(),
+        })
+        .eq("id", orderId);
+      if (error) throw error;
+      return;
+    }
+    const { error } = await supabase.rpc("request_guest_refund", {
+      p_order_id: orderId,
+      p_name: opts.guestName,
+      p_pin: opts.guestPin,
+      p_reason: opts.reason,
+      p_reason_detail: opts.reasonDetail || null,
+      p_photo_url: opts.photoUrl || null,
+    });
     if (error) throw error;
     return;
   }
-  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, status: "refund_requested" as OrderStatus } : o)));
+  const target = loadOrders().find((o) => o.id === orderId);
+  if (!target || target.status !== "done") {
+    throw new Error("배송완료 상태에서만 반품/환불을 신청할 수 있어요.");
+  }
+  saveOrders(
+    loadOrders().map((o) =>
+      o.id === orderId
+        ? {
+            ...o,
+            status: "refund_requested" as OrderStatus,
+            refundReason: opts.reason,
+            refundReasonDetail: opts.reasonDetail || null,
+            refundPhotoUrl: opts.photoUrl || null,
+            refundRequestedAt: new Date().toISOString(),
+          }
+        : o,
+    ),
+  );
+}
+
+// 관리자가 반품/환불 신청을 반려 — "admins manage orders" 정책이 이미 전체
+// 컬럼 수정을 허용하므로(다른 관리자 전용 상태 전환과 동일하게) 별도 RPC 없이
+// 직접 update한다. 승인(환불완료)은 기존 updateOrderStatus(id, "refunded")를
+// 그대로 쓴다.
+export async function rejectRefund(orderId: string, reason?: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("orders").update({ status: "refund_rejected", refund_reject_reason: reason || null }).eq("id", orderId);
+    if (error) throw error;
+    return;
+  }
+  saveOrders(
+    loadOrders().map((o) => (o.id === orderId ? { ...o, status: "refund_rejected" as OrderStatus, refundRejectReason: reason || null } : o)),
+  );
 }
 
 // ---------- Profiles (admin customer lookup) ----------
@@ -1436,7 +1519,13 @@ function mapSupabaseAddress(row: Record<string, any>): Address {
 }
 
 // product_option_values 행 -> 카탈로그 옵션값(이벤트 재고 정보 없이 구조만).
+// costDelta는 select에서 product_option_costs를 함께 embed했을 때만 채워진다
+// (listCatalogProducts 같은 관리자 전용 조회) — 고객 쪽 조회(listEvents 등)는
+// 이 테이블을 애초에 join하지 않으므로 row.product_option_costs가 없어서
+// costDelta가 항상 undefined로 남는다(RLS가 admin-only라 설령 조인해도
+// 비관리자에게는 null로 온다 — product_costs와 동일한 이중 방어).
 function mapSupabaseOptionValue(row: Record<string, any>): ProductOptionValue {
+  const costRow = Array.isArray(row.product_option_costs) ? row.product_option_costs[0] : row.product_option_costs;
   return {
     id: row.id,
     name: row.name,
@@ -1444,6 +1533,7 @@ function mapSupabaseOptionValue(row: Record<string, any>): ProductOptionValue {
     hasStock: row.has_stock ?? false,
     defaultStock: row.default_stock ?? undefined,
     sortOrder: row.sort_order ?? 0,
+    costDelta: costRow?.cost_delta ?? undefined,
   };
 }
 
@@ -1611,6 +1701,11 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     status: row.status,
     cancelRequested: row.cancel_requested ?? false,
     cancelReason: row.cancel_reason ?? null,
+    refundReason: row.refund_reason ?? null,
+    refundReasonDetail: row.refund_reason_detail ?? null,
+    refundPhotoUrl: row.refund_photo_url ?? null,
+    refundRequestedAt: row.refund_requested_at ?? null,
+    refundRejectReason: row.refund_reject_reason ?? null,
     courierCode: row.courier_code ?? null,
     trackingNumber: row.tracking_number ?? null,
     items,

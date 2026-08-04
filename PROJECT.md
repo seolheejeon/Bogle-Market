@@ -665,6 +665,83 @@ $$;
 - `tsc`/`build` 통과 확인. 편집기 자체(관리자 화면)는 로그인이 필요해 이번에도 브라우저로 직접 열어보지는 못함(기존과 동일한 한계) — 대신 렌더링 쪽(`ProductDetailContent`)은 로그인이 필요 없는 고객 화면이라 실 배포 사이트에 이미 등록된 진짜 상품 2개를 열어 기존 상세설명(텍스트만 있는 상품, 사진 여러 장 있는 상품)이 회귀 없이 그대로 렌더링되는 것과 콘솔 에러 없는 것까지 확인함. 위 "장 단위 재설계" 수정은 `DetailBlockEditor.tsx`(관리자 편집 화면)만 바꾸고 렌더러(`ProductDetailContent.tsx`)는 그대로라 이 렌더링 검증이 그대로 유효하며, 수정 후에도 `tsc`/`build` 재확인함
 - 마이그레이션 불필요(DB 스키마 변경 없음, jsonb 컬럼 재사용)
 
+**상품 뱃지 크기 확대**
+- 배경: 상품 카드(홈/카테고리)에 붙는 HOT/NEW/특가 같은 뱃지가 모바일에서 잘 안 보일 정도로 작다는 피드백
+- `components/Badge.tsx`의 `EventBadgeTag`(그리드 카드·이벤트 상세 목록 공용) 텍스트를 11px→13px, 패딩을 넉넉히 키우고 `font-bold`→`font-extrabold`로 굵기도 올림. `components/ProductGridCard.tsx`의 "BEST n" 랭크 뱃지도 10px→12px로 같이 키움(사용처가 겹치는 두 뱃지라 일관성 유지)
+- `tsc`/`build` 통과 + 실 배포 사이트에서 자바스크립트로 실제 렌더링된 폰트 크기/패딩까지 확인함(브라우저 프리뷰 pane이 화면에 안 떠서 스크린샷 대신 `getComputedStyle`로 검증)
+- 마이그레이션 불필요(DB 변경 없음)
+
+**웹 푸시 알림 버그 수정 — "끄기"를 눌러도 상태가 안 바뀌는 게 근본 원인**
+- 배경: "처음 한 번만 오고 그 다음부터 안 온다 / 끄기가 안 먹는다 / 다시 켜기도 안 된다"는 리포트 — 코드를 추적해보니 이 셋이 사실 하나의 버그였음
+- **근본 원인(`app/(shop)/notifications/page.tsx`의 `PushOptIn`)**: "받기/끄기" 버튼의 on/off 상태를 `Notification.permission`(브라우저 알림 권한)으로 판단하고 있었는데, 이 권한은 한 번 "허용"되면 구독을 실제로 끊어도 **절대 되돌아가지 않는 값**이다(권한과 구독은 서로 다른 개념). 그래서 "끄기"를 눌러 실제로는 구독 해제(`disablePush()`)가 성공해도, 버튼은 여전히 "끄기"로 표시됐다 — 눌러도 아무 반응이 없는 것처럼 보이고, 다시 "켜기"로 돌아갈 방법 자체가 화면에 없었음. 사용자가 그 상태에서 "끄기"를 한 번이라도 눌렀다면 실제로 구독은 끊긴 채 그 뒤로 알림이 영영 안 오는데, 화면은 계속 "켜져 있다"고 보여준 셈
+- **수정**: 버튼 상태를 `getCurrentPushSubscription()`으로 조회한 **실제 구독 여부**(`subscribed: "loading" | "subscribed" | "unsubscribed"`)로 바꿈 — 페이지 진입 시 실제 구독을 확인하고, 토글할 때마다 그 결과로 상태를 갱신. `Notification.permission`은 "차단됨" 안내 문구를 보여줄 때만 보조적으로 씀
+- **중복 구독 문제**: 별도 버그는 없었음 — `push_subscriptions.endpoint`가 기기별 고유값 + unique 제약이라 같은 기기가 다시 구독해도 `on conflict`로 기존 행을 덮어쓸 뿐 중복 행이 생기지 않음(여러 기기를 쓰면 기기 수만큼 행이 생기는 건 정상 동작). 발송 실패(410/404) 시 만료된 구독을 자동 삭제하는 로직도 이미 있었음
+- `tsc`/`build` 통과 확인. 실제 브라우저 알림 권한 상태 전환은 로그인+실 기기 테스트가 필요해 이번에도 직접 검증은 못 했고, 코드 로직 검토로 근본 원인과 수정을 확인함
+- 마이그레이션 불필요(DB 변경 없음)
+
+**옵션값별 공급가(원가) 구조**
+- 배경: "110g 판매가 +0원 / 390g 판매가 +28,000원"처럼 옵션마다 판매가가 다른데, 공급가는 상품 하나에 값 하나만 입력하게 돼 있어서 옵션별 정확한 수익 계산이 안 되던 문제
+- **설계**: 판매가가 이미 "기준 판매가 + 옵션별 `priceDelta`" 구조인 것과 똑같이, 공급가도 "기준 원가 + 옵션별 `costDelta`" 구조로 맞춤(`ProductOptionValue.costDelta`) — 별도의 새로운 개념을 만들지 않고 기존 패턴을 그대로 재사용. 기준 원가를 0으로 두고 옵션마다 `costDelta`에 실제 공급가(8,000원/24,000원)를 그대로 입력하면 예시와 동일하게 쓸 수 있고, 여러 옵션 그룹(색상+사이즈 등)을 동시에 쓰는 상품은 선택된 옵션들의 `costDelta`를 다 더한 값이 최종 원가가 됨(판매가 계산과 동일한 방식)
+- **보안**: `product_option_values`는 고객도 읽어야 해서(가격조정 표시) RLS가 공개 조회로 열려 있는데, 같은 테이블에 원가 컬럼을 얹으면 행 단위 RLS로는 그 컬럼만 따로 못 숨긴다 — 그래서 기존 `product_costs`/`event_product_costs`와 똑같은 패턴으로 **관리자 전용 별도 테이블**(`product_option_costs`, RLS `is_admin()`만)을 새로 둠. `lib/data.ts`의 `listCatalogProducts()`(관리자 전용 조회)만 이 테이블을 조인해서 `costDelta`를 채워주고, 고객 화면이 쓰는 조회(`listEvents` 등)는 이 테이블을 애초에 조인하지 않아 `costDelta`가 항상 `undefined`로 남는다 — mock 모드도 고객용 `Product`를 만드는 `mergeOptionStock`에서 `costDelta`를 명시적으로 제거해 Supabase 모드와 동일하게 고객에게 절대 안 보이게 맞춤
+- **관리자 UI**(`components/admin/ProductOptionEditor.tsx`): 옵션값마다 "가격조정" 입력 옆에 "공급가조정" 입력을 추가. 상품관리 옵션 섹션 하단에 사용법 안내 문구 추가
+- `tsc`/`build` 통과 확인. 옵션 에디터는 관리자 전용이라 로그인 없이 브라우저로 열어보지는 못했고(기존과 동일한 한계), `costDelta`가 어떤 경로로도 고객 응답에 안 섞이는지는 코드 경로(select 문에 join 여부)로 확인함
+- **마이그레이션 필요** — 실 Supabase 프로젝트에 아래 SQL 실행 필요:
+  ```sql
+  create table if not exists product_option_costs (
+    option_value_id uuid primary key references product_option_values(id) on delete cascade,
+    cost_delta integer not null default 0,
+    updated_at timestamptz not null default now()
+  );
+  alter table product_option_costs enable row level security;
+  create policy "admins manage product option costs" on product_option_costs for all
+    using (is_admin()) with check (is_admin());
+  ```
+
+**환불/반품 신청 기능**
+- 배경: 배송완료 주문에서 "반품/환불 신청" 버튼을 눌러도 아무 반응이 없다는 리포트. 원인 추적 결과 이미 버튼과 `requestRefund()` 호출은 있었지만, 그 함수가 하는 `orders` 테이블 직접 `update({status:'refund_requested'})`를 **허용하는 RLS 정책이 아예 없었다** — Postgres RLS는 조건에 안 맞는(=정책이 없는) UPDATE를 그냥 0행 변경으로 조용히 넘겨버려서 에러도 안 나고, 고객 입장에선 버튼이 반응 없는 것처럼 보였음(취소 요청 흐름엔 이미 있던 전용 RLS 정책/RPC가 반품·환불 흐름에는 빠져 있었던 것)
+- **수정**: 취소 요청과 동일한 패턴을 반품/환불에도 적용 — 회원은 새 RLS 정책(`user requests refund`, `done` 상태에서만 `refund_requested`로 전환 허용)으로, 게스트는 인증이 없어 `request_guest_refund` SECURITY DEFINER RPC로 처리
+- **신청 정보 확장**: 사유 선택(단순변심/상품불량/오배송/기타, `RefundReasonCode`) + 직접 입력(선택) + 사진 첨부(선택, 신규 `refund-photos` 스토리지 버킷 — product-photos와 달리 업로드 주체가 고객이라 인증 여부와 무관하게 업로드는 허용하고 삭제만 관리자 전용으로 잠금) — 모두 `orders.refund_reason`/`refund_reason_detail`/`refund_photo_url`/`refund_requested_at`에 저장
+- **승인/반려**: 기존 "환불완료 처리"(승인)에 더해 관리자 주문 카드에 "반려" 버튼 추가 — 반려 사유를 프롬프트로 입력받아 새 상태 `refund_rejected`로 전환하고 회원에게는 알림도 발송(`orders.refund_reject_reason`). 반려 후에도 고객이 다시 신청할 수 있게 열어둠(막다른 상태 방지)
+- **진행 상태 확인**: `components/Orders/OrderDetailView.tsx`에서 신청 폼(사유 칩 선택 + 상세 textarea + 사진 미리보기)과 신청 후 상태별 안내문(접수됨/반려됨+사유/환불완료)을 모두 표시. 관리자 쪽은 주문 카드와 `OrderDetailModal`에 사유/상세/신청일/사진/반려사유를 표시하고, 상태 필터 드롭다운에 "반려"도 추가
+- `tsc`/`build` 통과 확인. 실제 신청/승인/반려 플로우는 로그인(회원) 또는 배송완료 상태의 실제 주문이 필요해 브라우저로 직접 눌러보지는 못했고(기존 관리자·주문상세 화면과 동일한 한계), RLS 정책과 RPC 조건, 프론트 호출부 시그니처 일치는 코드로 꼼꼼히 확인함 — **이 기능은 실 서비스에 마이그레이션을 적용하기 전까지는 여전히 버튼이 안 먹는 것처럼 보일 수 있음** — 아래 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
+- **마이그레이션 필요** — 실 Supabase 프로젝트에 아래 SQL 실행 필요:
+  ```sql
+  alter table orders add column if not exists refund_reason text;
+  alter table orders add column if not exists refund_reason_detail text;
+  alter table orders add column if not exists refund_photo_url text;
+  alter table orders add column if not exists refund_requested_at timestamptz;
+  alter table orders add column if not exists refund_reject_reason text;
+  alter table orders drop constraint if exists orders_status_check;
+  alter table orders add constraint orders_status_check
+    check (status in ('wait','paid','confirmed','ship','done','refund_requested','refunded','refund_rejected','cancelled'));
+
+  create policy "user requests refund" on orders for update
+    using (profile_id = auth.uid() and status = 'done')
+    with check (status = 'refund_requested');
+
+  create or replace function request_guest_refund(
+    p_order_id uuid, p_name text, p_pin text, p_reason text, p_reason_detail text, p_photo_url text
+  )
+  returns void language plpgsql security definer set search_path = public as $$
+  begin
+    update orders
+    set status = 'refund_requested', refund_reason = p_reason, refund_reason_detail = p_reason_detail,
+        refund_photo_url = p_photo_url, refund_requested_at = now()
+    where id = p_order_id and guest_pin = p_pin
+      and lower(coalesce(guest_name, recipient_name)) = lower(p_name) and status = 'done';
+  end; $$;
+
+  -- lookup_guest_orders 함수는 반환 컬럼이 늘어나 시그니처가 바뀌므로
+  -- schema.sql의 최신 정의로 drop 후 재생성 필요(기존 컨벤션과 동일)
+  drop function if exists lookup_guest_orders(text, text);
+  -- (이어서 schema.sql의 lookup_guest_orders 최신 정의 전체를 실행)
+
+  insert into storage.buckets (id, name, public) values ('refund-photos', 'refund-photos', true) on conflict (id) do nothing;
+  create policy "refund photos are publicly readable" on storage.objects for select using (bucket_id = 'refund-photos');
+  create policy "anyone uploads refund photos" on storage.objects for insert with check (bucket_id = 'refund-photos');
+  create policy "admins delete refund photos" on storage.objects for delete using (bucket_id = 'refund-photos' and is_admin());
+  ```
+
 # 진행 중인 기능
 
 - **카드/카카오페이 결제**: Toss Payments 키가 없어서 지금은 무통장입금과 동일하게 관리자가 수동으로 확인하는 방식으로 대체 중
@@ -695,6 +772,8 @@ $$;
 - [ ] 배송지 다중 저장/선택 UI (현재는 최근 1건만 자동 채움)
 - [ ] 알림 보관 기간(현재 하드코딩 30일)을 관리자가 조정할 수 있는 설정 화면
 - [ ] 주소검색 결과 기반 문고리배송 가능 단지 자동 판별/배송 가능 지역 체크 (아파트명 컬럼이 이미 있어서 자연스러운 확장)
+- [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 옵션값별 공급가(`product_option_costs` 테이블) 마이그레이션 미적용 — 안 해도 기존 기능은 그대로 동작하지만, 관리자 상품관리에서 "공급가조정"을 입력해도 저장이 안 됨. 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
+- [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 반품/환불 확장(`orders.refund_*` 컬럼, `status` 체크 제약에 `refund_rejected` 추가, `user requests refund` RLS 정책, `request_guest_refund` RPC, `lookup_guest_orders` 함수 재정의, `refund-photos` 스토리지 버킷) 마이그레이션 미적용 — **적용 전까지는 "반품/환불 신청" 버튼이 지금 리포트하신 것과 똑같이 계속 안 먹음**(RLS가 이 update를 허용하지 않아서). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 
 # UX 결정사항
 

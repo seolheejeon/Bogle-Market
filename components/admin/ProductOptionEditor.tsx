@@ -99,6 +99,14 @@ export function ProductOptionEditor({ groups, onChange }: { groups: ProductOptio
                   value={v.priceDelta}
                   onChange={(e) => updateValue(gi, vi, { priceDelta: Number(e.target.value) || 0 })}
                 />
+                <input
+                  className="w-20 rounded-[6px] border border-border bg-bg-card px-2 py-1 text-[12.5px]"
+                  type="number"
+                  placeholder="공급가조정"
+                  title="이 값을 고르면 기준 원가에 더해지는 공급가 조정분(관리자만 봐요)"
+                  value={v.costDelta ?? 0}
+                  onChange={(e) => updateValue(gi, vi, { costDelta: Number(e.target.value) || 0 })}
+                />
                 <label className="flex items-center gap-1 text-[11.5px] text-text-muted">
                   <input
                     type="checkbox"

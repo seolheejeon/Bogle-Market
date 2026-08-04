@@ -2,7 +2,18 @@ export type EventType = "DOOR" | "GROUP_BUY" | "PARCEL";
 
 export type PaymentMethod = "bank_transfer" | "card" | "kakaopay" | "incheon_eum";
 
-export type OrderStatus = "wait" | "paid" | "confirmed" | "ship" | "done" | "refund_requested" | "refunded" | "cancelled";
+export type OrderStatus = "wait" | "paid" | "confirmed" | "ship" | "done" | "refund_requested" | "refunded" | "refund_rejected" | "cancelled";
+
+// 반품/환불 신청 시 고객이 고르는 사유 카테고리 — "기타"를 고르면 자유
+// 텍스트(refundReasonDetail)에 직접 입력한 내용이 사유가 된다.
+export type RefundReasonCode = "change_of_mind" | "defective" | "wrong_item" | "other";
+
+export const REFUND_REASON_LABEL: Record<RefundReasonCode, string> = {
+  change_of_mind: "단순 변심",
+  defective: "상품 불량",
+  wrong_item: "오배송/다른 상품",
+  other: "기타",
+};
 
 // The product detail page's long-form "상세설명" content, rendered top to
 // bottom in order — mirrors the shape the admin block 에디터
@@ -54,6 +65,16 @@ export interface ProductOptionValue {
   // 이벤트 리스팅에 조인된 경우에만 채워짐(카탈로그 단독 조회 시엔 없음) —
   // hasStock=true인 옵션값의 "이 리스팅" 기준 남은 재고.
   stock?: number;
+  // 이 값을 고르면 기준 원가에 더해지는 공급가 조정분(priceDelta와 같은
+  // 방식) — 옵션마다 판매가뿐 아니라 실제 공급가도 다를 수 있어서
+  // (예: 110g +0원/8,000원, 390g +28,000원/24,000원) 분리했다. costPrice와
+  // 마찬가지로 관리자에게만 채워지는 값이라, 별도 admin-only 테이블
+  // (product_option_costs, RLS is_admin()만 조회 가능)에서 온다 — 이 값이
+  // 실려 있는 optionGroups는 CatalogProduct(관리자 조회) 쪽에서만 채워지고,
+  // 고객 화면이 받는 Product.optionGroups에는 절대 섞이지 않는다
+  // (lib/data.ts의 mergeOptionStock/mapSupabaseEvent 경로는 이 값을 애초에
+  // 조인하지 않거나 명시적으로 제거한다).
+  costDelta?: number;
 }
 
 // 상품 옵션 그룹(색상/사이즈/중량/추가옵션 등) — required/multi/순서 같은
@@ -380,6 +401,16 @@ export interface Order {
   cancelRequested: boolean;
   // 고객이 취소 요청 시 남긴 사유(선택) — 관리자가 승인/거절을 판단할 때 참고.
   cancelReason: string | null;
+  // 배송완료(done) 이후 반품/환불 신청 시 채워지는 값들 — status가
+  // refund_requested/refunded/refund_rejected로 바뀔 때 함께 저장된다.
+  // refundReason은 REFUND_REASON_LABEL의 키(카테고리), refundReasonDetail은
+  // 고객이 직접 입력한 자유 텍스트(선택), refundPhotoUrl은 첨부 사진(선택).
+  refundReason: RefundReasonCode | null;
+  refundReasonDetail: string | null;
+  refundPhotoUrl: string | null;
+  refundRequestedAt: string | null; // ISO
+  // 관리자가 반려 처리 시 남기는 사유(선택) — status가 refund_rejected일 때만 의미 있음.
+  refundRejectReason: string | null;
   // 배송중(ship) 처리 시 관리자가 입력 — 택배(PARCEL)가 아닌 문고리/사다드림
   // 주문은 항상 null.
   courierCode: string | null;
@@ -495,6 +526,7 @@ export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   done: "배송완료",
   refund_requested: "반품/환불 신청",
   refunded: "환불완료",
+  refund_rejected: "반품/환불 반려",
   cancelled: "취소",
 };
 
