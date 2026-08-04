@@ -55,21 +55,46 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
     onChange(next);
   }
 
-  // 몇 장을 고르든 항상 사진 블록 하나로 묶는다 — 레이아웃(1/2/3열)은 블록
-  // 안에서 따로 고르는 값이라 장수와 무관하며, 나중에 사진을 더 추가해도
-  // 같은 블록 안에서 관리된다. GIF도 image/* MIME이라 그대로 여기로 들어와
-  // 똑같이 업로드되고, <img>가 애니메이션을 그대로 재생하므로 별도 처리가
-  // 필요 없다.
+  // 한 번에 여러 장을 올려도 한 블록에 몰아넣지 않고 사진 한 장당 블록 하나씩
+  // 순서대로 추가한다 — 그래야 그 사이사이에 텍스트를 끼워 넣을 수 있고,
+  // 원하는 사진끼리만 나중에 "합치기"로 2열/3열 묶음을 만들 수 있다(전체를
+  // 한 블록으로 묶어 열 하나만 고르는 방식이 아님). GIF도 image/* MIME이라
+  // 그대로 여기로 들어와 똑같이 업로드되고, <img>가 애니메이션을 그대로
+  // 재생하므로 별도 처리가 필요 없다.
   async function addPhotoBlock(files: File[]) {
     if (files.length === 0) return;
     setUploading(true);
     try {
       const urls = await uploadProductPhotos(files);
-      onChange([...blocks, { type: "images", urls, columns: 1 }]);
+      const newBlocks: ProductDetailBlock[] = urls.map((url) => ({ type: "images", urls: [url], columns: 1 }));
+      onChange([...blocks, ...newBlocks]);
     } catch (e) {
       alert(e instanceof Error ? e.message : "사진 업로드에 실패했어요.");
     }
     setUploading(false);
+  }
+
+  // 사진 블록끼리만 서로 합치거나(최대 3장까지, 옆에 나란히 보여줄 열도 그
+  // 수에 맞춰 자동으로 잡아준다) 다시 낱장으로 나눌 수 있다 — "1열/2열/3열을
+  // 몇 장짜리 블록 하나가 아니라 내가 원하는 사진끼리 직접 골라 정한다"는
+  // 요청을 이 두 동작으로 구현했다.
+  function mergeWithPrevious(i: number) {
+    const prev = blocks[i - 1];
+    const cur = blocks[i];
+    if (!prev || prev.type !== "images" || cur.type !== "images") return;
+    const mergedUrls = [...prev.urls, ...cur.urls].slice(0, 3);
+    const merged: ProductDetailBlock = { type: "images", urls: mergedUrls, columns: Math.min(3, mergedUrls.length) as 1 | 2 | 3 };
+    const next = blocks.slice();
+    next.splice(i - 1, 2, merged);
+    onChange(next);
+  }
+  function splitRow(i: number) {
+    const block = blocks[i];
+    if (block.type !== "images" || block.urls.length <= 1) return;
+    const split: ProductDetailBlock[] = block.urls.map((url) => ({ type: "images", urls: [url], columns: 1 }));
+    const next = blocks.slice();
+    next.splice(i, 1, ...split);
+    onChange(next);
   }
 
   return (
@@ -140,7 +165,39 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
                   />
                 )}
                 {block.type === "text" && <TextBlockEditor block={block} onChange={(b) => update(i, b)} />}
-                {block.type === "images" && <ImagesBlockEditor block={block} onChange={(b) => update(i, b)} />}
+                {block.type === "images" && (
+                  <div>
+                    {(() => {
+                      const prev = blocks[i - 1];
+                      const canMerge = i > 0 && prev?.type === "images" && prev.urls.length + block.urls.length <= 3;
+                      const canSplit = block.urls.length > 1;
+                      if (!canMerge && !canSplit) return null;
+                      return (
+                        <div className="mb-1.5 flex gap-1.5">
+                          {canMerge && (
+                            <button
+                              type="button"
+                              onClick={() => mergeWithPrevious(i)}
+                              className="rounded-full border border-dashed border-border px-2 py-0.5 text-[10.5px] font-semibold text-text-muted"
+                            >
+                              ▲ 이전 사진과 합치기
+                            </button>
+                          )}
+                          {canSplit && (
+                            <button
+                              type="button"
+                              onClick={() => splitRow(i)}
+                              className="rounded-full border border-dashed border-border px-2 py-0.5 text-[10.5px] font-semibold text-text-muted"
+                            >
+                              낱장으로 나누기
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    <ImagesBlockEditor block={block} onChange={(b) => update(i, b)} />
+                  </div>
+                )}
                 {block.type === "video" && <VideoBlockEditor block={block} onChange={(b) => update(i, b)} />}
               </div>
               <button type="button" onClick={() => remove(i)} className="rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] leading-relaxed text-white">
@@ -186,9 +243,10 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
         </div>
       )}
       <p className="mt-1 text-[10.5px] text-text-muted">
-        “+ 사진”으로 여러 장을 한 번에 올리면 사진 블록 하나가 만들어져요(GIF도 그대로 올릴 수 있어요). 블록 안에서 1/2/3열 레이아웃을 고르고
-        사진을 자유롭게 추가·교체·삭제·순서 변경할 수 있어요. 편집기 안에 사진을 드래그하거나 Ctrl+V로 붙여넣어도 새 사진 블록이 만들어져요. 블록
-        순서는 ⠿를 드래그하거나 ▲▼로 바꿀 수 있어요. 저장 전에 "미리보기"로 실제로 보일 모습을 확인해보세요.
+        “+ 사진”으로 여러 장을 한 번에 올려도 한 장당 블록 하나씩 따로 추가돼요(GIF도 그대로 올릴 수 있어요) — 그 사이에 "+ 텍스트"를 끼워 넣거나
+        순서를 자유롭게 바꿀 수 있어요. 나란히 보여주고 싶은 사진끼리는 "이전 사진과 합치기"로 최대 3장까지 한 줄로 묶고, 묶은 블록 안에서 1/2/3열
+        레이아웃을 고르면 돼요(다시 "낱장으로 나누기"로 되돌릴 수 있어요). 편집기 안에 사진을 드래그하거나 Ctrl+V로 붙여넣어도 같은 방식으로 추가돼요.
+        블록 순서는 ⠿를 드래그하거나 ▲▼로 바꿀 수 있어요. 저장 전에 "미리보기"로 실제로 보일 모습을 확인해보세요.
       </p>
     </div>
   );
@@ -334,9 +392,11 @@ function ImagesBlockEditor({
 
   async function addMore(files: File[]) {
     if (files.length === 0) return;
+    const room = Math.max(0, 3 - block.urls.length);
+    if (room === 0) return;
     setUploading(true);
     try {
-      const uploaded = await uploadProductPhotos(files);
+      const uploaded = await uploadProductPhotos(files.slice(0, room));
       onChange({ ...block, urls: [...block.urls, ...uploaded] });
     } catch (e) {
       alert(e instanceof Error ? e.message : "사진 업로드에 실패했어요.");
@@ -421,14 +481,16 @@ function ImagesBlockEditor({
             </button>
           </div>
         ))}
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          disabled={uploading}
-          className="flex h-16 w-16 flex-col items-center justify-center rounded-lg border border-dashed border-border text-[10px] text-text-muted disabled:opacity-50"
-        >
-          {uploading ? "업로드 중" : "+ 추가"}
-        </button>
+        {block.urls.length < 3 && (
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+            className="flex h-16 w-16 flex-col items-center justify-center rounded-lg border border-dashed border-border text-[10px] text-text-muted disabled:opacity-50"
+          >
+            {uploading ? "업로드 중" : "+ 추가"}
+          </button>
+        )}
         <input
           ref={inputRef}
           type="file"
