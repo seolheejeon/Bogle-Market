@@ -828,16 +828,23 @@ begin
 
   -- 최소 구매 수량 서버 검증 — 상품상세/장바구니에서 이미 막지만, RPC를 직접
   -- 호출하는 경우까지 대비해 여기서 한 번 더 막는다(체크아웃의 "서버 검증").
-  select i->>'product_name' as name, (i->>'quantity')::integer as qty, p.min_qty as min_qty
+  -- 옵션 조합(주문 라인) 하나하나가 아니라 같은 상품(리스팅)에 담은 모든
+  -- 조합의 합계로 따진다(예: 1번 옵션 1개 + 2번 옵션 2개 = 3개로 충족) —
+  -- 그래서 라인별로 보지 않고 event_product_id(=상품)별로 합산한 뒤 비교한다.
+  select p.name as name, s.qty as qty, p.min_qty as min_qty
   into v_bad_item
-  from jsonb_array_elements(p_items) as i
-  join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
-  join products p on p.id = ep.product_id
-  where (i->>'quantity')::integer < p.min_qty
+  from (
+    select ep.product_id, sum((i->>'quantity')::integer) as qty
+    from jsonb_array_elements(p_items) as i
+    join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
+    group by ep.product_id
+  ) s
+  join products p on p.id = s.product_id
+  where s.qty < p.min_qty
   limit 1;
 
   if v_bad_item.name is not null then
-    raise exception '%은(는) 최소 %개부터 주문할 수 있어요.', v_bad_item.name, v_bad_item.min_qty;
+    raise exception '%은(는) 최소 %개부터 주문할 수 있어요. (현재 %개)', v_bad_item.name, v_bad_item.min_qty, v_bad_item.qty;
   end if;
 
   -- 재고 차감을 주문 생성과 같은 트랜잭션 안에서 수행한다 — decrement_stock/

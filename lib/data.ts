@@ -756,14 +756,21 @@ async function assertEventOrderable(eventId: string): Promise<void> {
 // 생기거나 실수로 검증을 건너뛰어도)에서 한 번 더 최소 구매 수량을 검증한다.
 // Supabase 모드는 create_order RPC 안에서도 같은 검증을 한 번 더 한다(진짜
 // "서버" 검증) — 여기 있는 건 어느 모드든 공통으로 도는 클라이언트 쪽 방어선.
+// 최소 구매 수량은 옵션 조합 하나하나가 아니라 같은 상품(리스팅)에 담은
+// 모든 조합의 합계로 따진다(1번 옵션 1개 + 2번 옵션 2개도 합쳐서 3개면
+// 충족) — 그래서 order_item 라인별로 보지 않고 productId로 합산한 뒤 비교한다.
 async function assertMinQuantities(items: OrderItem[]): Promise<void> {
   const events = await listEvents();
+  const qtyByProduct = new Map<string, number>();
   for (const item of items) {
+    qtyByProduct.set(item.productId, (qtyByProduct.get(item.productId) ?? 0) + item.quantity);
+  }
+  for (const [productId, qty] of qtyByProduct) {
     for (const event of events) {
-      const product = event.products.find((p) => p.id === item.productId);
+      const product = event.products.find((p) => p.id === productId);
       if (!product) continue;
       const minQty = product.minQty ?? 1;
-      if (item.quantity < minQty) {
+      if (qty < minQty) {
         throw new Error(`${product.name}은(는) 최소 ${minQty}개부터 주문할 수 있어요.`);
       }
       break;

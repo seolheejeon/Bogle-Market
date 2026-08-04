@@ -122,6 +122,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
 
   const totalPendingQty = pendingLines.reduce((sum, l) => sum + l.qty, 0);
   const totalPendingPrice = pendingLines.reduce((sum, l) => sum + unitPrice(product, l.optionValueIds) * l.qty, 0);
+  // 최소 구매 수량은 담은 조합 전체의 합계로 따진다(1번 옵션 1개 + 2번 옵션
+  // 2개처럼 섞어도 합계가 최소 구매 수량 이상이면 충분) — 조합 하나하나가
+  // 각각 최소 구매 수량을 넘길 필요는 없다.
+  const pendingBelowMin = pendingLines.length > 0 && totalPendingQty < (product.minQty ?? 1);
 
   function selectOption(group: ProductOptionGroup, value: ProductOptionValue) {
     setOptionError(null);
@@ -141,7 +145,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
 
   // 지금 고른 옵션 조합을 대기 목록에 한 줄 추가한다(똑같은 조합이 이미
   // 있으면 수량만 1 더한다) — 그 다음 선택을 비워서 바로 다른 조합을 고를 수
-  // 있게 한다("의류 쇼핑몰처럼 선택한 옵션들이 목록으로 쌓이는" UX).
+  // 있게 한다("의류 쇼핑몰처럼 선택한 옵션들이 목록으로 쌓이는" UX). 최소
+  // 구매 수량은 이 조합 하나가 아니라 이 상품에 담은 모든 조합의 합계로
+  // 따지므로(예: 1번 옵션 1개 + 2번 옵션 2개 = 최소구매수량 3개 충족), 새
+  // 줄은 항상 1개로 시작한다 — 합계 검증은 "총 N개 담기" 버튼에서 한다.
   function addSelectionToList() {
     const error = validateOptionSelection(product, selectedOptionValueIds);
     if (error) {
@@ -161,7 +168,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
         next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
         return next;
       }
-      return [...prev, { optionValueIds: selectedOptionValueIds, qty: product.minQty ?? 1 }];
+      return [...prev, { optionValueIds: selectedOptionValueIds, qty: 1 }];
     });
     setSelected({});
   }
@@ -170,9 +177,11 @@ export function ProductDetailView({ productId }: { productId: string }) {
     setPendingLines((prev) => {
       const line = prev[index];
       const newQty = line.qty + delta;
-      // 최소 구매 수량 밑으로는 이 버튼으로 못 내려간다 — 완전히 빼려면
-      // removePendingLine(삭제 버튼)을 써야 한다.
-      if (newQty < (product.minQty ?? 1)) return prev;
+      // 조합 하나의 수량은 1개까지만 줄일 수 있다(0으로 완전히 빼려면
+      // removePendingLine/삭제 버튼을 써야 한다) — 최소 구매 수량은 이
+      // 줄 하나가 아니라 담은 조합 전체 합계로 따지기 때문에 줄마다 최소
+      // 구매 수량을 강제하지 않는다.
+      if (newQty < 1) return prev;
       const cap = remainingForIds(line.optionValueIds, index);
       if (cap !== undefined && newQty > cap) return prev;
       return prev.map((p, i) => (i === index ? { ...p, qty: newQty } : p));
@@ -330,7 +339,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
                       <button
                         type="button"
                         onClick={() => adjustPendingQty(i, -1)}
-                        disabled={line.qty <= (product.minQty ?? 1)}
+                        disabled={line.qty <= 1}
                         className="h-7 w-7 shrink-0 rounded-full border border-border text-[13px] text-text disabled:opacity-40"
                       >
                         −
@@ -436,10 +445,15 @@ export function ProductDetailView({ productId }: { productId: string }) {
                   <span className="font-bold">{formatPrice(totalPendingPrice)}</span>
                 </div>
               )}
+              {pendingBelowMin && (
+                <p className="mb-2.5 text-center text-[12.5px] font-semibold text-red-600">
+                  옵션을 합쳐서 최소 {product.minQty}개 이상 담아야 해요. (현재 {totalPendingQty}개)
+                </p>
+              )}
               <button
                 ref={addButtonRef}
                 className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40"
-                disabled={pendingLines.length === 0}
+                disabled={pendingLines.length === 0 || pendingBelowMin}
                 onClick={addPendingLinesToCart}
               >
                 {pendingLines.length === 0 ? "옵션을 담아주세요" : `총 ${totalPendingQty}개 담기`}

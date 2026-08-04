@@ -148,10 +148,11 @@ export function CartView() {
                               productId={product.id}
                               optionValueIds={line.optionValueIds}
                               max={maxQtyForSelection(product, line.optionValueIds)}
-                              minQty={product.minQty}
                             />
-                            {/* 최소 구매 수량 밑으로는 QtyControl의 −로 못 내려가서, 완전히
-                                빼려면 이 삭제 버튼을 따로 눌러야 한다. */}
+                            {/* 최소 구매 수량은 이 조합 하나가 아니라 이 상품에 담은 모든
+                                조합의 합계로 따진다(체크아웃에서 검증) — 그래서 QtyControl에
+                                minQty를 넘기지 않고, 조합 하나는 1개까지 줄일 수 있다.
+                                완전히 빼려면 이 삭제 버튼을 따로 눌러야 한다. */}
                             <button
                               onClick={() => setQty(product.id, 0, line.optionValueIds)}
                               className="text-[11px] font-semibold text-text-muted underline"

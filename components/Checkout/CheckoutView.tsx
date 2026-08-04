@@ -177,10 +177,19 @@ export function CheckoutView() {
       );
       return;
     }
-    const underMinQty = items.filter((i) => i.line.qty < (i.product.minQty ?? 1));
+    // 최소 구매 수량은 옵션 조합 하나하나가 아니라 같은 상품(리스팅)에 담은
+    // 모든 조합의 합계로 따진다(1번 옵션 1개 + 2번 옵션 2개도 합쳐서 3개면
+    // 충족) — 그래서 라인별로 보지 않고 product.id로 합산한 뒤 비교한다.
+    const qtyByProduct = new Map<string, { product: Product; qty: number }>();
+    for (const i of items) {
+      const entry = qtyByProduct.get(i.product.id);
+      if (entry) entry.qty += i.line.qty;
+      else qtyByProduct.set(i.product.id, { product: i.product, qty: i.line.qty });
+    }
+    const underMinQty = Array.from(qtyByProduct.values()).filter((e) => e.qty < (e.product.minQty ?? 1));
     if (underMinQty.length > 0) {
       setError(
-        `최소 구매 수량 미만인 상품이 있어요: ${underMinQty.map((i) => `${i.product.name}(최소 ${i.product.minQty}개)`).join(", ")}. 장바구니에서 수량을 늘려주세요.`,
+        `최소 구매 수량 미만인 상품이 있어요: ${underMinQty.map((e) => `${e.product.name}(최소 ${e.product.minQty}개, 현재 ${e.qty}개)`).join(", ")}. 장바구니에서 수량을 늘려주세요.`,
       );
       return;
     }
