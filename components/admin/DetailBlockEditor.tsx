@@ -2,17 +2,40 @@
 
 import { useRef, useState } from "react";
 import type { ProductDetailBlock } from "@/types";
-import { uploadProductPhotos } from "@/lib/supabase/storage";
+import { uploadProductPhotos, uploadProductPhoto, uploadProductFile } from "@/lib/supabase/storage";
 import { imageFilesFromDataTransfer, imageFilesFromClipboard } from "@/lib/file-drop";
 import { ProductPhoto } from "@/components/ProductPhoto";
+import { ProductDetailContent } from "@/components/Product/ProductDetailContent";
 
 const LAYOUT_LABEL: Record<1 | 2 | 3, string> = { 1: "1열", 2: "2열", 3: "3열" };
 
+type TextBlock = Extract<ProductDetailBlock, { type: "text" }>;
+const TEXT_SIZE_OPTIONS: { value: NonNullable<TextBlock["size"]>; label: string }[] = [
+  { value: "sm", label: "작게" },
+  { value: "md", label: "보통" },
+  { value: "lg", label: "크게" },
+  { value: "xl", label: "아주 크게" },
+];
+// "기본"은 색을 아예 안 지정하는(undefined) 선택지 — 라이트/다크 모드 양쪽에서
+// 알아서 읽기 좋은 기본 텍스트색을 쓰게 두고, 나머지는 고정 hex를 강조용으로.
+const COLOR_PRESETS: { label: string; value: string | undefined }[] = [
+  { label: "기본", value: undefined },
+  { label: "진하게", value: "#1a1a1a" },
+  { label: "브랜드", value: "#c9532f" },
+  { label: "강조", value: "#dc2626" },
+  { label: "파랑", value: "#2563eb" },
+];
+
+// 스마트스토어 상세편집기처럼 블록(제목/본문 대신 서식 있는 텍스트, 사진,
+// 동영상)을 자유롭게 쌓고 드래그로 순서를 바꾸는 편집기. 새 블록 종류(배너,
+// 유튜브, 버튼 등)를 추가하려면 types/index.ts의 ProductDetailBlock 유니온에
+// 멤버를 하나 추가하고, 여기 렌더링 분기와 "+ 버튼" 하나씩만 더하면 된다.
 export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailBlock[]; onChange: (blocks: ProductDetailBlock[]) => void }) {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
 
   function update(i: number, block: ProductDetailBlock) {
     onChange(blocks.map((b, idx) => (idx === i ? block : b)));
@@ -34,7 +57,9 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
 
   // 몇 장을 고르든 항상 사진 블록 하나로 묶는다 — 레이아웃(1/2/3열)은 블록
   // 안에서 따로 고르는 값이라 장수와 무관하며, 나중에 사진을 더 추가해도
-  // 같은 블록 안에서 관리된다.
+  // 같은 블록 안에서 관리된다. GIF도 image/* MIME이라 그대로 여기로 들어와
+  // 똑같이 업로드되고, <img>가 애니메이션을 그대로 재생하므로 별도 처리가
+  // 필요 없다.
   async function addPhotoBlock(files: File[]) {
     if (files.length === 0) return;
     setUploading(true);
@@ -49,112 +74,245 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
 
   return (
     <div>
-      <div
-        tabIndex={0}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          addPhotoBlock(imageFilesFromDataTransfer(e.dataTransfer));
-        }}
-        onPaste={(e) => addPhotoBlock(imageFilesFromClipboard(e.clipboardData))}
-        className={`flex flex-col gap-2 rounded-lg p-1 outline-none ${dragOver ? "bg-accent-soft ring-2 ring-accent" : ""}`}
-      >
-        {blocks.map((block, i) => (
-          <div
-            key={i}
-            draggable
-            onDragStart={() => setDragIndex(i)}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              if (dragIndex !== null && dragIndex !== i) reorder(dragIndex, i);
-              setDragIndex(null);
-            }}
-            onDragEnd={() => setDragIndex(null)}
-            className={`flex items-start gap-2 rounded-lg border bg-bg-card p-2 transition-opacity ${dragIndex === i ? "border-accent opacity-40" : "border-border"}`}
-          >
-            <div className="flex cursor-grab flex-col items-center gap-0.5 pt-0.5 select-none active:cursor-grabbing">
-              <span className="text-[13px] text-text-muted" title="드래그해서 순서 변경">
-                ⠿
-              </span>
-              <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="text-[11px] text-text-muted disabled:opacity-30">
-                ▲
-              </button>
-              <button type="button" onClick={() => move(i, 1)} disabled={i === blocks.length - 1} className="text-[11px] text-text-muted disabled:opacity-30">
-                ▼
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[11.5px] font-bold text-text-muted">블록 편집</p>
+        <button
+          type="button"
+          onClick={() => setShowPreview((v) => !v)}
+          className={`rounded-[7px] border px-2.5 py-1 text-[11.5px] font-semibold ${showPreview ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"}`}
+        >
+          {showPreview ? "미리보기 끄기" : "미리보기"}
+        </button>
+      </div>
+
+      {showPreview ? (
+        <div className="rounded-lg border border-border p-3">
+          {blocks.length === 0 ? <p className="text-[12px] text-text-muted">아직 블록이 없어요.</p> : <ProductDetailContent blocks={blocks} />}
+        </div>
+      ) : (
+        <div
+          tabIndex={0}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            addPhotoBlock(imageFilesFromDataTransfer(e.dataTransfer));
+          }}
+          onPaste={(e) => addPhotoBlock(imageFilesFromClipboard(e.clipboardData))}
+          className={`flex flex-col gap-2 rounded-lg p-1 outline-none ${dragOver ? "bg-accent-soft ring-2 ring-accent" : ""}`}
+        >
+          {blocks.map((block, i) => (
+            <div
+              key={i}
+              draggable
+              onDragStart={() => setDragIndex(i)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragIndex !== null && dragIndex !== i) reorder(dragIndex, i);
+                setDragIndex(null);
+              }}
+              onDragEnd={() => setDragIndex(null)}
+              className={`flex items-start gap-2 rounded-lg border bg-bg-card p-2 transition-opacity ${dragIndex === i ? "border-accent opacity-40" : "border-border"}`}
+            >
+              <div className="flex cursor-grab flex-col items-center gap-0.5 pt-0.5 select-none active:cursor-grabbing">
+                <span className="text-[13px] text-text-muted" title="드래그해서 순서 변경">
+                  ⠿
+                </span>
+                <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="text-[11px] text-text-muted disabled:opacity-30">
+                  ▲
+                </button>
+                <button type="button" onClick={() => move(i, 1)} disabled={i === blocks.length - 1} className="text-[11px] text-text-muted disabled:opacity-30">
+                  ▼
+                </button>
+              </div>
+              <div className="min-w-0 flex-1">
+                {block.type === "heading" && (
+                  <input
+                    className="w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px] font-bold"
+                    placeholder="제목 (예전 블록 — 새로 만들려면 아래 '+ 텍스트'를 쓰세요)"
+                    value={block.text}
+                    onChange={(e) => update(i, { type: "heading", text: e.target.value })}
+                  />
+                )}
+                {block.type === "text" && <TextBlockEditor block={block} onChange={(b) => update(i, b)} />}
+                {block.type === "images" && <ImagesBlockEditor block={block} onChange={(b) => update(i, b)} />}
+                {block.type === "video" && <VideoBlockEditor block={block} onChange={(b) => update(i, b)} />}
+              </div>
+              <button type="button" onClick={() => remove(i)} className="rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] leading-relaxed text-white">
+                ×
               </button>
             </div>
-            <div className="min-w-0 flex-1">
-              {block.type === "heading" && (
-                <input
-                  className="w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px] font-bold"
-                  placeholder="제목"
-                  value={block.text}
-                  onChange={(e) => update(i, { type: "heading", text: e.target.value })}
-                />
-              )}
-              {block.type === "text" && (
-                <textarea
-                  className="w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-                  rows={3}
-                  placeholder="본문 내용"
-                  value={block.text}
-                  onChange={(e) => update(i, { type: "text", text: e.target.value })}
-                />
-              )}
-              {block.type === "images" && <ImagesBlockEditor block={block} onChange={(b) => update(i, b)} />}
-            </div>
-            <button type="button" onClick={() => remove(i)} className="rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] leading-relaxed text-white">
-              ×
+          ))}
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => onChange([...blocks, { type: "text", text: "", size: "sm" }])}
+              className="rounded-[7px] border border-dashed border-border px-2.5 py-1.5 text-[12px] font-semibold text-text-muted"
+            >
+              + 텍스트
             </button>
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              disabled={uploading}
+              className="rounded-[7px] border border-dashed border-border px-2.5 py-1.5 text-[12px] font-semibold text-text-muted disabled:opacity-50"
+            >
+              {uploading ? "업로드 중..." : "+ 사진"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange([...blocks, { type: "video", src: "" }])}
+              className="rounded-[7px] border border-dashed border-border px-2.5 py-1.5 text-[12px] font-semibold text-text-muted"
+            >
+              + 동영상
+            </button>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addPhotoBlock(Array.from(e.target.files ?? []));
+                e.target.value = "";
+              }}
+            />
           </div>
-        ))}
-        <div className="flex flex-wrap gap-1.5">
+        </div>
+      )}
+      <p className="mt-1 text-[10.5px] text-text-muted">
+        “+ 사진”으로 여러 장을 한 번에 올리면 사진 블록 하나가 만들어져요(GIF도 그대로 올릴 수 있어요). 블록 안에서 1/2/3열 레이아웃을 고르고
+        사진을 자유롭게 추가·교체·삭제·순서 변경할 수 있어요. 편집기 안에 사진을 드래그하거나 Ctrl+V로 붙여넣어도 새 사진 블록이 만들어져요. 블록
+        순서는 ⠿를 드래그하거나 ▲▼로 바꿀 수 있어요. 저장 전에 "미리보기"로 실제로 보일 모습을 확인해보세요.
+      </p>
+    </div>
+  );
+}
+
+function TextBlockEditor({ block, onChange }: { block: TextBlock; onChange: (block: ProductDetailBlock) => void }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <textarea
+        className="w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+        rows={3}
+        placeholder="텍스트 내용"
+        value={block.text}
+        onChange={(e) => onChange({ ...block, text: e.target.value })}
+      />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1">
+          {TEXT_SIZE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange({ ...block, size: opt.value })}
+              className={`rounded-full border px-2 py-0.5 text-[10.5px] font-semibold ${
+                (block.size ?? "sm") === opt.value ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => onChange({ ...block, bold: !block.bold })}
+          className={`rounded-full border px-2.5 py-0.5 text-[10.5px] font-bold ${
+            block.bold ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"
+          }`}
+        >
+          굵게
+        </button>
+        <div className="flex items-center gap-1">
+          {COLOR_PRESETS.map((c) => (
+            <button
+              key={c.label}
+              type="button"
+              title={c.label}
+              onClick={() => onChange({ ...block, color: c.value })}
+              className={`h-5 w-5 rounded-full border-2 ${(block.color ?? undefined) === c.value ? "border-accent" : "border-border"}`}
+              style={{ backgroundColor: c.value ?? "var(--text-muted)" }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VideoBlockEditor({ block, onChange }: { block: Extract<ProductDetailBlock, { type: "video" }>; onChange: (block: ProductDetailBlock) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [mode, setMode] = useState<"upload" | "url">(block.src ? "url" : "upload");
+  const [uploading, setUploading] = useState(false);
+
+  async function handleFile(file: File | undefined) {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await uploadProductFile(file);
+      onChange({ ...block, src: url });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "동영상 업로드에 실패했어요.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          onClick={() => setMode("upload")}
+          className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${mode === "upload" ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"}`}
+        >
+          파일 업로드
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("url")}
+          className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${mode === "url" ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"}`}
+        >
+          URL 입력
+        </button>
+      </div>
+      {mode === "upload" ? (
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => onChange([...blocks, { type: "heading", text: "" }])}
-            className="rounded-[7px] border border-dashed border-border px-2.5 py-1.5 text-[12px] font-semibold text-text-muted"
-          >
-            + 제목
-          </button>
-          <button
-            type="button"
-            onClick={() => onChange([...blocks, { type: "text", text: "" }])}
-            className="rounded-[7px] border border-dashed border-border px-2.5 py-1.5 text-[12px] font-semibold text-text-muted"
-          >
-            + 본문
-          </button>
-          <button
-            type="button"
-            onClick={() => photoInputRef.current?.click()}
+            onClick={() => inputRef.current?.click()}
             disabled={uploading}
             className="rounded-[7px] border border-dashed border-border px-2.5 py-1.5 text-[12px] font-semibold text-text-muted disabled:opacity-50"
           >
-            {uploading ? "업로드 중..." : "+ 사진"}
+            {uploading ? "업로드 중..." : block.src ? "다른 파일로 교체" : "동영상 파일 선택"}
           </button>
           <input
-            ref={photoInputRef}
+            ref={inputRef}
             type="file"
-            accept="image/*"
-            multiple
+            accept="video/*"
             className="hidden"
             onChange={(e) => {
-              addPhotoBlock(Array.from(e.target.files ?? []));
+              handleFile(e.target.files?.[0]);
               e.target.value = "";
             }}
           />
         </div>
-      </div>
-      <p className="mt-1 text-[10.5px] text-text-muted">
-        “+ 사진”으로 여러 장을 한 번에 올리면 사진 블록 하나가 만들어져요. 블록 안에서 1/2/3열 레이아웃을 고르고 사진을 자유롭게 추가·삭제·순서
-        변경할 수 있어요. 편집기 안에 사진을 드래그하거나 Ctrl+V로 붙여넣어도 새 사진 블록이 만들어져요. 블록 순서는 ⠿를 드래그하거나 ▲▼로 바꿀 수
-        있어요.
-      </p>
+      ) : (
+        <input
+          className="w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+          placeholder="https://... (mp4 등 동영상 파일 직접 링크)"
+          value={block.src}
+          onChange={(e) => onChange({ ...block, src: e.target.value })}
+        />
+      )}
+      {block.src && (
+        <video src={block.src} controls playsInline className="mt-1 max-h-40 w-full rounded-lg bg-black" />
+      )}
     </div>
   );
 }
@@ -167,6 +325,10 @@ function ImagesBlockEditor({
   onChange: (block: ProductDetailBlock) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  // 특정 한 장을 "교체"할 때는 그 인덱스를 여기 담아두고, 같은 hidden input의
+  // onChange에서 addMore 대신 이 인덱스 자리만 바꿔치기한다.
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const [replaceIndex, setReplaceIndex] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
@@ -180,6 +342,19 @@ function ImagesBlockEditor({
       alert(e instanceof Error ? e.message : "사진 업로드에 실패했어요.");
     }
     setUploading(false);
+  }
+
+  async function replaceAt(idx: number, file: File | undefined) {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await uploadProductPhoto(file);
+      onChange({ ...block, urls: block.urls.map((u, i) => (i === idx ? url : u)) });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "사진 업로드에 실패했어요.");
+    } finally {
+      setUploading(false);
+    }
   }
 
   function removeAt(idx: number) {
@@ -234,6 +409,16 @@ function ImagesBlockEditor({
             >
               ×
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setReplaceIndex(idx);
+                replaceInputRef.current?.click();
+              }}
+              className="absolute inset-x-0 bottom-0 bg-black/60 py-0.5 text-center text-[9px] font-semibold text-white"
+            >
+              교체
+            </button>
           </div>
         ))}
         <button
@@ -252,6 +437,17 @@ function ImagesBlockEditor({
           className="hidden"
           onChange={(e) => {
             addMore(Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={replaceInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            if (replaceIndex !== null) replaceAt(replaceIndex, e.target.files?.[0]);
+            setReplaceIndex(null);
             e.target.value = "";
           }}
         />

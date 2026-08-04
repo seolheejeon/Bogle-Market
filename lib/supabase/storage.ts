@@ -33,3 +33,8 @@ export async function uploadProductPhoto(file: File): Promise<string> {
 export async function uploadProductPhotos(files: File[]): Promise<string[]> {
   return Promise.all(files.map((file) => uploadProductPhoto(file)));
 }
+
+// 같은 버킷/업로드 로직을 상세설명의 동영상 블록에도 그대로 쓴다 — 파일
+// 종류를 가리지 않고 업로드 후 공개 URL을 돌려주는 함수라 이름만 일반화한
+// 별칭으로 노출한다(내부 동작은 uploadProductPhoto와 동일).
+export const uploadProductFile = uploadProductPhoto;

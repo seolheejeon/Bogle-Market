@@ -1,6 +1,12 @@
 import type { ProductDetailBlock } from "@/types";
 
 const GRID_COLS_CLASS: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3" };
+const TEXT_SIZE_CLASS: Record<NonNullable<Extract<ProductDetailBlock, { type: "text" }>["size"]>, string> = {
+  sm: "text-[13.5px]",
+  md: "text-[15px]",
+  lg: "text-[17px]",
+  xl: "text-[21px]",
+};
 
 // Renders an ordered list of detail blocks (heading / text / images), same
 // shape whether the blocks are dummy placeholder content or, later, content
@@ -24,11 +30,19 @@ export function ProductDetailContent({ blocks }: { blocks: ProductDetailBlock[] 
             );
           }
           if (block.type === "text") {
+            const sizeClass = TEXT_SIZE_CLASS[block.size ?? "sm"];
             return (
-              <p key={i} className="text-[13.5px] leading-relaxed whitespace-pre-line text-text-muted">
+              <p
+                key={i}
+                className={`leading-relaxed whitespace-pre-line ${sizeClass} ${block.bold ? "font-bold" : ""} ${block.color ? "" : "text-text-muted"}`}
+                style={block.color ? { color: block.color } : undefined}
+              >
                 {block.text}
               </p>
             );
+          }
+          if (block.type === "video") {
+            return <video key={i} src={block.src} controls playsInline className="w-full rounded-xl bg-black" />;
           }
           // A 1열 block keeps its natural height (full-width, uncropped) like
           // before; 2~3열 get a shared square aspect so the row lines up evenly.

@@ -5,17 +5,38 @@ export type PaymentMethod = "bank_transfer" | "card" | "kakaopay" | "incheon_eum
 export type OrderStatus = "wait" | "paid" | "confirmed" | "ship" | "done" | "refund_requested" | "refunded" | "cancelled";
 
 // The product detail page's long-form "상세설명" content, rendered top to
-// bottom in order — mirrors the shape a future admin editor would write
-// (and a future `products.detail_blocks` jsonb column would store), so
-// swapping the dummy data for real admin-authored content later only means
-// changing where this array comes from, not how it's rendered.
+// bottom in order — mirrors the shape the admin block 에디터
+// (components/admin/DetailBlockEditor.tsx) writes and `products.detail_blocks`
+// (jsonb 컬럼, 스키마 변경 없이 새 블록 종류를 추가할 수 있음) 저장한다. 새
+// 블록 종류(배너, 유튜브, 버튼 등)를 추가하고 싶으면 이 유니온에 멤버 하나
+// 추가 + DetailBlockEditor에 편집 UI + ProductDetailContent에 렌더링 케이스
+// 하나씩만 더하면 된다 — 스마트스토어 에디터처럼 "블록을 더 추가할 수 있는"
+// 구조를 이 유니온 하나가 담당한다.
 // images 블록은 사진 목록(urls, 몇 장이든)과 레이아웃(columns)이 서로 독립이다 —
 // 사진을 자유롭게 추가/삭제/순서변경 해두고, 그 목록을 1/2/3열 중 원하는
 // 레이아웃으로만 렌더링한다(장수와 열 수가 안 맞으면 마지막 줄만 덜 채워짐).
 export type ProductDetailBlock =
+  // 예전엔 제목(heading)과 본문(text)이 분리된 블록이었는데, 지금은 text
+  // 블록 하나에 크기/굵기/색상을 자유롭게 골라서 제목처럼도 본문처럼도 쓸 수
+  // 있게 통합했다. heading은 이미 저장된 예전 상품들을 그대로 보여주기 위한
+  // 레거시 타입으로만 남겨둔다 — 새 에디터에서는 더 이상 만들지 않는다.
   | { type: "heading"; text: string }
-  | { type: "text"; text: string }
-  | { type: "images"; urls: string[]; columns: 1 | 2 | 3 };
+  | {
+      type: "text";
+      text: string;
+      // 전부 선택값 — 비워두면 기존과 동일한 기본 본문 스타일(sm 취급).
+      size?: "sm" | "md" | "lg" | "xl";
+      bold?: boolean;
+      // CSS color 값(hex 등) 그대로 저장 — 팔레트에서 고르든 직접 입력하든
+      // 렌더링 쪽은 그냥 style={{color}}로 꽂아 쓴다.
+      color?: string;
+    }
+  | { type: "images"; urls: string[]; columns: 1 | 2 | 3 }
+  // 업로드한 파일이든 외부에서 붙여넣은 직접 URL(mp4 등)이든 결국 재생 가능한
+  // 영상 하나의 주소라 구분 없이 src 하나로 저장한다 — <video src> 그대로 재생.
+  // 유튜브/비메오처럼 embed가 필요한 링크는 이 블록 대상이 아니고(추후 별도
+  // "youtube" 블록으로 다룰 예정), 여기 video 블록은 실제 영상 파일 전용이다.
+  | { type: "video"; src: string };
 
 // 옵션 그룹에 속한 선택지 하나(예: 색상 그룹의 "빨강"). priceDelta는 이 값을
 // 고르면 기준 판매가에 더해지는 금액(음수 가능). hasStock=false면 재고 제한이
