@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
-import { listOrdersForProfile, lookupGuestOrders } from "@/lib/data";
-import type { Order, OrderStatus } from "@/types";
+import { listOrdersForProfile, lookupGuestOrders, listEvents } from "@/lib/data";
+import type { MarketEvent, Order, OrderStatus } from "@/types";
 import { ORDER_STATUS_LABEL } from "@/types";
-import { formatPrice, formatDateTime } from "@/lib/format";
-import { OrderStatusBadge } from "@/components/Badge";
+import { formatPrice, formatDateTime, formatEventDateChip } from "@/lib/format";
+import { OrderStatusBadge, EventTypeBadge } from "@/components/Badge";
 
 const TABS: { value: OrderStatus | "all"; label: string }[] = [
   { value: "all", label: "전체" },
@@ -24,6 +24,10 @@ export function OrdersView() {
   const { profile, loading } = useAuth();
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [tab, setTab] = useState<OrderStatus | "all">("all");
+  // 문고리/사다드림 주문에 "몇 회차(날짜)" 주문인지 라벨로 보여주기 위해
+  // 이벤트 목록을 같이 불러와 eventId로 조인한다(택배는 회차 개념이 없어서
+  // 라벨을 안 붙임).
+  const [events, setEvents] = useState<MarketEvent[]>([]);
 
   const [guestName, setGuestName] = useState("");
   const [guestPin, setGuestPin] = useState("");
@@ -32,6 +36,11 @@ export function OrdersView() {
   useEffect(() => {
     if (profile) listOrdersForProfile(profile.id).then(setOrders);
   }, [profile]);
+  useEffect(() => {
+    listEvents().then(setEvents);
+  }, []);
+
+  const eventById = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
 
   if (loading) return <p className="p-4 text-sm text-text-muted">불러오는 중...</p>;
 
@@ -61,7 +70,7 @@ export function OrdersView() {
         {guestOrders !== undefined && guestOrders.length > 0 && (
           <div className="mt-4">
             {guestOrders.map((o) => (
-              <OrderRow key={o.id} order={o} href={`/orders/${o.id}?gn=${encodeURIComponent(guestName.trim())}&pin=${guestPin.trim()}`} />
+              <OrderRow key={o.id} order={o} event={eventById.get(o.eventId)} href={`/orders/${o.id}?gn=${encodeURIComponent(guestName.trim())}&pin=${guestPin.trim()}`} />
             ))}
           </div>
         )}
@@ -91,20 +100,29 @@ export function OrdersView() {
       {orders !== null && filtered.length === 0 && <p className="p-4 text-sm text-text-muted">주문 내역이 없어요.</p>}
       <div>
         {filtered.map((o) => (
-          <OrderRow key={o.id} order={o} />
+          <OrderRow key={o.id} order={o} event={eventById.get(o.eventId)} />
         ))}
       </div>
     </div>
   );
 }
 
-function OrderRow({ order, href }: { order: Order; href?: string }) {
+function OrderRow({ order, event, href }: { order: Order; event?: MarketEvent; href?: string }) {
   return (
     <Link href={href ?? `/orders/${order.id}`} className="block border-b border-border px-4 py-3.5">
       <div className="mb-1.5 flex items-center justify-between">
         <span className="text-[11px] text-text-muted">{order.orderNumber}</span>
         <OrderStatusBadge status={order.status} />
       </div>
+      {/* 문고리/사다드림은 회차(날짜)마다 별도 이벤트라 몇 회차 주문인지
+          한눈에 안 보이면 헷갈린다 — 택배는 상시 판매라 회차 개념이 없어서
+          라벨을 안 붙인다. */}
+      {event && event.type !== "PARCEL" && (
+        <div className="mb-1 flex items-center gap-1.5">
+          <EventTypeBadge type={event.type} />
+          <span className="text-[11px] font-semibold text-text-muted">{formatEventDateChip(event.deliveryAt)}</span>
+        </div>
+      )}
       <p className="text-[13px]">
         {order.items[0]?.productName}
         {order.items.length > 1 ? ` 외 ${order.items.length - 1}건` : ""}
