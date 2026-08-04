@@ -79,37 +79,43 @@ export function CategoryView({ initialType }: { initialType?: EventType }) {
 
   return (
     <div>
-      <div className="flex gap-2 overflow-x-auto border-b border-border px-4 py-3">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setType(t)}
-            className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold ${type === t ? "bg-accent text-white" : "bg-bg-sunken text-text-muted"}`}
-          >
-            {EVENT_TYPE_LABEL[t]}
-          </button>
-        ))}
+      {/* 헤더(sticky top-[71px], Product/ProductDetailView.tsx의 하위 sticky
+          헤더와 동일한 오프셋)에 이어 배송방식/날짜 탭도 같이 고정한다 —
+          상품이 많아 아래로 스크롤해도 탭이 계속 눌려 있어야 배송방식을
+          바꾸거나 다른 날짜를 고르기 편하다. */}
+      <div className="sticky top-[71px] z-10 bg-bg-card">
+        <div className="flex gap-2 overflow-x-auto border-b border-border px-4 py-3">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              onClick={() => setType(t)}
+              className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold ${type === t ? "bg-accent text-white" : "bg-bg-sunken text-text-muted"}`}
+            >
+              {EVENT_TYPE_LABEL[t]}
+            </button>
+          ))}
+        </div>
+
+        {!isDateless && eventsForType.length > 0 && (
+          <div className="flex gap-2 overflow-x-auto border-b border-border px-4 py-3">
+            {eventsForType.map((event) => (
+              <button
+                key={event.id}
+                onClick={() => setSelectedEventId(event.id)}
+                className={`shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
+                  selectedEventId === event.id ? "border-accent bg-accent text-white" : "border-border bg-bg-card text-text-muted"
+                }`}
+              >
+                {formatEventDateChip(event.deliveryAt)}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {events === null && <p className="p-4 text-sm text-text-muted">불러오는 중...</p>}
       {events !== null && eventsForType.length === 0 && (
         <p className="p-4 text-sm text-text-muted">{isDateless ? "등록된 상품이 없어요." : "진행 중인 이벤트가 없어요."}</p>
-      )}
-
-      {!isDateless && eventsForType.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto px-4 py-3">
-          {eventsForType.map((event) => (
-            <button
-              key={event.id}
-              onClick={() => setSelectedEventId(event.id)}
-              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors ${
-                selectedEventId === event.id ? "border-accent bg-accent text-white" : "border-border bg-bg-card text-text-muted"
-              }`}
-            >
-              {formatEventDateChip(event.deliveryAt)}
-            </button>
-          ))}
-        </div>
       )}
 
       {!isDateless && selectedEvent && (

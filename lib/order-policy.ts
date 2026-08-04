@@ -23,13 +23,17 @@ export function isEventOrderable(event: Pick<MarketEvent, "type" | "flashSale" |
   return new Date(event.deadlineAt).getTime() > Date.now();
 }
 
-// 고객 화면(홈/카테고리 등 목록)에 이 이벤트를 아예 노출할지 여부 — 진행중이면
-// 항상 노출하고, 관리자가 종료했다면 배송일 당일까지만 "마감"으로 조회 가능하게
-// 남겨두고(주문은 isEventOrderable이 막음), 배송일 다음날 00:00부터는 목록에서
-// 완전히 숨긴다. 직접 링크(상품 상세 등)로 들어온 경우는 이 함수를 거치지 않으므로
+// 고객 화면(홈/카테고리 등 목록)에 이 이벤트를 아예 노출할지 여부.
+// 문고리/사다드림은 회차(날짜)마다 별도 이벤트라서, 관리자가 "종료"를 따로
+// 안 눌러도 배송일이 지나면 자연스럽게 그 회차는 끝난 것 — 그래서 상태와
+// 무관하게 배송일 당일까지만 노출하고 다음날 00:00부터는 목록에서 자동으로
+// 숨긴다. 택배(PARCEL)는 상시 판매라 배송일이 "이번 상품의 마지막 날"이라는
+// 의미가 없으므로(회차 개념 자체가 없음) 이 자동 숨김 대상에서 빼고,
+// 관리자가 직접 "종료"를 눌렀을 때만(status==='ended') 같은 규칙을 적용해
+// 숨긴다. 직접 링크(상품 상세 등)로 들어온 경우는 이 함수를 거치지 않으므로
 // 계속 열람은 가능하고 주문만 막힌다.
-export function isEventVisibleToCustomers(event: Pick<MarketEvent, "status" | "deliveryAt">): boolean {
-  if (event.status !== "ended") return true;
+export function isEventVisibleToCustomers(event: Pick<MarketEvent, "type" | "status" | "deliveryAt">): boolean {
+  if (event.type === "PARCEL" && event.status !== "ended") return true;
   const d = new Date(event.deliveryAt);
   const hideAt = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);
   return Date.now() < hideAt.getTime();
