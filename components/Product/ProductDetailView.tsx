@@ -139,7 +139,12 @@ export function ProductDetailView({ productId }: { productId: string }) {
         const next = current.includes(value.id) ? current.filter((id) => id !== value.id) : [...current, value.id];
         return { ...prev, [group.id]: next };
       }
-      return { ...prev, [group.id]: [value.id] };
+      // 단일 선택 그룹도 이미 고른 값을 다시 누르면 선택이 취소돼야 한다 —
+      // 예전엔 항상 그 값으로 다시 세팅만 해서(선택된 상태 그대로 유지),
+      // "이 옵션 담기"를 누르기 전까지는 다시 눌러도 선택이 안 풀리는
+      // 문제가 있었다.
+      const next = current.includes(value.id) ? [] : [value.id];
+      return { ...prev, [group.id]: next };
     });
   }
 
