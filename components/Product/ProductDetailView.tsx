@@ -254,9 +254,13 @@ export function ProductDetailView({ productId }: { productId: string }) {
           <EventTypeBadge type={product.deliveryType ?? event.type} />
           <span className="text-[12px] font-semibold text-text-muted">{event.title}</span>
         </button>
-        <p className="mt-1 text-[12px] text-text-muted">
-          {formatDeadlineLabel(event.deadlineAt)} · 배송예정 {formatEventDateChip(event.deliveryAt)}
-        </p>
+        {/* 택배는 상시 판매라 마감/배송예정일이 회차 개념이 아니라 등록 시각으로
+            자동 채워진 값일 뿐이라 고객에게 노출하지 않는다(카테고리 날짜탭과 동일한 예외). */}
+        {(product.deliveryType ?? event.type) !== "PARCEL" && (
+          <p className="mt-1 text-[12px] text-text-muted">
+            {formatDeadlineLabel(event.deadlineAt)} · 배송예정 {formatEventDateChip(event.deliveryAt)}
+          </p>
+        )}
 
         <p className="mt-2 text-[17px] font-extrabold">{product.name}</p>
         <p className="my-1.5 text-xl font-extrabold">{formatPrice(unitPriceWithOptions)}</p>

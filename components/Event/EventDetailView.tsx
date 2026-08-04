@@ -38,9 +38,13 @@ export function EventDetailView({ eventId }: { eventId: string }) {
           <EventTypeBadge type={event.type} />
         </div>
         <p className="text-[17px] font-extrabold">{event.title}</p>
-        <p className="mt-1 text-[13px] text-text-muted">
-          {formatDeadlineLabel(event.deadlineAt)} · 배송예정 {formatEventDateChip(event.deliveryAt)}
-        </p>
+        {/* 택배는 상시 판매라 마감/배송예정일이 회차 개념이 아니라 등록 시각으로
+            자동 채워진 값일 뿐이라 고객에게 노출하지 않는다(카테고리 날짜탭과 동일한 예외). */}
+        {event.type !== "PARCEL" && (
+          <p className="mt-1 text-[13px] text-text-muted">
+            {formatDeadlineLabel(event.deadlineAt)} · 배송예정 {formatEventDateChip(event.deliveryAt)}
+          </p>
+        )}
         <div className="mt-3 rounded-[10px] p-3 text-[12.5px] leading-relaxed whitespace-pre-line" style={{ background: "#fff8e6", color: "#8a6a12" }}>
           {event.notice}
         </div>

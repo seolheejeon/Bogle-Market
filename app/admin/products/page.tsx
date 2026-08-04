@@ -243,7 +243,6 @@ function CatalogProductForm({
         <div className="flex flex-col gap-2.5">
           <PhotoUploader photos={photos} onChange={setPhotos} />
           <div className="flex flex-wrap gap-2">
-            <input className="w-14 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-center text-[13px]" value={emoji} onChange={(e) => setEmoji(e.target.value)} placeholder="🥚" />
             <input
               className="min-w-[160px] flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
               placeholder="상품명"
@@ -255,29 +254,9 @@ function CatalogProductForm({
             <input className="w-28 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" placeholder="보관법" value={storage} onChange={(e) => setStorage(e.target.value)} />
             <input className="w-28 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" placeholder="조리법" value={eat} onChange={(e) => setEat(e.target.value)} />
           </div>
-          <textarea
-            className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
-            rows={3}
-            placeholder="상품 한 줄 설명"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
           <div>
             <p className="mb-1.5 text-[12px] font-bold text-text-muted">뱃지 (홈/카테고리/상품상세 카드에 표시돼요)</p>
             <ProductBadgePicker value={badge} onChange={setBadge} />
-          </div>
-          <div>
-            <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
-            <DetailBlockEditor blocks={detailBlocks} onChange={setDetailBlocks} />
-          </div>
-          <div>
-            <p className="mb-1.5 text-[12px] font-bold text-text-muted">옵션 (색상/사이즈/중량/추가옵션 등)</p>
-            <ProductOptionEditor groups={optionGroups} onChange={setOptionGroups} />
-            <p className="mt-1.5 text-[11px] text-text-muted">
-              가격조정은 이 값을 고르면 기준 판매가에, 공급가조정은 기준 원가에 각각 더해지는 금액이에요(음수도 가능). 옵션마다 판매가뿐
-              아니라 실제 공급가도 다르면(예: 110g 8,000원/390g 24,000원) 기준 원가를 0으로 두고 공급가조정에 각 옵션의 실제 공급가를
-              그대로 입력하면 돼요.
-            </p>
           </div>
         </div>
       </section>
@@ -434,6 +413,24 @@ function CatalogProductForm({
             onChange={(e) => setShipsAt(e.target.value)}
           />
         )}
+      </section>
+
+      <section className="rounded-[9px] border border-border p-3">
+        <div className="flex flex-col gap-2.5">
+          <div>
+            <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
+            <DetailBlockEditor blocks={detailBlocks} onChange={setDetailBlocks} />
+          </div>
+          <div>
+            <p className="mb-1.5 text-[12px] font-bold text-text-muted">옵션 (색상/사이즈/중량/추가옵션 등)</p>
+            <ProductOptionEditor groups={optionGroups} onChange={setOptionGroups} />
+            <p className="mt-1.5 text-[11px] text-text-muted">
+              가격조정은 이 값을 고르면 기준 판매가에, 공급가조정은 기준 원가에 각각 더해지는 금액이에요(음수도 가능). 옵션마다 판매가뿐
+              아니라 실제 공급가도 다르면(예: 110g 8,000원/390g 24,000원) 기준 원가를 0으로 두고 공급가조정에 각 옵션의 실제 공급가를
+              그대로 입력하면 돼요.
+            </p>
+          </div>
+        </div>
       </section>
 
       {error && <p className="text-[12.5px] font-semibold text-red-600">{error}</p>}
