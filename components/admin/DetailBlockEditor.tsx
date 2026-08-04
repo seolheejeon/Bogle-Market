@@ -32,10 +32,18 @@ const COLOR_PRESETS: { label: string; value: string | undefined }[] = [
 // 멤버를 하나 추가하고, 여기 렌더링 분기와 "+ 버튼" 하나씩만 더하면 된다.
 export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailBlock[]; onChange: (blocks: ProductDetailBlock[]) => void }) {
   const photoInputRef = useRef<HTMLInputElement>(null);
+  // 블록 사이사이의 "+ 여기에 추가" 지점에서 사진을 고를 때 쓰는 별도 input —
+  // 어느 위치에 끼워 넣을지(insertMenuAt)를 같이 기억해뒀다가 onChange에서 그
+  // 인덱스에 바로 삽입한다(맨 아래 "+ 사진" 버튼과 동일한 input을 같이 쓰면
+  // "끝에 추가"와 "여기에 추가"가 서로 섞일 수 있어 분리했다).
+  const insertPhotoInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  // 블록 목록 맨 위(0)부터 각 블록 바로 앞자리까지, 어느 "+ 여기에 추가" 메뉴가
+  // 펼쳐져 있는지 — 한 번에 하나만 열리고, 선택하면 자동으로 닫힌다.
+  const [insertMenuAt, setInsertMenuAt] = useState<number | null>(null);
 
   function update(i: number, block: ProductDetailBlock) {
     onChange(blocks.map((b, idx) => (idx === i ? block : b)));
@@ -97,6 +105,38 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
     onChange(next);
   }
 
+  // 예전엔 새 블록이 항상 맨 아래에만 추가돼서, 중간에 끼워 넣으려면 맨
+  // 아래에 만든 뒤 드래그로 끌어올려야 했다 — 블록이 몇 개만 돼도 매번
+  // 오래 걸린다는 피드백을 받아, 블록과 블록 사이 어디든 바로 삽입할 수
+  // 있는 "+ 여기에 추가" 지점을 각 블록 앞자리마다 두었다.
+  function insertTextAt(index: number) {
+    const next = blocks.slice();
+    next.splice(index, 0, { type: "text", text: "", size: "sm" });
+    onChange(next);
+    setInsertMenuAt(null);
+  }
+  function insertVideoAt(index: number) {
+    const next = blocks.slice();
+    next.splice(index, 0, { type: "video", src: "" });
+    onChange(next);
+    setInsertMenuAt(null);
+  }
+  async function insertPhotosAt(index: number, files: File[]) {
+    if (files.length === 0) return;
+    setUploading(true);
+    try {
+      const urls = await uploadProductPhotos(files);
+      const newBlocks: ProductDetailBlock[] = urls.map((url) => ({ type: "images", urls: [url], columns: 1 }));
+      const next = blocks.slice();
+      next.splice(index, 0, ...newBlocks);
+      onChange(next);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "사진 업로드에 실패했어요.");
+    }
+    setUploading(false);
+    setInsertMenuAt(null);
+  }
+
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
@@ -131,19 +171,30 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
           className={`flex flex-col gap-2 rounded-lg p-1 outline-none ${dragOver ? "bg-accent-soft ring-2 ring-accent" : ""}`}
         >
           {blocks.map((block, i) => (
-            <div
-              key={i}
-              draggable
-              onDragStart={() => setDragIndex(i)}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (dragIndex !== null && dragIndex !== i) reorder(dragIndex, i);
-                setDragIndex(null);
-              }}
-              onDragEnd={() => setDragIndex(null)}
-              className={`flex items-start gap-2 rounded-lg border bg-bg-card p-2 transition-opacity ${dragIndex === i ? "border-accent opacity-40" : "border-border"}`}
-            >
+            <div key={i}>
+              <InsertPoint
+                open={insertMenuAt === i}
+                uploading={uploading}
+                onToggle={() => setInsertMenuAt(insertMenuAt === i ? null : i)}
+                onText={() => insertTextAt(i)}
+                onPhoto={() => {
+                  setInsertMenuAt(i);
+                  insertPhotoInputRef.current?.click();
+                }}
+                onVideo={() => insertVideoAt(i)}
+              />
+              <div
+                draggable
+                onDragStart={() => setDragIndex(i)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragIndex !== null && dragIndex !== i) reorder(dragIndex, i);
+                  setDragIndex(null);
+                }}
+                onDragEnd={() => setDragIndex(null)}
+                className={`flex items-start gap-2 rounded-lg border bg-bg-card p-2 transition-opacity ${dragIndex === i ? "border-accent opacity-40" : "border-border"}`}
+              >
               <div className="flex cursor-grab flex-col items-center gap-0.5 pt-0.5 select-none active:cursor-grabbing">
                 <span className="text-[13px] text-text-muted" title="드래그해서 순서 변경">
                   ⠿
@@ -200,11 +251,23 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
                 )}
                 {block.type === "video" && <VideoBlockEditor block={block} onChange={(b) => update(i, b)} />}
               </div>
-              <button type="button" onClick={() => remove(i)} className="rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] leading-relaxed text-white">
-                ×
-              </button>
+                <button type="button" onClick={() => remove(i)} className="rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] leading-relaxed text-white">
+                  ×
+                </button>
+              </div>
             </div>
           ))}
+          <input
+            ref={insertPhotoInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (insertMenuAt !== null) insertPhotosAt(insertMenuAt, Array.from(e.target.files ?? []));
+              e.target.value = "";
+            }}
+          />
           <div className="flex flex-wrap gap-1.5">
             <button
               type="button"
@@ -243,11 +306,66 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
         </div>
       )}
       <p className="mt-1 text-[10.5px] text-text-muted">
-        “+ 사진”으로 여러 장을 한 번에 올려도 한 장당 블록 하나씩 따로 추가돼요(GIF도 그대로 올릴 수 있어요) — 그 사이에 "+ 텍스트"를 끼워 넣거나
-        순서를 자유롭게 바꿀 수 있어요. 나란히 보여주고 싶은 사진끼리는 "이전 사진과 합치기"로 최대 3장까지 한 줄로 묶고, 묶은 블록 안에서 1/2/3열
-        레이아웃을 고르면 돼요(다시 "낱장으로 나누기"로 되돌릴 수 있어요). 편집기 안에 사진을 드래그하거나 Ctrl+V로 붙여넣어도 같은 방식으로 추가돼요.
-        블록 순서는 ⠿를 드래그하거나 ▲▼로 바꿀 수 있어요. 저장 전에 "미리보기"로 실제로 보일 모습을 확인해보세요.
+        블록과 블록 사이에 있는 점선 "+"를 누르면 바로 그 자리에 텍스트/사진/동영상을 끼워 넣을 수 있어요(맨 아래로 내려가서 추가한 뒤 끌어올릴
+        필요 없음). "+ 사진"으로 여러 장을 한 번에 올려도 한 장당 블록 하나씩 따로 추가돼요(GIF도 그대로 올릴 수 있어요). 나란히 보여주고 싶은
+        사진끼리는 "이전 사진과 합치기"로 최대 3장까지 한 줄로 묶고, 묶은 블록 안에서 1/2/3열 레이아웃을 고르면 돼요(다시 "낱장으로 나누기"로
+        되돌릴 수 있어요). 편집기 안에 사진을 드래그하거나 Ctrl+V로 붙여넣으면 맨 끝에 같은 방식으로 추가돼요. 블록 순서는 ⠿를 드래그하거나
+        ▲▼로 바꿀 수 있어요. 저장 전에 "미리보기"로 실제로 보일 모습을 확인해보세요.
       </p>
+    </div>
+  );
+}
+
+// 블록과 블록 사이(그리고 맨 위)에 놓이는 얇은 삽입 지점 — 평소엔 가운데
+// "+"만 보이다가 누르면 텍스트/사진/동영상 미니 버튼이 그 자리에서 펼쳐진다.
+// 맨 아래 "+ 텍스트/+ 사진/+ 동영상"과 달리 여기서 고르면 바로 이 지점에
+// 끼워 넣힌다(끝까지 스크롤해서 추가한 뒤 드래그로 끌어올릴 필요가 없어짐).
+function InsertPoint({
+  open,
+  uploading,
+  onToggle,
+  onText,
+  onPhoto,
+  onVideo,
+}: {
+  open: boolean;
+  uploading: boolean;
+  onToggle: () => void;
+  onText: () => void;
+  onPhoto: () => void;
+  onVideo: () => void;
+}) {
+  if (!open) {
+    return (
+      <div className="group flex items-center gap-2 py-0.5">
+        <div className="h-px flex-1 bg-border" />
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-border text-[12px] leading-none text-text-muted"
+          title="여기에 추가"
+        >
+          +
+        </button>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+    );
+  }
+  return (
+    <div className="my-1 flex flex-wrap items-center gap-1.5 rounded-[7px] border border-dashed border-accent bg-accent-soft/40 p-1.5">
+      <span className="text-[10.5px] font-semibold text-text-muted">여기에 추가:</span>
+      <button type="button" onClick={onText} className="rounded-full border border-border bg-bg-card px-2 py-0.5 text-[11px] font-semibold text-text-muted">
+        텍스트
+      </button>
+      <button type="button" onClick={onPhoto} disabled={uploading} className="rounded-full border border-border bg-bg-card px-2 py-0.5 text-[11px] font-semibold text-text-muted disabled:opacity-50">
+        {uploading ? "업로드 중..." : "사진"}
+      </button>
+      <button type="button" onClick={onVideo} className="rounded-full border border-border bg-bg-card px-2 py-0.5 text-[11px] font-semibold text-text-muted">
+        동영상
+      </button>
+      <button type="button" onClick={onToggle} className="ml-auto text-[11px] text-text-muted">
+        취소
+      </button>
     </div>
   );
 }

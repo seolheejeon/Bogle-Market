@@ -24,8 +24,7 @@ const EVENT_MERCHANDISE_BADGE_CLASS: Record<Exclude<EventBadge, "NONE">, string>
 // 수정 화면에서 고른 값을 그대로 보여준다. "없음"이면 아무것도 렌더링하지 않는다.
 export function EventBadgeTag({ badge }: { badge?: EventBadge }) {
   if (!badge || badge === "NONE") return null;
-  const label = badge === "SALE" ? "🔥 1시간 특가" : EVENT_BADGE_LABEL[badge];
-  return <span className={`rounded-md px-2.5 py-1 text-[13px] font-extrabold ${EVENT_MERCHANDISE_BADGE_CLASS[badge]}`}>{label}</span>;
+  return <span className={`rounded-md px-2.5 py-1 text-[13px] font-extrabold ${EVENT_MERCHANDISE_BADGE_CLASS[badge]}`}>{EVENT_BADGE_LABEL[badge]}</span>;
 }
 
 const STATUS_BADGE_CLASS: Record<OrderStatus, string> = {
