@@ -185,6 +185,7 @@ export default function AdminHomePage() {
   const tiles = useMemo(() => {
     const soldoutCount = events.reduce((s, e) => s + e.products.filter((p) => p.stock === 0).length, 0);
     return [
+      { key: "all_orders", label: "전체 주문", count: orders.length },
       { key: "wait", label: "입금대기 주문", count: orders.filter((o) => o.status === "wait").length },
       { key: "paid", label: "발주확인 대기", count: orders.filter((o) => o.status === "paid").length },
       {
@@ -206,19 +207,30 @@ export default function AdminHomePage() {
     ];
   }, [orders, events, eventById]);
 
+  // 타일을 누르면 그 타일이 뜻하는 주문만 정확히 보여야 한다 — 예전엔 배송방식
+  // 필터/검색어/기간(기본 최근 30일)이 이전 상태 그대로 남아있어서, 타일
+  // 숫자에는 잡히는 주문이 목록엔 하나도 안 뜨는 것처럼 보이는 버그가 있었다
+  // (특히 취소요청/반품환불요청처럼 타일 카운트 자체가 기간과 무관하게 전체
+  // 기준으로 계산돼서, 그 주문이 30일보다 오래됐으면 목록만 비어보였음). 그래서
+  // 타일을 누를 때마다 배송방식/검색어를 항상 초기화하고, 기간도 "전체"로 맞춰
+  // 타일 숫자와 목록이 항상 일치하게 한다.
   function clickTile(key: string) {
     setActiveTile(key);
+    setTypeFilter("");
+    setSubFilter("");
+    setSearch("");
+    setPeriod("all");
     setCancelOnly(false);
     setTodayDeliveryOnly(false);
     setTodayDoneOnly(false);
-    if (key === "deliverytoday") {
+    if (key === "all_orders") {
+      setStatusFilter("all");
+    } else if (key === "deliverytoday") {
       setStatusFilter("confirmed");
       setTodayDeliveryOnly(true);
-      setPeriod("all");
     } else if (key === "donetoday") {
       setStatusFilter("done");
       setTodayDoneOnly(true);
-      setPeriod("all");
     } else if (key === "cancel_requested") {
       setStatusFilter("all");
       setCancelOnly(true);

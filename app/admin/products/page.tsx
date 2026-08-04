@@ -312,6 +312,15 @@ function CatalogProductForm({
         <p className="mt-1.5 text-[11px] text-text-muted">
           새 이벤트에 이 상품을 추가하면 기준 판매가·원가가 기본값으로 채워지고, 그 회차에서만 다르게(2+1 묶음 등) 바꿀 수 있어요. 재고는 이 상품을 쓰는 모든 이벤트가 실시간으로 함께 봐요 — 한 회차에서 주문이 들어가면 다른 회차 재고도 즉시 줄어들어요. 최소 구매 수량은 상품 상세/빠른 담기가 항상 이 수량으로 시작하고, 이 밑으로는 수량을 줄일 수 없어요.
         </p>
+        <div className="mt-3">
+          <p className="mb-1.5 text-[12px] font-bold text-text-muted">옵션 (색상/사이즈/중량/추가옵션 등)</p>
+          <ProductOptionEditor groups={optionGroups} onChange={setOptionGroups} />
+          <p className="mt-1.5 text-[11px] text-text-muted">
+            가격조정은 이 값을 고르면 기준 판매가에, 공급가조정은 위 기준 원가에 각각 더해지는 금액이에요(음수도 가능). 옵션마다 판매가뿐
+            아니라 실제 공급가도 다르면(예: 110g 8,000원/390g 24,000원) 기준 원가를 0으로 두고 공급가조정에 각 옵션의 실제 공급가를
+            그대로 입력하면 돼요.
+          </p>
+        </div>
       </section>
 
       <section className="rounded-[9px] border border-border p-3">
@@ -416,21 +425,8 @@ function CatalogProductForm({
       </section>
 
       <section className="rounded-[9px] border border-border p-3">
-        <div className="flex flex-col gap-2.5">
-          <div>
-            <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
-            <DetailBlockEditor blocks={detailBlocks} onChange={setDetailBlocks} />
-          </div>
-          <div>
-            <p className="mb-1.5 text-[12px] font-bold text-text-muted">옵션 (색상/사이즈/중량/추가옵션 등)</p>
-            <ProductOptionEditor groups={optionGroups} onChange={setOptionGroups} />
-            <p className="mt-1.5 text-[11px] text-text-muted">
-              가격조정은 이 값을 고르면 기준 판매가에, 공급가조정은 기준 원가에 각각 더해지는 금액이에요(음수도 가능). 옵션마다 판매가뿐
-              아니라 실제 공급가도 다르면(예: 110g 8,000원/390g 24,000원) 기준 원가를 0으로 두고 공급가조정에 각 옵션의 실제 공급가를
-              그대로 입력하면 돼요.
-            </p>
-          </div>
-        </div>
+        <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
+        <DetailBlockEditor blocks={detailBlocks} onChange={setDetailBlocks} />
       </section>
 
       {error && <p className="text-[12.5px] font-semibold text-red-600">{error}</p>}
