@@ -338,9 +338,12 @@ export function ProductDetailView({ productId }: { productId: string }) {
                   const cap = remainingForIds(line.optionValueIds, i);
                   return (
                     <div key={`${line.optionValueIds.join(",")}::${i}`} className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">
-                        {optionSelectionLabel(product, line.optionValueIds)}
-                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-semibold">{optionSelectionLabel(product, line.optionValueIds)}</p>
+                        {/* + 버튼이 재고 한도에 막혀 비활성화되기 전에 한도를 미리 보여준다 —
+                            안 그러면 왜 안 늘어나는지 몰라서 버그처럼 느껴질 수 있다. */}
+                        {cap !== undefined && <p className="text-[10.5px] text-text-muted">최대 {cap}개까지 담을 수 있어요</p>}
+                      </div>
                       <button
                         type="button"
                         onClick={() => adjustPendingQty(i, -1)}

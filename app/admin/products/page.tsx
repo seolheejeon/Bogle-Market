@@ -338,7 +338,12 @@ function CatalogProductForm({
         </p>
         <div className="mt-3">
           <p className="mb-1.5 text-[12px] font-bold text-text-muted">옵션 (색상/사이즈/중량/추가옵션 등)</p>
-          <ProductOptionEditor groups={optionGroups} onChange={setOptionGroups} />
+          <ProductOptionEditor
+            groups={optionGroups}
+            onChange={setOptionGroups}
+            basePrice={basePrice.trim() === "" ? 0 : Number(basePrice) || 0}
+            baseCost={costPrice.trim() === "" ? 0 : Number(costPrice) || 0}
+          />
           <p className="mt-1.5 text-[11px] text-text-muted">
             가격조정은 이 값을 고르면 기준 판매가에, 공급가조정은 위 기준 원가에 각각 더해지는 금액이에요(음수도 가능). 옵션마다 판매가뿐
             아니라 실제 공급가도 다르면(예: 110g 8,000원/390g 24,000원) 기준 원가를 0으로 두고 공급가조정에 각 옵션의 실제 공급가를
