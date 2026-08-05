@@ -10,6 +10,7 @@ import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { OrderDetailModal } from "@/components/admin/OrderDetailModal";
 import { getAccessToken, sendPushToProfile } from "@/lib/push";
+import { isEventAdminEnded } from "@/lib/order-policy";
 
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", paid: "confirmed", confirmed: "ship", ship: "done" };
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = { wait: "입금확인", paid: "발주확인", confirmed: "배송시작", ship: "배송완료 처리" };
@@ -212,8 +213,8 @@ export default function AdminHomePage() {
       // 없어서, 예전처럼 이벤트관리로 보내면 뭐가 품절인지 알 수 없었다 —
       // 상품관리로 보내고 거기서 품절만 걸러 보여준다.
       { key: "soldout", label: "품절 상품", count: soldoutCount, href: "/admin/products?soldout=1" },
-      { key: "events", label: "진행중 이벤트", count: events.filter((e) => e.status !== "ended").length, href: "/admin/events" },
-      { key: "events_ended", label: "종료 이벤트", count: events.filter((e) => e.status === "ended").length, href: "/admin/events" },
+      { key: "events", label: "진행중 이벤트", count: events.filter((e) => !isEventAdminEnded(e)).length, href: "/admin/events" },
+      { key: "events_ended", label: "종료 이벤트", count: events.filter((e) => isEventAdminEnded(e)).length, href: "/admin/events" },
     ];
   }, [orders, events, eventById]);
 

@@ -38,3 +38,21 @@ export function isEventVisibleToCustomers(event: Pick<MarketEvent, "type" | "sta
   const hideAt = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);
   return Date.now() < hideAt.getTime();
 }
+
+// 관리자 화면(운영 메인 타일, 이벤트 관리 목록)에서 "진행중" vs "종료"를
+// 나눌 때 쓰는 기준 — 관리자가 직접 "종료"를 안 눌러도 마감(deadlineAt)이
+// 지나면 그 회차는 더 볼 일이 없다고 보고 자동으로 종료 쪽으로 묶는다.
+// 택배(PARCEL)는 마감 개념이 없어(상시 판매) 대상에서 뺀다.
+//
+// 실제 주문 가능 여부(isEventOrderable)는 이 값과 완전히 별개다 — 문고리
+// (SOFT_DEADLINE)처럼 마감이 지나도 재고가 있으면 계속 주문을 받는 이벤트가
+// 있어서, 여기서 "종료"로 분류된다고 해서 주문이 막히는 건 아니다. 실제로
+// 막고 싶으면 관리자가 이 목록에서 "종료" 버튼을 눌러 status를 바꿔야 한다.
+export function isEventDeadlinePassed(event: Pick<MarketEvent, "type" | "deadlineAt">): boolean {
+  if (event.type === "PARCEL") return false;
+  return new Date(event.deadlineAt).getTime() <= Date.now();
+}
+
+export function isEventAdminEnded(event: Pick<MarketEvent, "type" | "status" | "deadlineAt">): boolean {
+  return event.status === "ended" || isEventDeadlinePassed(event);
+}

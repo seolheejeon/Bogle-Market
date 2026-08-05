@@ -7,6 +7,7 @@ import { listEvents, deleteEvent, duplicateEvent, updateEvent } from "@/lib/data
 import type { MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatDateTime, toDateInputValue, dateInputValueToIso } from "@/lib/format";
+import { isEventAdminEnded } from "@/lib/order-policy";
 
 function toLocalInputValue(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -56,9 +57,13 @@ export default function AdminEventsPage() {
     refresh();
   }
 
-  const openEvents = events.filter((e) => e.status !== "ended");
+  // 관리자가 "종료"를 직접 안 눌러도 마감이 지나면 이 목록에서는 자동으로
+  // 종료 쪽으로 묶는다(isEventAdminEnded) — 실제 주문 차단 여부와는 별개
+  // 기준이라, 문고리처럼 마감 후에도 재고가 있으면 주문이 들어올 수 있는
+  // 이벤트도 여기서는 "종료"로 보여 정리가 된다.
+  const openEvents = events.filter((e) => !isEventAdminEnded(e));
   const endedEvents = events
-    .filter((e) => e.status === "ended")
+    .filter((e) => isEventAdminEnded(e))
     .sort((a, b) => new Date(b.deliveryAt).getTime() - new Date(a.deliveryAt).getTime());
   // 진행중을 항상 먼저, 종료는 항상 하단에 — 필터가 "전체"일 때만 이 순서가 보임.
   const sorted = [...openEvents, ...endedEvents];
@@ -94,7 +99,8 @@ export default function AdminEventsPage() {
       {loading && <p className="text-sm text-text-muted">불러오는 중...</p>}
       <div className="flex flex-col gap-2">
         {visible.map((e) => {
-          const ended = e.status === "ended";
+          const manuallyEnded = e.status === "ended";
+          const ended = manuallyEnded || isEventAdminEnded(e);
           return (
             <div key={e.id} className={`rounded-xl border border-border p-3.5 ${ended ? "opacity-60 grayscale-[0.4]" : ""}`}>
               <div className="flex items-center justify-between">
@@ -104,7 +110,8 @@ export default function AdminEventsPage() {
                     {e.flashSale && (
                       <span className="rounded-md bg-[var(--badge-flash-bg)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--badge-flash-fg)]">🔥 1시간 특가</span>
                     )}
-                    {ended && <span className="rounded-md bg-text-muted px-1.5 py-0.5 text-[10.5px] font-bold text-white">종료됨</span>}
+                    {manuallyEnded && <span className="rounded-md bg-text-muted px-1.5 py-0.5 text-[10.5px] font-bold text-white">종료됨</span>}
+                    {!manuallyEnded && ended && <span className="rounded-md bg-text-muted px-1.5 py-0.5 text-[10.5px] font-bold text-white">마감</span>}
                     <span className="text-[14px] font-bold">{e.title}</span>
                   </div>
                   <p className="mt-1 text-[12px] text-text-muted">
@@ -124,7 +131,7 @@ export default function AdminEventsPage() {
                   >
                     복제
                   </button>
-                  {ended ? (
+                  {manuallyEnded ? (
                     <button onClick={() => onRestart(e)} className="rounded-[8px] border border-accent px-3 py-1.5 text-[12.5px] font-semibold text-accent-dark">
                       재시작
                     </button>
