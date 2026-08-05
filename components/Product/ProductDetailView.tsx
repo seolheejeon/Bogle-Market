@@ -13,7 +13,7 @@ import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { ShareButton } from "@/components/ShareButton";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
-import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, comboKey } from "@/lib/product-options";
+import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 import { flyToCart } from "@/lib/cart-feedback";
 
@@ -94,27 +94,18 @@ export function ProductDetailView({ productId }: { productId: string }) {
   // 쓰고(hasOptions), 없는 상품은 예전처럼 수량 스텝퍼 + 바로 담기를 그대로 쓴다.
   const hasOptions = (product.optionGroups ?? []).length > 0;
 
-  // 이 조합(재고관리 대상 값 기준)이 실제 장바구니 + 다른 대기 목록 줄에서
-  // 이미 얼마나 쓰이고 있는지 — excludeIndex는 "그 줄 자신은 빼고" 계산할 때
-  // 쓴다(그 줄이 가질 수 있는 최대 수량을 구할 때).
-  function stockUsedElsewhere(optionValueIds: string[], excludeIndex?: number): number {
-    const key = comboKey(product, optionValueIds);
-    if (key === "") return 0;
-    let used = 0;
-    for (const l of lines) {
-      if (l.productId === product.id && comboKey(product, l.optionValueIds) === key) used += l.qty;
-    }
-    pendingLines.forEach((p, i) => {
-      if (i === excludeIndex) return;
-      if (comboKey(product, p.optionValueIds) === key) used += p.qty;
-    });
-    return used;
-  }
-
+  // 이 조합이 지금부터 몇 개까지 더 늘어날 수 있는지 — 장바구니에 이미 담긴
+  // 것 + 대기 목록의 다른 줄(자기 자신은 excludeIndex로 빼고)까지 전부
+  // "같은 상품의 다른 줄"로 취급해 remainingForCombo에 넘긴다. product.stock은
+  // 옵션 조합과 무관하게 이 상품 전체가 나눠 쓰는 값이라, 재고관리 옵션이
+  // 없는 조합끼리도 서로의 몫을 갉아먹어야 한다(lib/product-options.ts의
+  // remainingForCombo 주석 참고).
   function remainingForIds(optionValueIds: string[], excludeIndex?: number): number | undefined {
-    const max = maxQtyForSelection(product, optionValueIds);
-    if (max === undefined) return undefined;
-    return Math.max(0, max - stockUsedElsewhere(optionValueIds, excludeIndex));
+    const otherLines: { optionValueIds: string[]; qty: number }[] = [
+      ...lines.filter((l) => l.productId === product.id).map((l) => ({ optionValueIds: l.optionValueIds, qty: l.qty })),
+      ...pendingLines.filter((_, i) => i !== excludeIndex),
+    ];
+    return remainingForCombo(product, optionValueIds, otherLines);
   }
 
   const currentRemaining = remainingForIds(selectedOptionValueIds);

@@ -124,6 +124,57 @@ export function maxQtyForSelection(
   return limits.length > 0 ? Math.min(...limits) : undefined;
 }
 
+// 이 조합(장바구니 줄 하나)이 지금부터 더 늘어날 수 있는 최대 수량 — 같은
+// 상품의 "다른 조합"까지 감안해서 계산한다. product.stock은 옵션과 무관하게
+// 이 상품 전체가 나눠 쓰는 값이라, 재고관리 옵션이 하나도 없는 상품이라도
+// 110g 줄과 390g 줄이 서로의 몫을 갉아먹어야 한다 — 예전엔 comboKey가 ""일
+// 때(재고관리 옵션 미사용) 다른 줄의 사용량을 아예 0으로 취급해서, 조합마다
+// product.stock 전체(예: 10개)를 각각 다 쓸 수 있는 것처럼 보였다(실제로는
+// 재고 10개를 여러 조합이 나눠 가져야 하는데 안 나눠졌음 — 결제 직전 서버의
+// 진짜 재고 검증에서만 걸려서 "이유 없이 주문 실패"처럼 보이는 원인이었다).
+// otherLines는 "지금 보는 줄 자신은 뺀, 같은 상품의 다른 줄들"이어야 한다.
+export function remainingForCombo(
+  product: Pick<Product, "stock" | "optionGroups" | "optionStockByCombo">,
+  optionValueIds: string[],
+  otherLines: { optionValueIds: string[]; qty: number }[],
+): number | undefined {
+  const usedForProduct = otherLines.reduce((sum, l) => sum + l.qty, 0);
+  const key = comboKey(product, optionValueIds);
+  const usedForCombo = key === "" ? 0 : otherLines.filter((l) => comboKey(product, l.optionValueIds) === key).reduce((sum, l) => sum + l.qty, 0);
+  const limits: number[] = [];
+  if (product.stock !== undefined) limits.push(Math.max(0, product.stock - usedForProduct));
+  const comboStock = comboStockFor(product, optionValueIds);
+  if (comboStock !== undefined) limits.push(Math.max(0, comboStock - usedForCombo));
+  return limits.length > 0 ? Math.min(...limits) : undefined;
+}
+
+// 여러 라인(같은 상품이든 여러 상품이 섞여있든)을 한꺼번에 놓고, 실제로
+// 재고보다 많이 담겨있는 라인만 골라낸다 — 체크아웃 최종 검증용. 라인별로
+// 각각 확인하면(예전 방식) product.stock을 조합마다 따로 확인하는 셈이 돼서
+// 위 remainingForCombo와 같은 문제가 생기므로, 상품 전체 합계 / 조합 전체
+// 합계를 먼저 구해두고 그 기준으로 넘는 라인을 찾는다.
+export function findOverStockLines<T extends { product: Pick<Product, "id" | "stock" | "optionGroups" | "optionStockByCombo">; optionValueIds: string[]; qty: number }>(
+  lines: T[],
+): T[] {
+  const productTotals = new Map<string, number>();
+  const comboTotals = new Map<string, number>();
+  for (const l of lines) {
+    productTotals.set(l.product.id, (productTotals.get(l.product.id) ?? 0) + l.qty);
+    const key = comboKey(l.product, l.optionValueIds);
+    if (key !== "") {
+      const comboMapKey = `${l.product.id}::${key}`;
+      comboTotals.set(comboMapKey, (comboTotals.get(comboMapKey) ?? 0) + l.qty);
+    }
+  }
+  return lines.filter((l) => {
+    if (l.product.stock !== undefined && (productTotals.get(l.product.id) ?? 0) > l.product.stock) return true;
+    const key = comboKey(l.product, l.optionValueIds);
+    if (key === "") return false;
+    const comboStock = comboStockFor(l.product, l.optionValueIds);
+    return comboStock !== undefined && (comboTotals.get(`${l.product.id}::${key}`) ?? 0) > comboStock;
+  });
+}
+
 // 재고관리 그룹(hasStock 값이 있는 그룹)들의 카티션 곱 — 그룹이 1개면 그
 // 그룹의 재고관리 대상 값 각각이 곧 조합(예전과 동일), 2개 이상이면 진짜
 // 조합(예: 블랙+260)이 나온다. 각 조합의 기본 재고는 참여하는 값들의

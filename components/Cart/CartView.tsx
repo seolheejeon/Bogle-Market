@@ -9,7 +9,7 @@ import { formatPrice, formatDeadlineLabel } from "@/lib/format";
 import { useCart, type CartLine } from "@/lib/cart-context";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
-import { unitPrice, maxQtyForSelection, optionSelectionLabel } from "@/lib/product-options";
+import { unitPrice, remainingForCombo, optionSelectionLabel } from "@/lib/product-options";
 import { totalShippingFee } from "@/lib/shipping";
 
 // 체크아웃 화면과 동일한 순서(components/Checkout/CheckoutView.tsx의
@@ -147,7 +147,15 @@ export function CartView() {
                             <QtyControl
                               productId={product.id}
                               optionValueIds={line.optionValueIds}
-                              max={maxQtyForSelection(product, line.optionValueIds)}
+                              // product.stock은 옵션 조합과 무관하게 이 상품 전체가 나눠 쓰는
+                              // 값이라, 같은 상품의 다른 조합 줄(자기 자신은 빼고)까지 감안해야
+                              // 한다 — 안 그러면 조합마다 재고 전체(예: 10개)를 각각 다 쓸 수
+                              // 있는 것처럼 보여서 결제 직전 서버 재고 검증에서만 막히게 된다.
+                              max={remainingForCombo(
+                                product,
+                                line.optionValueIds,
+                                lines.filter((l) => l.productId === product.id && l !== line).map((l) => ({ optionValueIds: l.optionValueIds, qty: l.qty })),
+                              )}
                             />
                             {/* 최소 구매 수량은 이 조합 하나가 아니라 이 상품에 담은 모든
                                 조합의 합계로 따진다(체크아웃에서 검증) — 그래서 QtyControl에

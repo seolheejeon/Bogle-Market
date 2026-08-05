@@ -9,7 +9,7 @@ import { formatPrice, formatEventDateChip } from "@/lib/format";
 import { isEventOrderable } from "@/lib/order-policy";
 import { useCart, type CartLine } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
-import { unitPrice, maxQtyForSelection, optionSelectionLabel, buildOptionSnapshot, comboValueIds } from "@/lib/product-options";
+import { unitPrice, findOverStockLines, optionSelectionLabel, buildOptionSnapshot, comboValueIds } from "@/lib/product-options";
 import { totalShippingFee } from "@/lib/shipping";
 import { getCurrentPushSubscription, sendPushToSelf } from "@/lib/push";
 import { PAYMENT_METHODS, allowedPaymentMethods } from "@/lib/payments";
@@ -167,13 +167,14 @@ export function CheckoutView() {
       setError("장바구니가 비어있어요.");
       return;
     }
-    const overStock = items.filter((i) => {
-      const max = maxQtyForSelection(i.product, i.line.optionValueIds);
-      return max !== undefined && i.line.qty > max;
-    });
+    // product.stock은 옵션 조합과 무관하게 이 상품 전체가 나눠 쓰는 값이라,
+    // 라인 하나하나를 각각 stock과 비교하면(예전 방식) 조합마다 재고 전체를
+    // 따로 쓸 수 있는 것처럼 통과해버린다 — findOverStockLines가 같은
+    // 상품/같은 조합끼리 먼저 합산한 뒤에 실제로 넘는 라인만 찾아준다.
+    const overStock = findOverStockLines(items.map((i) => ({ product: i.product, optionValueIds: i.line.optionValueIds, qty: i.line.qty, item: i })));
     if (overStock.length > 0) {
       setError(
-        `재고가 부족한 상품이 있어요: ${overStock.map((i) => `${i.product.name}(재고 ${maxQtyForSelection(i.product, i.line.optionValueIds)}개)`).join(", ")}. 장바구니에서 수량을 줄여주세요.`,
+        `재고가 부족한 상품이 있어요: ${overStock.map((o) => o.item.product.name).join(", ")}. 장바구니에서 수량을 줄여주세요.`,
       );
       return;
     }
