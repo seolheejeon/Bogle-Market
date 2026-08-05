@@ -55,7 +55,12 @@ export function EventDetailView({ eventId }: { eventId: string }) {
         )}
 
         <div className="mt-4">
-          {event.products.map((product) => (
+          {event.products.map((product) => {
+            // 이벤트는 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰을
+            // 수 있다(예약상품 발주마감 등, product.closed) — 둘 중 하나만
+            // 참이어도 이 줄은 마감 취급한다.
+            const itemClosed = closed || product.closed === true;
+            return (
             <div key={product.id} className="flex items-center gap-3 border-b border-border py-3 last:border-none">
               <Link href={`/product/${product.id}`} className="block h-[52px] w-[52px] shrink-0">
                 <ProductPhoto
@@ -72,7 +77,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                 </div>
                 <p className="text-[13.5px] font-bold">{formatPrice(product.price)}</p>
               </div>
-              {!closed && product.stock !== 0 && hasRequiredOptions(product) ? (
+              {!itemClosed && product.stock !== 0 && hasRequiredOptions(product) ? (
                 <Link
                   href={`/product/${product.id}`}
                   className="shrink-0 rounded-full border border-accent px-3 py-1.5 text-[11.5px] font-bold text-accent"
@@ -80,10 +85,11 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                   옵션선택
                 </Link>
               ) : (
-                <QtyControl productId={product.id} max={product.stock} minQty={product.minQty} closed={closed} photo={product.photos?.[0] ?? product.emoji} />
+                <QtyControl productId={product.id} max={product.stock} minQty={product.minQty} closed={itemClosed} photo={product.photos?.[0] ?? product.emoji} />
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="mt-4 flex gap-2">

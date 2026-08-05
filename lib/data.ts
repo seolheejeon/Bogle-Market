@@ -78,6 +78,7 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     fulfillmentType: catalog?.fulfillmentType,
     shipsAt: catalog?.shipsAt,
     visible: listing.visible,
+    closed: listing.closed ?? false,
     optionGroups: mergeOptionStock(catalog?.optionGroups, listing.optionStock),
     // listing.optionStock은 이미 comboKey -> stock 맵이라 그대로 내려주면 된다.
     optionStockByCombo: listing.optionStock,
@@ -538,6 +539,7 @@ export interface EventProductPatch {
   costPrice?: number;
   deliveryType?: EventType;
   visible?: boolean;
+  closed?: boolean;
 }
 
 export async function updateEventProduct(eventProductId: string, patch: EventProductPatch): Promise<void> {
@@ -547,6 +549,7 @@ export async function updateEventProduct(eventProductId: string, patch: EventPro
     if (patch.price !== undefined) row.price = patch.price;
     if (patch.deliveryType !== undefined) row.delivery_type = patch.deliveryType ?? null;
     if (patch.visible !== undefined) row.visible = patch.visible;
+    if (patch.closed !== undefined) row.closed = patch.closed;
     if (Object.keys(row).length > 0) {
       const { error } = await supabase.from("event_products").update(row).eq("id", eventProductId);
       if (error) throw error;
@@ -924,6 +927,15 @@ function assertStockAvailable(events: MarketEventSeed[], items: OrderItem[]): vo
     }
   }
   const catalogById = new Map(loadCatalogProducts().map((c) => [c.id, c]));
+
+  // 개별 상품 마감(listing.closed) — 재고와 무관하게 관리자가 이 리스팅만
+  // 따로 마감시킨 경우, 재고 검사보다 먼저 막는다.
+  for (const i of items) {
+    if (!listingById.get(i.productId)?.closed) continue;
+    const catalogId = catalogIdByListing.get(i.productId);
+    const name = catalogId ? catalogById.get(catalogId)?.name : undefined;
+    throw new Error(`${name ?? "이 상품"}은(는) 마감되어 더 이상 주문할 수 없어요.`);
+  }
 
   const requestedByCatalog = new Map<string, number>();
   const requestedByListingCombo = new Map<string, Record<string, number>>();
@@ -1697,6 +1709,7 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     fulfillmentType: catalog.fulfillment_type ?? "same_day",
     shipsAt: catalog.ships_at ?? undefined,
     visible: row.visible ?? true,
+    closed: row.closed ?? false,
     optionGroups: mergeSupabaseOptionStock(mapSupabaseOptionGroups(catalog.product_option_groups), row.event_option_stock),
     optionStockByCombo: optionStockByComboFromRows(row.event_option_stock),
   };

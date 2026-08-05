@@ -11,8 +11,11 @@ import { hasRequiredOptions } from "@/lib/product-options";
 // 보내는 뱃지를 보여준다. 그 안에 QtyControl이 nested <a>가 되지 않도록
 // 사진/이름/옵션뱃지를 각각 별도 Link로 감싼다(EventDetailView와 같은 패턴).
 // closed는 이 상품이 속한 이벤트가 마감(종료 포함)돼서 더 이상 주문할 수
-// 없다는 뜻 — 호출부가 !isEventOrderable(event)로 계산해 넘겨준다.
+// 없다는 뜻 — 호출부가 !isEventOrderable(event)로 계산해 넘겨준다. 이벤트는
+// 그대로 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰을 수 있어서
+// (product.closed, 예약상품 발주마감 등) 둘 중 하나라도 참이면 마감 취급한다.
 export function ProductGridCard({ product, rankBadge, closed }: { product: Product; rankBadge?: string; closed?: boolean }) {
+  const isClosed = closed || product.closed === true;
   const optionsRequired = hasRequiredOptions(product);
   return (
     <div>
@@ -35,7 +38,7 @@ export function ProductGridCard({ product, rankBadge, closed }: { product: Produ
       </Link>
       <div className="flex items-center justify-between">
         <span className="text-[13.5px] font-bold">{formatPrice(product.price)}</span>
-        {closed ? (
+        {isClosed ? (
           <span className="shrink-0 rounded-full bg-bg-sunken px-2.5 py-1 text-[11px] font-bold text-text-muted">마감</span>
         ) : optionsRequired ? (
           <Link href={`/product/${product.id}`} className="shrink-0 rounded-full border border-accent px-2.5 py-1 text-[11px] font-bold text-accent">

@@ -223,6 +223,13 @@ export function CheckoutView() {
       setError(`마감되어 더 이상 주문할 수 없는 이벤트가 있어요: ${closedGroups.map((g) => g.event.title).join(", ")}. 장바구니에서 빼주세요.`);
       return;
     }
+    // 이벤트 전체는 진행 중이어도 이 상품만 관리자가 따로 마감시켰을 수
+    // 있다(예약상품 발주마감 등) — closedGroups와 별개로 한 번 더 막는다.
+    const closedItems = items.filter((i) => i.product.closed === true);
+    if (closedItems.length > 0) {
+      setError(`마감된 상품이 있어요: ${Array.from(new Set(closedItems.map((i) => i.product.name))).join(", ")}. 장바구니에서 빼주세요.`);
+      return;
+    }
     setSubmitting(true);
     setFailureNotice(null);
     try {

@@ -149,9 +149,15 @@ create table if not exists event_products (
   delivery_type text check (delivery_type in ('DOOR', 'GROUP_BUY', 'PARCEL')),
   -- false면 고객 화면에서 숨김(삭제 없이 판매만 잠시 중단). 기본은 true.
   visible boolean not null default true,
+  -- 이 리스팅만 주문을 막을 때 켠다(예: 예약상품이라 나머지 상품보다 발주
+  -- 마감이 먼저인 경우) — 이벤트 전체의 종료(events.status)와는 별개로,
+  -- 상품 하나만 마감시키고 싶을 때 쓴다. visible과 달리 화면에는 계속
+  -- 보이되(투명성) 주문만 막고 "마감" 표시가 붙는다.
+  closed boolean not null default false,
   -- 이 이벤트 안에서 상품이 노출되는 순서(오름차순) — 이벤트마다 독립적으로
   -- 관리자가 ▲▼로 바꿀 수 있다. 새로 추가되는 리스팅은 맨 뒤로 붙도록 그
-  -- 시점의 최댓값+1로 채워진다.
+  -- 시점의 최댓값+1로 채워진다. 관리자가 "마감"을 누르면 이 값을 맨 뒤로
+  -- 밀어서 처리할 나머지 상품과 안 섞이게 한다.
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
@@ -820,6 +826,7 @@ set search_path = public
 as $$
 declare
   v_bad_item record;
+  v_closed_item record;
   v_item jsonb;
   v_event_product_id uuid;
   v_qty integer;
@@ -827,6 +834,21 @@ declare
 begin
   if p_profile_id is not null and p_profile_id <> auth.uid() then
     raise exception 'profile_id must match the authenticated user';
+  end if;
+
+  -- 개별 상품 마감(event_products.closed) 서버 검증 — 관리자가 예약상품처럼
+  -- 이벤트 전체보다 먼저 마감해야 하는 상품 하나만 "마감" 처리했을 때, RPC를
+  -- 직접 호출하는 경로까지 대비해 여기서 막는다.
+  select p.name
+  into v_closed_item
+  from jsonb_array_elements(p_items) as i
+  join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
+  join products p on p.id = ep.product_id
+  where ep.closed
+  limit 1;
+
+  if v_closed_item.name is not null then
+    raise exception '%은(는) 마감되어 더 이상 주문할 수 없어요.', v_closed_item.name;
   end if;
 
   -- 최소 구매 수량 서버 검증 — 상품상세/장바구니에서 이미 막지만, RPC를 직접

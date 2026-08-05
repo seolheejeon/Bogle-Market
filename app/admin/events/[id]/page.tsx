@@ -265,7 +265,15 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
               </button>
             </div>
             <div className="min-w-0 flex-1">
-              <EventProductRow product={p} eventType={event.type} costPrice={costsByListing[p.id]} soldQty={soldByListing[p.id] ?? 0} onSaved={refresh} />
+              <EventProductRow
+                product={p}
+                eventType={event.type}
+                costPrice={costsByListing[p.id]}
+                soldQty={soldByListing[p.id] ?? 0}
+                siblingIds={event.products.map((x) => x.id)}
+                eventId={event.id}
+                onSaved={refresh}
+              />
             </div>
           </div>
         ))}
@@ -282,6 +290,8 @@ function EventProductRow({
   eventType,
   costPrice,
   soldQty,
+  siblingIds,
+  eventId,
   onSaved,
 }: {
   product: Product;
@@ -290,6 +300,10 @@ function EventProductRow({
   // 전달되는 값 — 이 컴포넌트는 /admin 하위 화면에서만 렌더링된다.
   costPrice: number | undefined;
   soldQty: number;
+  // "마감" 처리 시 이 회차 맨 아래로 순서를 내리는 데 필요 — 지금 회차의
+  // 리스팅 id 전체(현재 순서)와 그 이벤트의 id.
+  siblingIds: string[];
+  eventId: string;
   onSaved: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -347,8 +361,29 @@ function EventProductRow({
     }
   }
 
+  // 예약상품처럼 이벤트 전체보다 발주 마감이 먼저인 상품 하나만 따로
+  // 주문을 막는다(이벤트 상태·재고와 무관). 마감시키는 순간 이 회차 맨
+  // 아래로 순서를 내려서, 아직 처리할(마감 전) 상품과 안 섞이게 한다.
+  async function toggleClosed() {
+    setBusy(true);
+    try {
+      const next = !isClosed;
+      await updateEventProduct(product.id, { closed: next });
+      if (next) {
+        const reordered = [...siblingIds.filter((id) => id !== product.id), product.id];
+        await reorderEventProducts(eventId, reordered);
+      }
+      onSaved();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const isSoldout = product.stock === 0;
   const isVisible = product.visible !== false;
+  const isClosed = product.closed === true;
 
   if (!editing) {
     const optionStockNote = (() => {
@@ -373,6 +408,7 @@ function EventProductRow({
             <p className="truncate text-[13px] font-semibold">
               {product.name}
               {!isVisible && <span className="ml-1.5 rounded-md bg-bg-sunken px-1.5 py-0.5 text-[10.5px] font-bold text-text-muted">숨김</span>}
+              {isClosed && <span className="ml-1.5 rounded-md bg-red-50 px-1.5 py-0.5 text-[10.5px] font-bold text-red-600">마감</span>}
             </p>
             <p className="text-[12px] text-text-muted">
               {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
@@ -387,6 +423,9 @@ function EventProductRow({
           <div className="flex flex-wrap justify-end gap-1.5">
             <button onClick={toggleVisible} disabled={busy} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold disabled:opacity-50">
               {isVisible ? "숨기기" : "노출"}
+            </button>
+            <button onClick={toggleClosed} disabled={busy} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold text-red-600 disabled:opacity-50">
+              {isClosed ? "마감 해제" : "마감"}
             </button>
             <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
               가격/원가 수정
@@ -405,6 +444,7 @@ function EventProductRow({
             <p className="min-w-0 flex-1 truncate text-[13px] font-semibold">
               {product.name}
               {!isVisible && <span className="ml-1.5 rounded-md bg-bg-sunken px-1.5 py-0.5 text-[10.5px] font-bold text-text-muted">숨김</span>}
+              {isClosed && <span className="ml-1.5 rounded-md bg-red-50 px-1.5 py-0.5 text-[10.5px] font-bold text-red-600">마감</span>}
             </p>
           </div>
           <div className="flex flex-col gap-0.5 text-[12px] text-text-muted">
@@ -422,9 +462,12 @@ function EventProductRow({
             </p>
             {optionStockNote && <p className="truncate">{optionStockNote}</p>}
           </div>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 gap-1.5">
             <button onClick={toggleVisible} disabled={busy} className="rounded-[7px] border border-border py-1.5 text-[12px] font-semibold disabled:opacity-50">
               {isVisible ? "숨기기" : "노출"}
+            </button>
+            <button onClick={toggleClosed} disabled={busy} className="rounded-[7px] border border-border py-1.5 text-[12px] font-semibold text-red-600 disabled:opacity-50">
+              {isClosed ? "마감 해제" : "마감"}
             </button>
             <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border py-1.5 text-[12px] font-semibold">
               가격/원가 수정

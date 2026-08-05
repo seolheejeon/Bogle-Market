@@ -79,6 +79,9 @@ export function ProductDetailView({ productId }: { productId: string }) {
   const inCart = getQty(product.id, selectedOptionValueIds);
   const soldOut = product.stock === 0;
   const closed = !isEventOrderable(event);
+  // 이벤트 전체는 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰을 수
+  // 있다(예약상품 발주마감 등) — 이벤트 마감(closed)과 구분해 안내 문구를 다르게 준다.
+  const listingClosed = product.closed === true;
   const maxQty = maxQtyForSelection(product, selectedOptionValueIds);
   const remaining = maxQty !== undefined ? Math.max(0, maxQty - inCart) : undefined;
   // 필수 옵션이 여러 개인 상품은 전부 고르기 전까지 수량 조절/담기 자체를
@@ -304,7 +307,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
           </div>
         )}
 
-        {hasOptions && !closed && !soldOut && (
+        {hasOptions && !closed && !listingClosed && !soldOut && (
           <div className="mb-4">
             {selectionIncomplete ? (
               <p className="mb-2 text-[12.5px] font-semibold text-text-muted">옵션을 모두 선택해 주세요.</p>
@@ -429,6 +432,13 @@ export function ProductDetailView({ productId }: { productId: string }) {
                 마감
               </button>
             </>
+          ) : listingClosed ? (
+            <>
+              <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">마감된 상품이에요. 더 이상 주문할 수 없어요.</p>
+              <button className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40" disabled>
+                마감
+              </button>
+            </>
           ) : soldOut ? (
             <>
               <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">품절된 상품이에요.</p>
@@ -482,7 +492,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
               <button
                 ref={addButtonRef}
                 className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40"
-                disabled={soldOut || closed}
+                disabled={soldOut || closed || listingClosed}
                 onClick={addToCart}
               >
                 장바구니 담기

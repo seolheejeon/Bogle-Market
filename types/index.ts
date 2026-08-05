@@ -196,6 +196,11 @@ export interface Product {
   // false면 고객 화면(그리드/이벤트 상세 등)에서 숨김 — 상품은 남겨두되 잠시
   // 판매만 중단하고 싶을 때(예: 다음 회차 준비 중) 삭제 없이 끄는 용도.
   visible?: boolean;
+  // true면 이 리스팅(이 이벤트의 이 상품)만 주문이 막힌다 — 이벤트 전체는
+  // 계속 진행 중이어도 예약상품처럼 발주 마감이 먼저 오는 상품 하나만
+  // 관리자가 따로 마감시킬 때 쓴다. visible과 달리 화면에는 계속 보이고
+  // "마감" 표시만 붙는다(재고와 무관하게 항상 주문 불가로 취급).
+  closed?: boolean;
   // 색상/사이즈/중량/추가옵션 등 — 그룹 구조(required/multi/이름)는 카탈로그와
   // 동일하지만, 재고관리(hasStock) 대상 값의 stock은 이 리스팅(event_option_stock)
   // 기준으로 온다. 재고관리 그룹이 하나뿐이면 이 stock이 곧 그 값 하나의 재고고,
@@ -267,6 +272,7 @@ export interface EventProductSeed {
   costPrice?: number;
   deliveryType?: EventType;
   visible?: boolean;
+  closed?: boolean;
   // 이 이벤트 안에서 노출되는 순서(오름차순) — 이벤트마다 독립적. 관리자가
   // ▲▼로 바꾸며, 새로 추가된 리스팅은 기존 최댓값+1로 맨 뒤에 붙는다.
   sortOrder?: number;

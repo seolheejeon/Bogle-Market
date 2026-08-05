@@ -156,6 +156,9 @@ export function CartView() {
                                 line.optionValueIds,
                                 lines.filter((l) => l.productId === product.id && l !== line).map((l) => ({ optionValueIds: l.optionValueIds, qty: l.qty })),
                               )}
+                              // 이벤트 전체는 진행 중이어도 이 상품만 관리자가 따로 마감시켰을
+                              // 수 있다 — 이 경우 수량을 못 늘리게 "마감" 표시로 대체한다.
+                              closed={product.closed === true}
                             />
                             {/* 최소 구매 수량은 이 조합 하나가 아니라 이 상품에 담은 모든
                                 조합의 합계로 따진다(체크아웃에서 검증) — 그래서 QtyControl에
