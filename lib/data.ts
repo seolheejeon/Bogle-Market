@@ -64,6 +64,8 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     weight: catalog?.weight,
     storage: catalog?.storage,
     eat: catalog?.eat,
+    expiryLabel: catalog?.expiryLabel,
+    expiryValue: catalog?.expiryValue,
     description: catalog?.description,
     detailBlocks: catalog?.detailBlocks,
     // 카탈로그 상품의 공유 재고를 그대로 내려준다 — 리스팅 자체엔 재고가 없다.
@@ -273,6 +275,8 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
         weight: input.weight,
         storage: input.storage,
         eat: input.eat,
+        expiry_label: input.expiryLabel ?? null,
+        expiry_value: input.expiryValue ?? null,
         description: input.description,
         base_price: input.basePrice ?? 0,
         stock: input.stock ?? null,
@@ -326,6 +330,8 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     if (patch.weight !== undefined) row.weight = patch.weight;
     if (patch.storage !== undefined) row.storage = patch.storage;
     if (patch.eat !== undefined) row.eat = patch.eat;
+    if (patch.expiryLabel !== undefined) row.expiry_label = patch.expiryLabel;
+    if (patch.expiryValue !== undefined) row.expiry_value = patch.expiryValue;
     if (patch.description !== undefined) row.description = patch.description;
     if (patch.basePrice !== undefined) row.base_price = patch.basePrice;
     // "stock" in patch (아닌 !== undefined)로 확인 — 재고 한도를 다시
@@ -1656,6 +1662,8 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     weight: row.weight ?? undefined,
     storage: row.storage ?? undefined,
     eat: row.eat ?? undefined,
+    expiryLabel: row.expiry_label ?? undefined,
+    expiryValue: row.expiry_value ?? undefined,
     description: row.description ?? undefined,
     detailBlocks: row.detail_blocks && row.detail_blocks.length > 0 ? row.detail_blocks : undefined,
     basePrice: row.base_price ?? 0,
@@ -1695,6 +1703,8 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     weight: catalog.weight ?? undefined,
     storage: catalog.storage ?? undefined,
     eat: catalog.eat ?? undefined,
+    expiryLabel: catalog.expiry_label ?? undefined,
+    expiryValue: catalog.expiry_value ?? undefined,
     description: catalog.description ?? undefined,
     detailBlocks: catalog.detail_blocks && catalog.detail_blocks.length > 0 ? catalog.detail_blocks : undefined,
     // 카탈로그 상품(products.stock)의 공유 재고를 그대로 내려준다.

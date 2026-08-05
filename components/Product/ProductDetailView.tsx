@@ -15,7 +15,7 @@ import { ShareButton } from "@/components/ShareButton";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
-import { flyToCart } from "@/lib/cart-feedback";
+import { flyToCart, showAddedToast } from "@/lib/cart-feedback";
 
 export function ProductDetailView({ productId }: { productId: string }) {
   const router = useRouter();
@@ -182,7 +182,13 @@ export function ProductDetailView({ productId }: { productId: string }) {
       // 구매 수량을 강제하지 않는다.
       if (newQty < 1) return prev;
       const cap = remainingForIds(line.optionValueIds, index);
-      if (cap !== undefined && newQty > cap) return prev;
+      if (cap !== undefined && newQty > cap) {
+        // 한도를 미리 보여주지 않고, 실제로 넘기려는 시도가 있을 때만 그
+        // 자리에서 안내한다(사용자 요청 — 재고가 얼마 안 남았다는 인상을
+        // 계속 노출하지 않기 위함).
+        showAddedToast(cap <= 0 ? "더 담을 수 있는 재고가 없어요." : `최대 ${cap}개까지만 구매할 수 있어요.`);
+        return prev;
+      }
       return prev.map((p, i) => (i === index ? { ...p, qty: newQty } : p));
     });
   }
@@ -328,39 +334,32 @@ export function ProductDetailView({ productId }: { productId: string }) {
 
             {pendingLines.length > 0 && (
               <div className="mt-3 flex flex-col gap-2 rounded-[10px] border border-border p-3">
-                {pendingLines.map((line, i) => {
-                  const cap = remainingForIds(line.optionValueIds, i);
-                  return (
-                    <div key={`${line.optionValueIds.join(",")}::${i}`} className="flex items-center gap-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[13px] font-semibold">{optionSelectionLabel(product, line.optionValueIds)}</p>
-                        {/* + 버튼이 재고 한도에 막혀 비활성화되기 전에 한도를 미리 보여준다 —
-                            안 그러면 왜 안 늘어나는지 몰라서 버그처럼 느껴질 수 있다. */}
-                        {cap !== undefined && <p className="text-[10.5px] text-text-muted">최대 {cap}개까지 담을 수 있어요</p>}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => adjustPendingQty(i, -1)}
-                        disabled={line.qty <= 1}
-                        className="h-7 w-7 shrink-0 rounded-full border border-border text-[13px] text-text disabled:opacity-40"
-                      >
-                        −
-                      </button>
-                      <span className="w-5 shrink-0 text-center text-[13px] font-bold">{line.qty}</span>
-                      <button
-                        type="button"
-                        onClick={() => adjustPendingQty(i, 1)}
-                        disabled={cap !== undefined && line.qty >= cap}
-                        className="h-7 w-7 shrink-0 rounded-full border border-border text-[13px] text-text disabled:opacity-40"
-                      >
-                        +
-                      </button>
-                      <button type="button" onClick={() => removePendingLine(i)} className="ml-1 shrink-0 text-[12px] font-semibold text-text-muted">
-                        삭제
-                      </button>
+                {pendingLines.map((line, i) => (
+                  <div key={`${line.optionValueIds.join(",")}::${i}`} className="flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-semibold">{optionSelectionLabel(product, line.optionValueIds)}</p>
                     </div>
-                  );
-                })}
+                    <button
+                      type="button"
+                      onClick={() => adjustPendingQty(i, -1)}
+                      disabled={line.qty <= 1}
+                      className="h-7 w-7 shrink-0 rounded-full border border-border text-[13px] text-text disabled:opacity-40"
+                    >
+                      −
+                    </button>
+                    <span className="w-5 shrink-0 text-center text-[13px] font-bold">{line.qty}</span>
+                    <button
+                      type="button"
+                      onClick={() => adjustPendingQty(i, 1)}
+                      className="h-7 w-7 shrink-0 rounded-full border border-border text-[13px] text-text disabled:opacity-40"
+                    >
+                      +
+                    </button>
+                    <button type="button" onClick={() => removePendingLine(i)} className="ml-1 shrink-0 text-[12px] font-semibold text-text-muted">
+                      삭제
+                    </button>
+                  </div>
+                ))}
                 <div className="mt-1 flex justify-between border-t border-border pt-2 text-[13px] font-bold">
                   <span>총 {totalPendingQty}개</span>
                   <span>{formatPrice(totalPendingPrice)}</span>
@@ -398,6 +397,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
             ["최소주문수량", (product.minQty ?? 1) > 1 ? `${product.minQty}개부터 주문 가능` : undefined],
             ["보관법", product.storage],
             ["조리법", product.eat],
+            [product.expiryLabel ?? "유통기한", product.expiryValue],
           ]
             .filter(([, v]) => v)
             .map(([k, v]) => (
@@ -481,8 +481,15 @@ export function ProductDetailView({ productId }: { productId: string }) {
                 <span className="w-5 text-center font-bold">{qty}</span>
                 <button
                   className="h-[30px] w-[30px] rounded-full border border-border bg-bg-card text-[15px] text-text disabled:opacity-40"
-                  disabled={remaining !== undefined && qty >= remaining}
-                  onClick={() => setQty((q) => q + 1)}
+                  onClick={() => {
+                    // 남은 수량을 미리 보여주지 않고, 한도를 넘기려는 시도가
+                    // 있을 때만 그 자리에서 안내한다(사용자 요청).
+                    if (remaining !== undefined && qty >= remaining) {
+                      showAddedToast(remaining <= 0 ? "더 담을 수 있는 재고가 없어요." : `최대 ${remaining}개까지만 구매할 수 있어요.`);
+                      return;
+                    }
+                    setQty((q) => q + 1);
+                  }}
                 >
                   +
                 </button>

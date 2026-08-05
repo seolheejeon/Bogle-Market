@@ -54,7 +54,6 @@ export function QtyControl({
       </button>
     );
   }
-  const atMax = max !== undefined && qty >= max;
   const atMin = qty <= minQty;
   return (
     <div className="flex items-center gap-1.5">
@@ -72,10 +71,16 @@ export function QtyControl({
       <span className="min-w-3.5 text-center text-sm font-bold">{qty}</span>
       <button
         className="h-[26px] w-[26px] rounded-full border border-border bg-bg-card text-sm text-text disabled:opacity-40"
-        disabled={atMax}
         onClick={(e) => {
           e.stopPropagation();
           e.preventDefault();
+          // 남은 수량을 미리 보여주지 않고, 한도를 넘기려는 시도가 있을 때만
+          // 그 자리에서 안내한다 — "재고가 몇 개 안 남았다"는 인상을 계속
+          // 노출하지 않기 위함(사용자 요청).
+          if (max !== undefined && qty >= max) {
+            showAddedToast(`최대 ${max}개까지만 구매할 수 있어요.`);
+            return;
+          }
           changeQty(productId, 1, optionValueIds);
         }}
       >

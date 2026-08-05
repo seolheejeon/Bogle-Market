@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { listCatalogProducts, createCatalogProduct, updateCatalogProduct, deleteCatalogProduct, listEvents, addEventProduct, removeEventProduct } from "@/lib/data";
-import type { CatalogProduct, EventBadge, FulfillmentType, MarketEvent, ProductDetailBlock, ProductOptionGroup, ShippingFeeType } from "@/types";
+import type { CatalogProduct, EventBadge, ExpiryLabel, FulfillmentType, MarketEvent, ProductDetailBlock, ProductOptionGroup, ShippingFeeType } from "@/types";
 import { EVENT_TYPE_LABEL, COURIER_OPTIONS, FULFILLMENT_TYPE_LABEL, SHIPPING_FEE_TYPE_LABEL } from "@/types";
 
 // 택배사 select에서 기본 목록(COURIER_OPTIONS)에 없는 값을 직접 입력할 때 쓰는
@@ -207,6 +207,8 @@ function CatalogProductForm({
   const [weight, setWeight] = useState(initial?.weight ?? "");
   const [storage, setStorage] = useState(initial?.storage ?? "");
   const [eat, setEat] = useState(initial?.eat ?? "");
+  const [expiryLabel, setExpiryLabel] = useState<ExpiryLabel | "">(initial?.expiryLabel ?? "");
+  const [expiryValue, setExpiryValue] = useState(initial?.expiryValue ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [photos, setPhotos] = useState<string[]>(initial?.photos ?? []);
   const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>(initial?.detailBlocks ?? []);
@@ -244,6 +246,10 @@ function CatalogProductForm({
         weight: weight || undefined,
         storage: storage || undefined,
         eat: eat || undefined,
+        // 라벨/값 둘 다 채워졌을 때만 저장한다 — 하나만 있으면 고객 화면에
+        // 보여줄 방법이 없어서(라벨만 있고 값이 없거나 그 반대) 의미가 없다.
+        expiryLabel: expiryLabel && expiryValue.trim() ? expiryLabel : undefined,
+        expiryValue: expiryLabel && expiryValue.trim() ? expiryValue.trim() : undefined,
         description: description || undefined,
         photos,
         detailBlocks,
@@ -277,6 +283,22 @@ function CatalogProductForm({
             <input className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" placeholder="중량" value={weight} onChange={(e) => setWeight(e.target.value)} />
             <input className="w-28 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" placeholder="보관법" value={storage} onChange={(e) => setStorage(e.target.value)} />
             <input className="w-28 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]" placeholder="조리법" value={eat} onChange={(e) => setEat(e.target.value)} />
+            <select
+              className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+              value={expiryLabel}
+              onChange={(e) => setExpiryLabel(e.target.value as ExpiryLabel | "")}
+            >
+              <option value="">기한 안 씀</option>
+              <option value="유통기한">유통기한</option>
+              <option value="소비기한">소비기한</option>
+            </select>
+            <input
+              className="w-28 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px] disabled:opacity-40"
+              placeholder="예: 제조일로부터 7일"
+              value={expiryValue}
+              disabled={!expiryLabel}
+              onChange={(e) => setExpiryValue(e.target.value)}
+            />
           </div>
           <div>
             <p className="mb-1.5 text-[12px] font-bold text-text-muted">뱃지 (홈/카테고리/상품상세 카드에 표시돼요)</p>

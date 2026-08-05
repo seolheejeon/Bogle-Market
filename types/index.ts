@@ -103,6 +103,13 @@ export interface CatalogProduct {
   weight?: string;
   storage?: string;
   eat?: string;
+  // 상품마다 "유통기한"이 맞는지 "소비기한"이 맞는지 달라서(육류/수산물은
+  // 소비기한 표기가 흔하고, 가공식품은 유통기한 표기가 흔함) 라벨 자체를
+  // 관리자가 고르게 하고, 값은 자유 텍스트로 받는다("제조일로부터 7일" 처럼
+  // 날짜가 아닌 형태도 있어서 date 타입 대신 텍스트). 둘 중 하나라도 비어있으면
+  // 상품 정보 표에서 이 줄 자체를 숨긴다.
+  expiryLabel?: ExpiryLabel;
+  expiryValue?: string;
   description?: string;
   detailBlocks?: ProductDetailBlock[];
   // 새 이벤트에 이 상품을 추가할 때 기본값으로 복사되는 기준 판매가 — 공개
@@ -174,6 +181,8 @@ export interface Product {
   weight?: string;
   storage?: string;
   eat?: string;
+  expiryLabel?: ExpiryLabel;
+  expiryValue?: string;
   description?: string;
   detailBlocks?: ProductDetailBlock[];
   // 카탈로그 상품(CatalogProduct.stock)에서 그대로 내려오는 공유 재고값 —
@@ -485,6 +494,10 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
 //   (예: 5세트마다 배송비 1회 — 박스 단위 발송처럼 수량에 비례해 배송 건수가
 //   느는 상품에 씀).
 export type ShippingFeeType = "fixed" | "free_threshold" | "per_quantity";
+
+// 유통기한(제조 후 유통 가능한 기간)과 소비기한(안전하게 섭취 가능한 기간)은
+// 법적으로 다른 개념이라 상품마다 어느 쪽으로 표기할지 관리자가 직접 고른다.
+export type ExpiryLabel = "유통기한" | "소비기한";
 
 export const SHIPPING_FEE_TYPE_LABEL: Record<ShippingFeeType, string> = {
   fixed: "고정 배송비",

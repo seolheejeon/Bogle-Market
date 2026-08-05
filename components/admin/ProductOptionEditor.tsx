@@ -94,7 +94,7 @@ export function ProductOptionEditor({
               그룹삭제
             </button>
           </div>
-          <div className="mb-2 flex gap-3 text-[12px] font-semibold text-text-muted">
+          <div className="mb-1 flex gap-3 text-[12px] font-semibold text-text-muted">
             <label className="flex items-center gap-1">
               <input type="checkbox" checked={g.required} onChange={(e) => updateGroup(gi, { required: e.target.checked })} />
               필수
@@ -104,6 +104,12 @@ export function ProductOptionEditor({
               중복선택
             </label>
           </div>
+          {!g.required && (
+            <p className="mb-2 text-[11px] text-text-muted">
+              필수 체크를 안 하면 고객이 이 옵션을 하나도 안 골라도 "담기"가 돼요 — 맛/사이즈처럼 반드시 골라야 하는
+              선택지라면 꼭 필수를 켜주세요.
+            </p>
+          )}
           <div className="flex flex-col gap-1.5">
             {g.values.map((v, vi) => (
               <div key={v.id} className="rounded-[7px] bg-bg-sunken p-1.5">

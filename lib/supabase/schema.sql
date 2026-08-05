@@ -79,6 +79,12 @@ create table if not exists products (
   weight text,
   storage text,
   eat text,
+  -- 유통기한/소비기한 — 법적으로 다른 개념이라 상품마다 어느 쪽으로 표기할지
+  -- expiry_label로 고르고, 값(expiry_value)은 "제조일로부터 7일"처럼 날짜가
+  -- 아닌 형태도 있어 자유 텍스트로 받는다. 둘 다 채워졌을 때만 상품 정보
+  -- 표에 노출된다(lib/data.ts 저장 로직 참고).
+  expiry_label text check (expiry_label is null or expiry_label in ('유통기한', '소비기한')),
+  expiry_value text,
   description text,
   -- 새 이벤트에 이 상품을 추가할 때 기본값으로 복사되는 기준 판매가. 공개
   -- 정보라(고객도 결국 event_products.price로 실제 판매가를 보게 됨) 다른
