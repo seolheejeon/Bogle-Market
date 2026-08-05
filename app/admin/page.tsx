@@ -183,7 +183,11 @@ export default function AdminHomePage() {
 
   // ---------- 오늘 할 일 타일 ----------
   const tiles = useMemo(() => {
-    const soldoutCount = events.reduce((s, e) => s + e.products.filter((p) => p.stock === 0).length, 0);
+    // 품절은 카탈로그 상품(재고) 기준으로 세야 한다 — 같은 상품이 여러
+    // 이벤트에 걸려있으면 리스팅별로 세면 중복 카운트된다(재고 하나를 여러
+    // 이벤트가 공유하므로). catalogProductId로 중복 제거.
+    const soldoutProductIds = new Set(events.flatMap((e) => e.products.filter((p) => p.stock === 0).map((p) => p.catalogProductId)));
+    const soldoutCount = soldoutProductIds.size;
     return [
       { key: "all_orders", label: "전체 주문", count: orders.length },
       { key: "wait", label: "입금대기 주문", count: orders.filter((o) => o.status === "wait").length },
@@ -201,7 +205,10 @@ export default function AdminHomePage() {
       },
       { key: "cancel_requested", label: "취소 요청", count: orders.filter((o) => o.cancelRequested).length },
       { key: "refund_requested", label: "반품/환불 요청", count: orders.filter((o) => o.status === "refund_requested").length },
-      { key: "soldout", label: "품절 상품", count: soldoutCount, href: "/admin/events" },
+      // 재고는 상품관리(카탈로그)에서 관리되고 이벤트관리에는 재고 표시가
+      // 없어서, 예전처럼 이벤트관리로 보내면 뭐가 품절인지 알 수 없었다 —
+      // 상품관리로 보내고 거기서 품절만 걸러 보여준다.
+      { key: "soldout", label: "품절 상품", count: soldoutCount, href: "/admin/products?soldout=1" },
       { key: "events", label: "진행중 이벤트", count: events.filter((e) => e.status !== "ended").length, href: "/admin/events" },
       { key: "events_ended", label: "종료 이벤트", count: events.filter((e) => e.status === "ended").length, href: "/admin/events" },
     ];

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { listCatalogProducts, createCatalogProduct, updateCatalogProduct, deleteCatalogProduct, listEvents, addEventProduct, removeEventProduct } from "@/lib/data";
 import type { CatalogProduct, EventBadge, FulfillmentType, MarketEvent, ProductDetailBlock, ProductOptionGroup, ShippingFeeType } from "@/types";
 import { EVENT_TYPE_LABEL, COURIER_OPTIONS, FULFILLMENT_TYPE_LABEL, SHIPPING_FEE_TYPE_LABEL } from "@/types";
@@ -23,11 +24,20 @@ import { formatPrice, formatEventDateChip } from "@/lib/format";
 // 이 상품을 쓰는 모든 이벤트가 그대로 공유한다(Epic 1 Phase 3) — 가격·노출만
 // 이벤트마다 다를 수 있어서 각 이벤트 관리 화면(/admin/events/[id])에서 정한다.
 export default function AdminProductsPage() {
+  const searchParams = useSearchParams();
   const [products, setProducts] = useState<CatalogProduct[] | null>(null);
   const [query, setQuery] = useState("");
+  // 운영 메인의 "품절 상품" 타일이 ?soldout=1로 들어온다 — 재고는 이벤트관리가
+  // 아니라 여기(카탈로그)에서 관리되는 값이라, 여기서 걸러서 보여줘야
+  // 실제로 뭐가 품절인지 알 수 있다.
+  const [soldoutOnly, setSoldoutOnly] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (searchParams.get("soldout") === "1") setSoldoutOnly(true);
+  }, [searchParams]);
 
   function refresh() {
     listCatalogProducts().then(setProducts);
@@ -37,8 +47,10 @@ export default function AdminProductsPage() {
   const filtered = useMemo(() => {
     if (!products) return [];
     const q = query.trim().toLowerCase();
-    return q === "" ? products : products.filter((p) => p.name.toLowerCase().includes(q));
-  }, [products, query]);
+    let result = q === "" ? products : products.filter((p) => p.name.toLowerCase().includes(q));
+    if (soldoutOnly) result = result.filter((p) => p.stock === 0);
+    return result;
+  }, [products, query, soldoutOnly]);
 
   async function onDelete(p: CatalogProduct) {
     if (!confirm(`"${p.name}" 상품을 삭제할까요?`)) return;
@@ -77,14 +89,25 @@ export default function AdminProductsPage() {
       )}
 
       <input
-        className="mb-3 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+        className="mb-2 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
         placeholder="상품명 검색"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
+      <button
+        type="button"
+        onClick={() => setSoldoutOnly((v) => !v)}
+        className={`mb-3 rounded-full border px-3 py-1.5 text-[12px] font-semibold ${
+          soldoutOnly ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"
+        }`}
+      >
+        품절만 보기
+      </button>
 
       {products === null && <p className="text-sm text-text-muted">불러오는 중...</p>}
-      {products !== null && filtered.length === 0 && <p className="text-sm text-text-muted">상품이 없어요.</p>}
+      {products !== null && filtered.length === 0 && (
+        <p className="text-sm text-text-muted">{soldoutOnly ? "품절된 상품이 없어요." : "상품이 없어요."}</p>
+      )}
       <div className="flex flex-col gap-2">
         {filtered.map((p) =>
           editingId === p.id ? (
@@ -108,6 +131,7 @@ export default function AdminProductsPage() {
                   <p className="flex items-center gap-1.5 truncate text-[13px] font-semibold">
                     {p.name}
                     <EventBadgeTag badge={p.badge} />
+                    {p.stock === 0 && <span className="shrink-0 rounded-md bg-red-100 px-1.5 py-0.5 text-[11px] font-bold text-red-600">품절</span>}
                   </p>
                   <p className="truncate text-[12px] text-text-muted">{[p.origin, p.weight, p.storage].filter(Boolean).join(" · ") || "추가 정보 없음"}</p>
                   <p className="truncate text-[11.5px] text-text-muted">
