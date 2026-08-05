@@ -551,9 +551,14 @@ export interface StoreSettings {
   inquiryChatUrl?: string;
   kakaoChannelUrl?: string;
   opentalkUrl?: string;
+  // 고객 알림 화면에서 알림이 보관되는 기간(일) — lib/notification-state.ts의
+  // isWithinRetention이 이 값 기준으로 지난 알림을 걸러낸다. 안 채우면 30일.
+  notificationRetentionDays?: number;
 }
 
 export const EMPTY_STORE_SETTINGS: StoreSettings = { bankName: "", accountNumber: "", accountHolder: "" };
+
+export const DEFAULT_NOTIFICATION_RETENTION_DAYS = 30;
 
 export function hasBankAccountInfo(settings: StoreSettings): boolean {
   return Boolean(settings.bankName.trim() && settings.accountNumber.trim() && settings.accountHolder.trim());

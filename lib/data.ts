@@ -1276,9 +1276,9 @@ export async function listAllProfiles(): Promise<Profile[]> {
 }
 
 // ---------- Addresses ----------
-// Only ever one address per member for now (their 기본 배송지) — modeled as
-// its own table with is_default from the start so adding multiple saved
-// addresses later is a UI change, not a schema change.
+// 회원당 여러 배송지를 저장할 수 있다(is_default가 그중 하나를 기본으로
+// 표시) — 마이페이지에서 추가/수정/삭제/기본설정하고, 체크아웃에서 그중
+// 하나를 골라 쓰거나 이번 주문만 새로 입력할 수 있다.
 
 export async function listAddresses(profileId: string): Promise<Address[]> {
   if (isSupabaseConfigured) {
@@ -1326,9 +1326,8 @@ export async function saveAddress(input: Omit<Address, "id">): Promise<Address> 
   return address;
 }
 
-// Updates the member's saved default address in place (used when checkout's
-// "기본 배송지로 저장" option is chosen instead of creating another row —
-// there's only ever the one address per member right now).
+// Updates one saved address row in place (used by 마이페이지 edit and by
+// checkout's "기본 배송지로 저장" option).
 export async function updateAddress(addressId: string, profileId: string, patch: Partial<Omit<Address, "id" | "profileId">>): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
@@ -1341,6 +1340,7 @@ export async function updateAddress(addressId: string, profileId: string, patch:
     if (patch.detailAddress !== undefined) row.detail_address = patch.detailAddress;
     if (patch.entranceMethod !== undefined) row.entrance_method = patch.entranceMethod || null;
     if (patch.memo !== undefined) row.memo = patch.memo || null;
+    if (patch.isDefault !== undefined) row.is_default = patch.isDefault;
     const { error } = await supabase.from("addresses").update(row).eq("id", addressId);
     if (error) throw error;
     return;
@@ -1348,6 +1348,43 @@ export async function updateAddress(addressId: string, profileId: string, patch:
   if (typeof window === "undefined") return;
   const existing = await listAddresses(profileId);
   const next = existing.map((a) => (a.id === addressId ? { ...a, ...patch } : a));
+  window.localStorage.setItem(`bogle_addresses_${profileId}`, JSON.stringify(next));
+}
+
+// 저장된 배송지 중 하나를 삭제한다. 지운 게 기본 배송지였고 다른 배송지가
+// 남아있으면, 남은 것 중 하나(가장 최근 것)를 자동으로 새 기본 배송지로
+// 승격한다 — 기본 배송지가 하나도 없는 상태로 남으면 체크아웃/마이페이지가
+// "저장된 배송지 없음"으로 잘못 보일 수 있어서다.
+export async function deleteAddress(addressId: string, profileId: string): Promise<void> {
+  const existing = await listAddresses(profileId);
+  const target = existing.find((a) => a.id === addressId);
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("addresses").delete().eq("id", addressId);
+    if (error) throw error;
+  } else if (typeof window !== "undefined") {
+    window.localStorage.setItem(`bogle_addresses_${profileId}`, JSON.stringify(existing.filter((a) => a.id !== addressId)));
+  }
+  const remaining = existing.filter((a) => a.id !== addressId);
+  if (target?.isDefault && remaining.length > 0) {
+    await setDefaultAddress(remaining[0].id, profileId);
+  }
+}
+
+// 여러 배송지 중 하나만 기본으로 지정한다 — 나머지는 모두 is_default를
+// false로 내려서 항상 기본 배송지가 최대 하나만 존재하도록 보장한다.
+export async function setDefaultAddress(addressId: string, profileId: string): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error: unsetError } = await supabase.from("addresses").update({ is_default: false }).eq("profile_id", profileId);
+    if (unsetError) throw unsetError;
+    const { error: setError } = await supabase.from("addresses").update({ is_default: true }).eq("id", addressId);
+    if (setError) throw setError;
+    return;
+  }
+  if (typeof window === "undefined") return;
+  const existing = await listAddresses(profileId);
+  const next = existing.map((a) => ({ ...a, isDefault: a.id === addressId }));
   window.localStorage.setItem(`bogle_addresses_${profileId}`, JSON.stringify(next));
 }
 
@@ -1376,6 +1413,7 @@ export async function updateStoreSettings(input: StoreSettings): Promise<void> {
       inquiry_chat_url: input.inquiryChatUrl || null,
       kakao_channel_url: input.kakaoChannelUrl || null,
       opentalk_url: input.opentalkUrl || null,
+      notification_retention_days: input.notificationRetentionDays ?? null,
       updated_at: new Date().toISOString(),
     });
     if (error) throw error;
@@ -1486,6 +1524,7 @@ function mapSupabaseStoreSettings(row: Record<string, any>): StoreSettings {
     inquiryChatUrl: row.inquiry_chat_url ?? undefined,
     kakaoChannelUrl: row.kakao_channel_url ?? undefined,
     opentalkUrl: row.opentalk_url ?? undefined,
+    notificationRetentionDays: row.notification_retention_days ?? undefined,
   };
 }
 

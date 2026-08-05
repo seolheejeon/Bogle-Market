@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { listNotifications } from "@/lib/data";
+import { listNotifications, getStoreSettings } from "@/lib/data";
 import { useAuth } from "@/lib/auth-context";
-import type { NotificationItem } from "@/types";
+import { DEFAULT_NOTIFICATION_RETENTION_DAYS, type NotificationItem } from "@/types";
 import { formatDateTime } from "@/lib/format";
 import { getReadIds, getDismissedIds, markRead, markAllRead, dismiss, dismissAll, isWithinRetention } from "@/lib/notification-state";
 import { isPushSupported, getNotificationPermission, enablePush, disablePush, getCurrentPushSubscription, PUSH_FAILURE_MESSAGE } from "@/lib/push";
@@ -101,15 +101,20 @@ export default function NotificationsPage() {
   const { profile } = useAuth();
   const [items, setItems] = useState<NotificationItem[] | null>(null);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [retentionDays, setRetentionDays] = useState(DEFAULT_NOTIFICATION_RETENTION_DAYS);
+
+  useEffect(() => {
+    getStoreSettings().then((s) => setRetentionDays(s.notificationRetentionDays ?? DEFAULT_NOTIFICATION_RETENTION_DAYS));
+  }, []);
 
   function refresh() {
     listNotifications(profile?.id ?? null).then((all) => {
       const dismissed = getDismissedIds();
-      setItems(all.filter((n) => !dismissed.has(n.id) && isWithinRetention(n.createdAt)));
+      setItems(all.filter((n) => !dismissed.has(n.id) && isWithinRetention(n.createdAt, retentionDays)));
       setReadIds(getReadIds());
     });
   }
-  useEffect(refresh, [profile]);
+  useEffect(refresh, [profile, retentionDays]);
 
   function open(n: NotificationItem) {
     markRead(n.id);

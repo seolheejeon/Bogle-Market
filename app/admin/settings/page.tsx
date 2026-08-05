@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getStoreSettings, updateStoreSettings } from "@/lib/data";
-import { EMPTY_STORE_SETTINGS, type StoreSettings } from "@/types";
+import { EMPTY_STORE_SETTINGS, DEFAULT_NOTIFICATION_RETENTION_DAYS, type StoreSettings } from "@/types";
 
 export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<StoreSettings>(EMPTY_STORE_SETTINGS);
@@ -33,6 +33,7 @@ export default function AdminSettingsPage() {
         inquiryChatUrl: settings.inquiryChatUrl?.trim() || undefined,
         kakaoChannelUrl: settings.kakaoChannelUrl?.trim() || undefined,
         opentalkUrl: settings.opentalkUrl?.trim() || undefined,
+        notificationRetentionDays: settings.notificationRetentionDays,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 1800);
@@ -100,6 +101,22 @@ export default function AdminSettingsPage() {
             placeholder="https://open.kakao.com/o/..."
             value={settings.opentalkUrl ?? ""}
             onChange={(e) => setSettings((s) => ({ ...s, opentalkUrl: e.target.value }))}
+          />
+        </label>
+      </div>
+
+      <p className="mt-5 mb-2 text-[12.5px] font-bold text-text-muted">알림</p>
+      <p className="mb-3 text-[12px] text-text-muted">고객 알림 화면에서 이 기간이 지난 알림은 자동으로 안 보여요.</p>
+      <div className="flex flex-col gap-2.5 rounded-xl border border-border p-4">
+        <label className="text-[12.5px] font-semibold text-text-muted">
+          알림 보관 기간 (일)
+          <input
+            className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+            type="number"
+            min={1}
+            placeholder={String(DEFAULT_NOTIFICATION_RETENTION_DAYS)}
+            value={settings.notificationRetentionDays ?? ""}
+            onChange={(e) => setSettings((s) => ({ ...s, notificationRetentionDays: e.target.value.trim() === "" ? undefined : Math.max(1, Number(e.target.value) || 1) }))}
           />
         </label>
       </div>

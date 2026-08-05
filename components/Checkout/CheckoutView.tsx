@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { listEvents, createOrder, getDefaultAddress, updateAddress } from "@/lib/data";
-import { formatAddress, type MarketEvent, type Order, type PaymentMethod, type Product } from "@/types";
+import { listEvents, createOrder, listAddresses, updateAddress, saveAddress, setDefaultAddress } from "@/lib/data";
+import { formatAddress, type Address, type MarketEvent, type Order, type PaymentMethod, type Product } from "@/types";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
 import { isEventOrderable } from "@/lib/order-policy";
 import { useCart, type CartLine } from "@/lib/cart-context";
@@ -30,7 +30,10 @@ export function CheckoutView() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState<AddressFieldsValue>(EMPTY_ADDRESS_FIELDS);
-  const [defaultAddressId, setDefaultAddressId] = useState<string | null>(null);
+  const [savedAddresses, setSavedAddresses] = useState<Address[]>([]);
+  // 저장된 배송지 중 고른 것의 id, 새로 입력하는 중이면 "new". 아직 저장된
+  // 배송지가 없는 회원(또는 게스트)도 "new"와 동일하게 동작한다.
+  const [selectedAddressId, setSelectedAddressId] = useState<string | "new">("new");
   const [saveAsDefault, setSaveAsDefault] = useState(false);
   const [pin, setPin] = useState("");
   // 배송유형(문고리/사다드림/택배)마다 결제 가능 수단이 달라서(사다드림은
@@ -57,24 +60,45 @@ export function CheckoutView() {
     listEvents().then(setEvents);
   }, []);
 
+  function fieldsFromAddress(addr: Address): AddressFieldsValue {
+    return {
+      zonecode: addr.zonecode,
+      roadAddress: addr.roadAddress,
+      apartmentName: addr.apartmentName,
+      detailAddress: addr.detailAddress,
+      entranceMethod: addr.entranceMethod ?? "",
+      memo: addr.memo ?? "",
+    };
+  }
+
   useEffect(() => {
     if (profile) {
       setName(profile.name);
       setPhone(profile.phone);
-      getDefaultAddress(profile.id).then((addr) => {
-        if (!addr) return;
-        setDefaultAddressId(addr.id);
-        setAddress({
-          zonecode: addr.zonecode,
-          roadAddress: addr.roadAddress,
-          apartmentName: addr.apartmentName,
-          detailAddress: addr.detailAddress,
-          entranceMethod: addr.entranceMethod ?? "",
-          memo: addr.memo ?? "",
-        });
+      listAddresses(profile.id).then((list) => {
+        setSavedAddresses(list);
+        const def = list.find((a) => a.isDefault) ?? list[0];
+        if (def) {
+          setSelectedAddressId(def.id);
+          setAddress(fieldsFromAddress(def));
+        }
       });
     }
   }, [profile]);
+
+  // 저장된 배송지 목록에서 하나를 고르면 그 내용을 채워 넣는다 — 그대로 써도
+  // 되고, 아래 필드를 손으로 더 고쳐서 "이번 주문만 다르게" 보낼 수도 있다.
+  function selectSavedAddress(a: Address) {
+    setSelectedAddressId(a.id);
+    setAddress(fieldsFromAddress(a));
+    setSaveAsDefault(false);
+  }
+
+  function selectNewAddress() {
+    setSelectedAddressId("new");
+    setAddress(EMPTY_ADDRESS_FIELDS);
+    setSaveAsDefault(false);
+  }
 
   const items = useMemo(() => {
     if (!events) return [];
@@ -202,15 +226,36 @@ export function CheckoutView() {
     setSubmitting(true);
     setFailureNotice(null);
     try {
-      if (profile && saveAsDefault && defaultAddressId) {
-        await updateAddress(defaultAddressId, profile.id, {
-          zonecode: address.zonecode,
-          roadAddress: address.roadAddress,
-          apartmentName: address.apartmentName,
-          detailAddress: address.detailAddress.trim(),
-          entranceMethod: address.entranceMethod.trim() || undefined,
-          memo: address.memo.trim() || undefined,
-        });
+      if (profile && saveAsDefault) {
+        if (selectedAddressId === "new") {
+          const created = await saveAddress({
+            profileId: profile.id,
+            name,
+            phone,
+            zonecode: address.zonecode,
+            roadAddress: address.roadAddress,
+            apartmentName: address.apartmentName,
+            detailAddress: address.detailAddress.trim(),
+            entranceMethod: address.entranceMethod.trim() || undefined,
+            memo: address.memo.trim() || undefined,
+            isDefault: savedAddresses.length === 0,
+          });
+          // 이미 기본 배송지가 있었다면 saveAddress는 새 행을 비-기본으로
+          // 만들 뿐이라, setDefaultAddress로 기존 기본을 정식으로 넘겨받는다
+          // (두 행이 동시에 기본으로 남는 걸 막기 위해).
+          if (savedAddresses.length > 0) await setDefaultAddress(created.id, profile.id);
+        } else {
+          await updateAddress(selectedAddressId, profile.id, {
+            zonecode: address.zonecode,
+            roadAddress: address.roadAddress,
+            apartmentName: address.apartmentName,
+            detailAddress: address.detailAddress.trim(),
+            entranceMethod: address.entranceMethod.trim() || undefined,
+            memo: address.memo.trim() || undefined,
+          });
+          const wasDefault = savedAddresses.find((a) => a.id === selectedAddressId)?.isDefault;
+          if (!wasDefault) await setDefaultAddress(selectedAddressId, profile.id);
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "배송지 저장 중 오류가 발생했어요.");
@@ -325,9 +370,32 @@ export function CheckoutView() {
         <div className="mb-2 flex flex-col gap-2">
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="받는 분 이름" value={name} onChange={(e) => setName(e.target.value)} />
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 (010-0000-0000)" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          {profile && savedAddresses.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              {savedAddresses.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => selectSavedAddress(a)}
+                  className={`rounded-[9px] border px-3 py-2.5 text-left text-[12.5px] ${selectedAddressId === a.id ? "border-accent bg-accent-soft" : "border-border"}`}
+                >
+                  {a.isDefault && <span className="mr-1.5 rounded-full bg-accent px-1.5 py-0.5 text-[10px] font-bold text-white">기본</span>}
+                  {a.roadAddress} {a.detailAddress}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={selectNewAddress}
+                className={`rounded-[9px] border px-3 py-2.5 text-left text-[12.5px] font-semibold ${selectedAddressId === "new" ? "border-accent bg-accent-soft" : "border-border text-text-muted"}`}
+              >
+                + 새 배송지 입력
+              </button>
+            </div>
+          )}
+
           <AddressFields value={address} onChange={(patch) => setAddress((v) => ({ ...v, ...patch }))} showEntranceMethod={needsEntranceMethod} />
 
-          {profile && defaultAddressId && (
+          {profile && (
             <div className="flex flex-col gap-1.5 rounded-[9px] border border-border p-2.5">
               <label className="flex items-center gap-2 text-[12.5px]">
                 <input type="radio" name="addr-save" checked={!saveAsDefault} onChange={() => setSaveAsDefault(false)} />
@@ -335,7 +403,7 @@ export function CheckoutView() {
               </label>
               <label className="flex items-center gap-2 text-[12.5px]">
                 <input type="radio" name="addr-save" checked={saveAsDefault} onChange={() => setSaveAsDefault(true)} />
-                이 배송지를 기본 배송지로 저장
+                {selectedAddressId === "new" ? "이 배송지를 새로 저장하고 기본으로 설정" : "이 배송지를 기본 배송지로 저장"}
               </label>
             </div>
           )}

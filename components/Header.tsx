@@ -6,7 +6,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCart } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
-import { listNotifications } from "@/lib/data";
+import { listNotifications, getStoreSettings } from "@/lib/data";
+import { DEFAULT_NOTIFICATION_RETENTION_DAYS } from "@/types";
 import { getReadIds, getDismissedIds, isWithinRetention, onNotificationStateChange } from "@/lib/notification-state";
 
 export function Header() {
@@ -14,18 +15,23 @@ export function Header() {
   const { profile } = useAuth();
   const pathname = usePathname();
   const [unread, setUnread] = useState(0);
+  const [retentionDays, setRetentionDays] = useState(DEFAULT_NOTIFICATION_RETENTION_DAYS);
+
+  useEffect(() => {
+    getStoreSettings().then((s) => setRetentionDays(s.notificationRetentionDays ?? DEFAULT_NOTIFICATION_RETENTION_DAYS));
+  }, []);
 
   useEffect(() => {
     function refresh() {
       listNotifications(profile?.id ?? null).then((all) => {
         const read = getReadIds();
         const dismissed = getDismissedIds();
-        setUnread(all.filter((n) => !read.has(n.id) && !dismissed.has(n.id) && isWithinRetention(n.createdAt)).length);
+        setUnread(all.filter((n) => !read.has(n.id) && !dismissed.has(n.id) && isWithinRetention(n.createdAt, retentionDays)).length);
       });
     }
     refresh();
     return onNotificationStateChange(refresh);
-  }, [profile, pathname]);
+  }, [profile, pathname, retentionDays]);
 
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-bg-card px-4 py-3">

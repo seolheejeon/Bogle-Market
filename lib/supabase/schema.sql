@@ -20,9 +20,9 @@ create table if not exists profiles (
 );
 
 -- Saved addresses. profile_id is null for guest orders (snapshot lives on the
--- order itself). Only ever one row per member for now (the member's single
--- 기본 배송지), but modeled as its own table with is_default from the start
--- so multiple saved addresses per member is a UI change, not a schema change.
+-- order itself). A member can have multiple rows here; is_default marks the
+-- one 마이페이지/체크아웃 preselects (RLS below already allows full CRUD by
+-- the owning profile, so adding rows needed no policy change).
 -- 주소는 Daum(카카오) 주소검색으로만 입력받는다 — road_address/zonecode는
 -- 검색 결과 그대로, apartment_name은 검색 결과가 공동주택일 때만 채워지는
 -- 값(사용자가 입력하는 항목이 아님)으로, 관리자가 아파트 단지별로 주문을
@@ -375,6 +375,9 @@ create table if not exists store_settings (
   inquiry_chat_url text,
   kakao_channel_url text,
   opentalk_url text,
+  -- 고객 알림 화면에서 알림이 보관되는 기간(일) — lib/notification-state.ts의
+  -- isWithinRetention이 이 값 기준으로 지난 알림을 걸러낸다.
+  notification_retention_days integer not null default 30,
   updated_at timestamptz not null default now()
 );
 

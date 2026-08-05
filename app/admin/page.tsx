@@ -15,6 +15,9 @@ const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", p
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = { wait: "입금확인", paid: "발주확인", confirmed: "배송시작", ship: "배송완료 처리" };
 const STATUS_OPTIONS: (OrderStatus | "all")[] = ["all", "wait", "paid", "confirmed", "ship", "done", "refund_requested", "refunded", "refund_rejected", "cancelled"];
 const PERIOD_DAYS: Record<string, number> = { "7": 7, "30": 30, "90": 90, "365": 365 };
+// "오늘 매출" 계산에서 제외할 상태 — 아직 입금 미확인(wait), 결과적으로
+// 돈이 안 남은 취소(cancelled), 돌려준 환불(refunded).
+const REVENUE_EXCLUDED_STATUSES = new Set<OrderStatus>(["wait", "cancelled", "refunded"]);
 
 // 주요 상태 전환 시 해당 주문 고객에게만(비회원 제외) 알림을 보낸다. 발주확인은
 // 고객이 딱히 할 일이 없는 내부 진행 상태라 알림을 보내지 않는다.
@@ -214,6 +217,16 @@ export default function AdminHomePage() {
     ];
   }, [orders, events, eventById]);
 
+  // 오늘 매출: 오늘 생성된 주문 중 실제로 돈이 걸려있는 것만 합산한다.
+  // 입금대기(wait)는 아직 입금이 확인 안 된 금액이라 매출로 잡으면 실제
+  // 입금액보다 부풀어 보이고, 취소/환불된 주문은 결과적으로 돈이 안 남았거나
+  // 돌려준 상태라 제외한다 — 그 사이(발주확인~반려)는 실제로 입금이 확인된
+  // 돈이라 그대로 포함한다.
+  const todayRevenue = useMemo(
+    () => orders.filter((o) => isToday(o.createdAt) && !REVENUE_EXCLUDED_STATUSES.has(o.status)).reduce((sum, o) => sum + o.total, 0),
+    [orders],
+  );
+
   // 타일을 누르면 그 타일이 뜻하는 주문만 정확히 보여야 한다 — 예전엔 배송방식
   // 필터/검색어/기간(기본 최근 30일)이 이전 상태 그대로 남아있어서, 타일
   // 숫자에는 잡히는 주문이 목록엔 하나도 안 뜨는 것처럼 보이는 버그가 있었다
@@ -336,6 +349,12 @@ export default function AdminHomePage() {
     <div>
       <p className="mb-1 text-[15px] font-bold">운영 메인</p>
       <p className="mb-4 text-[12.5px] text-text-muted">오늘 처리할 일을 누르면 아래 주문 목록이 그 조건으로 필터돼요.</p>
+
+      <div className="mb-4 rounded-xl border border-border p-3.5">
+        <p className="text-[11.5px] font-semibold text-text-muted">오늘 매출</p>
+        <p className="mt-0.5 text-xl font-extrabold">{formatPrice(todayRevenue)}</p>
+        <p className="mt-0.5 text-[11px] text-text-muted">입금대기·취소·환불 주문은 제외한 금액이에요.</p>
+      </div>
 
       <div className="mb-6 grid grid-cols-3 gap-2 sm:grid-cols-5">
         {tiles.map((t) =>

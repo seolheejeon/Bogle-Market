@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { listAddresses, updateAddress } from "@/lib/data";
+import { listAddresses, updateAddress, saveAddress, deleteAddress, setDefaultAddress } from "@/lib/data";
 import type { Address, Profile } from "@/types";
 import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
 import { SupportLinks } from "@/components/SupportLinks";
@@ -255,12 +255,11 @@ function ProfilePanel({
   changePassword: (newPassword: string) => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 }) {
-  // 배송지도 회원정보의 일부라는 판단 아래, "정보 수정" 하나로 프로필+배송지를
-  // 한 화면에서 같이 고친다(예전엔 배송지가 항상 펼쳐진 별도 카드였음). 요약
-  // 화면(!editing)에는 닉네임/휴대폰만 간단히 보여주고, 수정 화면은 아래 섹션
-  // 순서(기본 정보 → 배송지 → 비밀번호)로 구성해뒀다 — 나중에 "알림 설정"
-  // 같은 섹션을 추가하고 싶으면 비밀번호 섹션 앞뒤로 같은 모양의 블록만
-  // 하나 더 넣으면 된다.
+  // 기본 정보(이름/닉네임/휴대폰/비밀번호)는 "정보 수정" 토글로 한 번에
+  // 고친다. 배송지는 여러 개를 저장할 수 있어서 별도 섹션으로 분리하고,
+  // 각 배송지 카드마다 자기 자신만 수정/삭제/기본설정하는 식으로 둔다 —
+  // "정보 수정" 토글에 배송지까지 얹으면 하나 고치려고 전체를 편집모드로
+  // 돌려야 해서 번거롭다.
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(profile.name);
   const [nickname, setNickname] = useState(profile.nickname);
@@ -270,27 +269,24 @@ function ProfilePanel({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [savedAddress, setSavedAddress] = useState<Address | null>(null);
-  const [address, setAddress] = useState<AddressFieldsValue>(EMPTY_ADDRESS_FIELDS);
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [addressesLoading, setAddressesLoading] = useState(true);
+  // null이면 아무 배송지도 편집 중이 아님, "new"면 새 배송지 추가 폼,
+  // 그 외엔 그 id를 가진 기존 배송지를 수정 중.
+  const [editingAddressId, setEditingAddressId] = useState<string | "new" | null>(null);
+  const [addressDraft, setAddressDraft] = useState<AddressFieldsValue>(EMPTY_ADDRESS_FIELDS);
+  const [addressError, setAddressError] = useState<string | null>(null);
+  const [addressSaving, setAddressSaving] = useState(false);
 
-  function loadSavedAddress(def: Address | null) {
-    setSavedAddress(def);
-    setAddress(
-      def
-        ? {
-            zonecode: def.zonecode,
-            roadAddress: def.roadAddress,
-            apartmentName: def.apartmentName,
-            detailAddress: def.detailAddress,
-            entranceMethod: def.entranceMethod ?? "",
-            memo: def.memo ?? "",
-          }
-        : EMPTY_ADDRESS_FIELDS,
-    );
+  function refreshAddresses() {
+    return listAddresses(profile.id).then((list) => {
+      setAddresses(list);
+      setAddressesLoading(false);
+    });
   }
 
   useEffect(() => {
-    listAddresses(profile.id).then((addrs) => loadSavedAddress(addrs.find((a) => a.isDefault) ?? addrs[0] ?? null));
+    refreshAddresses();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id]);
 
@@ -299,7 +295,6 @@ function ProfilePanel({
     setNickname(profile.nickname);
     setPhone(profile.phone);
     setNewPassword("");
-    if (savedAddress) loadSavedAddress(savedAddress);
     setError(null);
     setEditing(true);
   }
@@ -308,10 +303,6 @@ function ProfilePanel({
     setError(null);
     if (!name.trim()) {
       setError("이름을 입력해 주세요.");
-      return;
-    }
-    if (!address.roadAddress.trim() || !address.detailAddress.trim() || !address.entranceMethod.trim()) {
-      setError("배송지(주소검색/상세주소/공동현관 출입방법)를 모두 입력해 주세요.");
       return;
     }
     setSaving(true);
@@ -328,16 +319,6 @@ function ProfilePanel({
           return;
         }
       }
-      if (savedAddress) {
-        await updateAddress(savedAddress.id, profile.id, {
-          zonecode: address.zonecode,
-          roadAddress: address.roadAddress,
-          apartmentName: address.apartmentName,
-          detailAddress: address.detailAddress.trim(),
-          entranceMethod: address.entranceMethod.trim(),
-          memo: address.memo.trim() || undefined,
-        });
-      }
       setNewPassword("");
       setEditing(false);
       setSaved(true);
@@ -346,6 +327,92 @@ function ProfilePanel({
       setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function startAddAddress() {
+    setEditingAddressId("new");
+    setAddressDraft(EMPTY_ADDRESS_FIELDS);
+    setAddressError(null);
+  }
+
+  function startEditAddress(a: Address) {
+    setEditingAddressId(a.id);
+    setAddressDraft({
+      zonecode: a.zonecode,
+      roadAddress: a.roadAddress,
+      apartmentName: a.apartmentName,
+      detailAddress: a.detailAddress,
+      entranceMethod: a.entranceMethod ?? "",
+      memo: a.memo ?? "",
+    });
+    setAddressError(null);
+  }
+
+  function cancelAddressEdit() {
+    setEditingAddressId(null);
+    setAddressError(null);
+  }
+
+  async function saveAddressDraft() {
+    setAddressError(null);
+    if (!addressDraft.roadAddress.trim() || !addressDraft.detailAddress.trim() || !addressDraft.entranceMethod.trim()) {
+      setAddressError("배송지(주소검색/상세주소/공동현관 출입방법)를 모두 입력해 주세요.");
+      return;
+    }
+    setAddressSaving(true);
+    try {
+      if (editingAddressId === "new") {
+        await saveAddress({
+          profileId: profile.id,
+          name: profile.name,
+          phone: profile.phone,
+          zonecode: addressDraft.zonecode,
+          roadAddress: addressDraft.roadAddress,
+          apartmentName: addressDraft.apartmentName,
+          detailAddress: addressDraft.detailAddress.trim(),
+          entranceMethod: addressDraft.entranceMethod.trim(),
+          memo: addressDraft.memo.trim() || undefined,
+          // 처음 저장하는 배송지라면 자동으로 기본 배송지가 된다 — 그 외엔
+          // 명시적으로 "기본으로 설정"을 눌러야 바뀐다(다른 배송지의 기본
+          // 지위를 조용히 뺏지 않기 위해).
+          isDefault: addresses.length === 0,
+        });
+      } else if (editingAddressId) {
+        await updateAddress(editingAddressId, profile.id, {
+          zonecode: addressDraft.zonecode,
+          roadAddress: addressDraft.roadAddress,
+          apartmentName: addressDraft.apartmentName,
+          detailAddress: addressDraft.detailAddress.trim(),
+          entranceMethod: addressDraft.entranceMethod.trim(),
+          memo: addressDraft.memo.trim() || undefined,
+        });
+      }
+      await refreshAddresses();
+      setEditingAddressId(null);
+    } catch (e) {
+      setAddressError(e instanceof Error ? e.message : "배송지 저장 중 오류가 발생했어요.");
+    } finally {
+      setAddressSaving(false);
+    }
+  }
+
+  async function removeAddress(a: Address) {
+    if (!confirm("이 배송지를 삭제할까요?")) return;
+    try {
+      await deleteAddress(a.id, profile.id);
+      await refreshAddresses();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "삭제 중 오류가 발생했어요.");
+    }
+  }
+
+  async function makeDefaultAddress(a: Address) {
+    try {
+      await setDefaultAddress(a.id, profile.id);
+      await refreshAddresses();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "기본 배송지 설정 중 오류가 발생했어요.");
     }
   }
 
@@ -379,11 +446,6 @@ function ProfilePanel({
             </div>
 
             <div className="flex flex-col gap-2">
-              <p className="text-[11.5px] font-bold text-text-muted">배송지</p>
-              <AddressFields value={address} onChange={(patch) => setAddress((v) => ({ ...v, ...patch }))} />
-            </div>
-
-            <div className="flex flex-col gap-2">
               <p className="text-[11.5px] font-bold text-text-muted">비밀번호 변경</p>
               <input
                 className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
@@ -403,6 +465,89 @@ function ProfilePanel({
                 취소
               </button>
             </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 rounded-xl border border-border p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[13px] font-bold">배송지 관리</p>
+          {editingAddressId === null && (
+            <button className="text-[12px] font-semibold text-accent-dark" onClick={startAddAddress}>
+              + 새 배송지 추가
+            </button>
+          )}
+        </div>
+        {addressesLoading ? (
+          <p className="text-[12px] text-text-muted">불러오는 중...</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {addresses.length === 0 && editingAddressId !== "new" && <p className="text-[12px] text-text-muted">저장된 배송지가 없어요.</p>}
+            {addresses.map((a) =>
+              editingAddressId === a.id ? (
+                <div key={a.id} className="rounded-[9px] border border-accent p-3">
+                  <div className="flex flex-col gap-2">
+                    <AddressFields value={addressDraft} onChange={(patch) => setAddressDraft((v) => ({ ...v, ...patch }))} />
+                    {addressError && <p className="text-[11.5px] font-semibold text-red-600">{addressError}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        className="flex-1 rounded-[8px] bg-accent py-2 text-[12px] font-bold text-white disabled:opacity-50"
+                        disabled={addressSaving}
+                        onClick={saveAddressDraft}
+                      >
+                        {addressSaving ? "저장 중..." : "저장"}
+                      </button>
+                      <button className="flex-1 rounded-[8px] border border-border py-2 text-[12px] font-semibold" onClick={cancelAddressEdit}>
+                        취소
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div key={a.id} className="rounded-[9px] border border-border p-3">
+                  <div className="flex items-center gap-1.5">
+                    {a.isDefault && <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10.5px] font-bold text-accent-dark">기본</span>}
+                    <p className="text-[12.5px] font-semibold">
+                      {a.roadAddress} {a.detailAddress}
+                    </p>
+                  </div>
+                  {a.apartmentName && <p className="mt-0.5 text-[11px] text-text-muted">🏢 {a.apartmentName}</p>}
+                  <div className="mt-2 flex gap-3 text-[11.5px] font-semibold">
+                    {!a.isDefault && (
+                      <button className="text-accent-dark" onClick={() => makeDefaultAddress(a)}>
+                        기본으로 설정
+                      </button>
+                    )}
+                    <button className="text-text-muted" onClick={() => startEditAddress(a)}>
+                      수정
+                    </button>
+                    <button className="text-red-600" onClick={() => removeAddress(a)}>
+                      삭제
+                    </button>
+                  </div>
+                </div>
+              ),
+            )}
+            {editingAddressId === "new" && (
+              <div className="rounded-[9px] border border-accent p-3">
+                <div className="flex flex-col gap-2">
+                  <AddressFields value={addressDraft} onChange={(patch) => setAddressDraft((v) => ({ ...v, ...patch }))} />
+                  {addressError && <p className="text-[11.5px] font-semibold text-red-600">{addressError}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      className="flex-1 rounded-[8px] bg-accent py-2 text-[12px] font-bold text-white disabled:opacity-50"
+                      disabled={addressSaving}
+                      onClick={saveAddressDraft}
+                    >
+                      {addressSaving ? "저장 중..." : "저장"}
+                    </button>
+                    <button className="flex-1 rounded-[8px] border border-border py-2 text-[12px] font-semibold" onClick={cancelAddressEdit}>
+                      취소
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -1,5 +1,7 @@
 "use client";
 
+import { DEFAULT_NOTIFICATION_RETENTION_DAYS } from "@/types";
+
 // Read/dismissed status is tracked per-browser via localStorage rather than
 // in the backend — it's a per-viewer concern, and doing it this way means it
 // works identically whether or not Supabase is configured (no join table,
@@ -9,14 +11,12 @@ const READ_KEY = "bogle_notification_reads";
 const DISMISSED_KEY = "bogle_notification_dismissed";
 
 // How long a notification stays visible before it's treated as expired.
-// Pulled out as its own constant so a future admin settings screen only
-// needs to change where this value comes from, not the filtering logic
-// itself.
-export const NOTIFICATION_RETENTION_DAYS = 30;
-
-export function isWithinRetention(createdAt: string): boolean {
+// Admin-adjustable via 설정 화면(StoreSettings.notificationRetentionDays) —
+// callers pass that value in and fall back to DEFAULT_NOTIFICATION_RETENTION_DAYS
+// (30) when settings haven't loaded yet or the admin hasn't set one.
+export function isWithinRetention(createdAt: string, retentionDays: number = DEFAULT_NOTIFICATION_RETENTION_DAYS): boolean {
   const ageMs = Date.now() - new Date(createdAt).getTime();
-  return ageMs <= NOTIFICATION_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  return ageMs <= retentionDays * 24 * 60 * 60 * 1000;
 }
 
 function loadIds(key: string): string[] {
