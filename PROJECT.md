@@ -925,8 +925,8 @@ $$;
 - [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 옵션값별 공급가(`product_option_costs` 테이블) 마이그레이션 미적용 — 안 해도 기존 기능은 그대로 동작하지만, 관리자 상품관리에서 "공급가조정"을 입력해도 저장이 안 됨. 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [ ] ⚠️ **(긴급/배포 차단)** 실제 Supabase 프로젝트에 반품/환불 확장(`orders.refund_*` 컬럼, `status` 체크 제약에 `refund_rejected` 추가, `user requests refund` RLS 정책, `request_guest_refund` RPC, `lookup_guest_orders` 함수 재정의, `refund-photos` 스토리지 버킷) 마이그레이션 미적용 — **적용 전까지는 "반품/환불 신청" 버튼이 지금 리포트하신 것과 똑같이 계속 안 먹음**(RLS가 이 update를 허용하지 않아서). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
 - [ ] ⚠️ **(배포 차단)** 실제 Supabase 프로젝트에 `product_recommendations` 테이블 마이그레이션 미적용 — 안 해도 다른 기능은 그대로 동작하지만, 관리자가 추천 상품을 추가해도 저장이 안 됨(읽기는 빈 목록으로 조용히 통과). 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
-- [ ] ⚠️ **(배포 차단)** 실제 Supabase 프로젝트에 `event_products.order_deadline_at` 컬럼 + `create_order` RPC 재정의 마이그레이션 미적용 — 안 해도 다른 기능은 그대로 동작하지만, "발주 마감 예약" 입력이 저장만 실패함. 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
-- [ ] ⚠️ **(배포 차단)** 실제 Supabase 프로젝트에 `products.discount`/`orders.discount_total` 컬럼 + `create_order` RPC 재정의 마이그레이션 미적용 — 안 해도 다른 기능은 그대로 동작하지만, 할인 정책을 설정해도 저장만 실패함. 대화에서 안내한 마이그레이션 SQL을 SQL 에디터에서 반드시 먼저 실행할 것
+- [x] ~~실제 Supabase 프로젝트에 `event_products.order_deadline_at` 컬럼 + `create_order` RPC 재정의 마이그레이션 미적용~~ → 실행 완료(최초 SQL은 `select ... into`가 Supabase Studio에 "새 테이블 생성"으로 오인식돼 실행이 깨졌던 문제가 있어 `for ... in loop` 방식으로 재작성한 버전으로 실행함, 위 "create_order RPC의 select...into가 Supabase Studio 오탐 유발" 항목 참고)
+- [x] ~~실제 Supabase 프로젝트에 `products.discount`/`orders.discount_total` 컬럼 + `create_order` RPC 재정의 마이그레이션 미적용~~ → 실행 완료(위와 동일한 SQL에 함께 포함되어 실행됨)
 
 # UX 결정사항
 
