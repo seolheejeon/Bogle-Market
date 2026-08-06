@@ -7,6 +7,7 @@ import { listCatalogProducts, createCatalogProduct, updateCatalogProduct, delete
 import type { CatalogProduct, EventBadge, ExpiryLabel, FulfillmentType, MarketEvent, ProductDetailBlock, ProductDiscount, ProductOptionGroup, ShippingFeeType } from "@/types";
 import { EVENT_TYPE_LABEL, COURIER_OPTIONS, FULFILLMENT_TYPE_LABEL, SHIPPING_FEE_TYPE_LABEL } from "@/types";
 import { describeDiscount } from "@/lib/discount";
+import { isEventAdminEnded } from "@/lib/order-policy";
 
 // 택배사 select에서 기본 목록(COURIER_OPTIONS)에 없는 값을 직접 입력할 때 쓰는
 // select 값 — 실제 저장값(courierCode)에는 절대 안 들어가고, 이 값이 select에
@@ -695,7 +696,11 @@ function ConnectedEventsPanel({ catalogProduct }: { catalogProduct: CatalogProdu
     .flatMap((e) => e.products.filter((p) => p.catalogProductId === catalogProduct.id).map((listing) => ({ event: e, listing })))
     .sort((a, b) => new Date(a.event.deliveryAt).getTime() - new Date(b.event.deliveryAt).getTime());
   const linkedEventIds = new Set(linked.map((l) => l.event.id));
-  const addableEvents = (events ?? []).filter((e) => !linkedEventIds.has(e.id));
+  // 마감(종료)된 이벤트는 이 빠른 추가 목록에서 뺀다 — 상품을 마감된
+  // 회차에 걸어봤자 노출도 주문도 안 되니 혼란만 준다. 정말 마감된
+  // 이벤트에 상품을 추가해야 하면(드문 경우) 이벤트 관리에서 먼저
+  // "재시작"으로 다시 열고 나서 여기서 추가하면 된다.
+  const addableEvents = (events ?? []).filter((e) => !linkedEventIds.has(e.id) && !isEventAdminEnded(e));
 
   async function unlink(listingId: string, eventTitle: string) {
     if (!confirm(`"${eventTitle}"에서 이 상품 연결을 해제할까요? (상품 자체는 삭제되지 않아요)`)) return;
