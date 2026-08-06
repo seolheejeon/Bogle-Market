@@ -20,6 +20,7 @@ export default function AdminEventsPage() {
   const [events, setEvents] = useState<MarketEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [extendingId, setExtendingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<StatusFilter>("all");
 
   function refresh() {
@@ -54,6 +55,16 @@ export default function AdminEventsPage() {
   async function onRestart(event: MarketEvent) {
     if (!confirm(`"${event.title}"을(를) 다시 진행중으로 되돌릴까요?`)) return;
     await updateEvent(event.id, { status: "open" });
+    refresh();
+  }
+
+  // 마감시간만 지나서 "마감"으로 자동 분류된 이벤트(status는 여전히
+  // open)는 status를 되돌릴 게 없어서 onRestart가 의미가 없다 — 이 경우
+  // "재시작"은 마감시간 자체를 미래로 늦춰서 목록에서 다시 "진행중"으로
+  // 보이게 하는 동작이어야 한다(지금 시각 기준으로 연장).
+  async function onExtendDeadline(event: MarketEvent, newDeadlineIso: string) {
+    await updateEvent(event.id, { deadlineAt: newDeadlineIso });
+    setExtendingId(null);
     refresh();
   }
 
@@ -136,9 +147,19 @@ export default function AdminEventsPage() {
                       재시작
                     </button>
                   ) : (
-                    <button onClick={() => onClose(e)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold text-red-600">
-                      종료
-                    </button>
+                    <>
+                      {ended && (
+                        <button
+                          onClick={() => setExtendingId(extendingId === e.id ? null : e.id)}
+                          className="rounded-[8px] border border-accent px-3 py-1.5 text-[12.5px] font-semibold text-accent-dark"
+                        >
+                          재시작
+                        </button>
+                      )}
+                      <button onClick={() => onClose(e)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold text-red-600">
+                        종료
+                      </button>
+                    </>
                   )}
                   <button onClick={() => onDelete(e.id)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12.5px] font-semibold text-red-600">
                     삭제
@@ -146,9 +167,64 @@ export default function AdminEventsPage() {
                 </div>
               </div>
               {duplicatingId === e.id && <DuplicateForm event={e} onDone={() => setDuplicatingId(null)} onCreated={refresh} />}
+              {extendingId === e.id && (
+                <ExtendDeadlineForm event={e} onDone={() => setExtendingId(null)} onExtend={(iso) => onExtendDeadline(e, iso)} />
+              )}
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// 마감시간만 지나 자동으로 "마감"이 된 이벤트를 다시 "진행중"으로 되돌리는
+// UI — status를 바꿀 게 없으니(이미 open) 마감시간을 지금 시각 기준으로
+// 얼마나 늦출지 고르게 한다. 자주 쓰는 짧은 연장은 버튼 한 번으로, 특정
+// 시각까지 늦추고 싶으면 직접 입력으로 처리한다.
+function ExtendDeadlineForm({ event, onDone, onExtend }: { event: MarketEvent; onDone: () => void; onExtend: (iso: string) => void }) {
+  const [custom, setCustom] = useState(toLocalInputValue(new Date(Date.now() + 24 * 3600 * 1000)));
+
+  const PRESETS = [
+    { label: "+1시간", hours: 1 },
+    { label: "+3시간", hours: 3 },
+    { label: "+6시간", hours: 6 },
+    { label: "+1일", hours: 24 },
+    { label: "+3일", hours: 72 },
+  ];
+
+  return (
+    <div className="mt-3 rounded-[10px] border border-accent bg-accent-soft p-3 text-[12.5px]">
+      <p className="mb-2 font-semibold text-text-muted">
+        마감시간이 지나서 "마감"으로 분류됐어요. 지금 시각 기준으로 얼마나 늦출까요?
+      </p>
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {PRESETS.map((p) => (
+          <button
+            key={p.label}
+            onClick={() => onExtend(new Date(Date.now() + p.hours * 3600 * 1000).toISOString())}
+            className="rounded-full border border-accent bg-bg-card px-3 py-1.5 text-[12.5px] font-bold text-accent-dark"
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="datetime-local"
+          className="rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+        />
+        <button
+          onClick={() => onExtend(new Date(custom).toISOString())}
+          className="rounded-[7px] bg-accent px-3 py-1.5 text-[12.5px] font-bold text-white"
+        >
+          이 시각으로 연장
+        </button>
+        <button onClick={onDone} className="rounded-[7px] border border-border px-3 py-1.5 text-[12.5px] font-semibold text-text-muted">
+          취소
+        </button>
       </div>
     </div>
   );
