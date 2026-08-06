@@ -107,6 +107,12 @@ export function OrderDetailModal({
               <span>{formatPrice(order.shippingFee)}</span>
             </div>
           )}
+          {order.discountTotal > 0 && (
+            <div className="flex justify-between text-accent-dark">
+              <span>할인</span>
+              <span>-{formatPrice(order.discountTotal)}</span>
+            </div>
+          )}
           <div className="flex justify-between text-[13.5px] font-bold">
             <span>총 결제금액</span>
             <span>{formatPrice(order.total)}</span>

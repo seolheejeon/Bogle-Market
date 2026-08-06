@@ -18,6 +18,7 @@ import { ProductGridCard } from "@/components/ProductGridCard";
 import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 import { flyToCart, showAddedToast } from "@/lib/cart-feedback";
+import { describeDiscount } from "@/lib/discount";
 
 export function ProductDetailView({ productId }: { productId: string }) {
   const router = useRouter();
@@ -291,6 +292,11 @@ export function ProductDetailView({ productId }: { productId: string }) {
 
         <p className="mt-2 text-[17px] font-extrabold">{product.name}</p>
         <p className="my-1.5 text-xl font-extrabold">{formatPrice(unitPriceWithOptions)}</p>
+        {product.discount && (
+          <p className="mb-1.5 -mt-1 inline-block rounded-[6px] bg-accent-soft px-1.5 py-0.5 text-[11.5px] font-bold text-accent-dark">
+            {describeDiscount(product.discount)}
+          </p>
+        )}
 
         {(product.optionGroups ?? []).length > 0 && (
           <div className="mb-4 flex flex-col gap-3">

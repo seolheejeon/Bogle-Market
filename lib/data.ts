@@ -83,6 +83,7 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     visible: listing.visible,
     closed: listing.closed ?? false,
     orderDeadlineAt: listing.orderDeadlineAt,
+    discount: catalog?.discount,
     optionGroups: mergeOptionStock(catalog?.optionGroups, listing.optionStock),
     // listing.optionStock은 이미 comboKey -> stock 맵이라 그대로 내려주면 된다.
     optionStockByCombo: listing.optionStock,
@@ -335,6 +336,7 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
         courier_code: input.courierCode ?? null,
         fulfillment_type: input.fulfillmentType ?? "same_day",
         ships_at: input.shipsAt ?? null,
+        discount: input.discount ?? null,
       })
       .select()
       .single();
@@ -396,6 +398,7 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     if ("courierCode" in patch) row.courier_code = patch.courierCode ?? null;
     if (patch.fulfillmentType !== undefined) row.fulfillment_type = patch.fulfillmentType;
     if ("shipsAt" in patch) row.ships_at = patch.shipsAt ?? null;
+    if ("discount" in patch) row.discount = patch.discount ?? null;
     if (Object.keys(row).length > 0) {
       const { error } = await supabase.from("products").update(row).eq("id", catalogProductId);
       if (error) {
@@ -837,6 +840,9 @@ export interface NewOrderInput {
   // 값을 그대로 스냅샷으로 저장해둔다. 안 주면 0(문고리/사다드림, 또는
   // 배송비 없는 택배).
   shippingFee?: number;
+  // 이 주문에 적용된 상품 할인 합계 — shippingFee와 같은 방식(클라이언트가
+  // 계산해서 그대로 넘기는 스냅샷)으로, 이미 total에서 차감된 값이다.
+  discountTotal?: number;
 }
 
 // 사다드림/특가처럼 STRICT_DEADLINE 정책인 이벤트만 마감 후 주문을 막는다 — 문고리/
@@ -915,6 +921,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
         stock_value_ids: item.stockComboValueIds ?? [],
       })),
       p_shipping_fee: input.shippingFee ?? 0,
+      p_discount_total: input.discountTotal ?? 0,
       p_road_address: input.roadAddress ?? null,
       p_detail_address: input.detailAddress ?? null,
       p_entrance_method: input.entranceMethod || null,
@@ -946,6 +953,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       tracking_number: null,
       total: input.total,
       shipping_fee: input.shippingFee ?? 0,
+      discount_total: input.discountTotal ?? 0,
       created_at: createdAt,
     };
     // 재고 차감은 create_order RPC 안에서 주문 생성과 같은 트랜잭션으로
@@ -993,6 +1001,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     items: input.items,
     total: input.total,
     shippingFee: input.shippingFee ?? 0,
+    discountTotal: input.discountTotal ?? 0,
     createdAt: new Date().toISOString(),
   };
   saveOrders([order, ...loadOrders()]);
@@ -1760,6 +1769,7 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     courierCode: row.courier_code ?? undefined,
     fulfillmentType: row.fulfillment_type ?? "same_day",
     shipsAt: row.ships_at ?? undefined,
+    discount: row.discount ?? undefined,
     // product_costs는 1:1 관계라 PostgREST가 보통 객체로 embed하지만, 관계
     // 감지 방식에 따라 배열로 올 수도 있어 양쪽 다 방어적으로 처리한다.
     // RLS상 비관리자에게는 이 값 자체가 null로 오므로 costPrice가 그냥
@@ -1808,6 +1818,7 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     visible: row.visible ?? true,
     closed: row.closed ?? false,
     orderDeadlineAt: row.order_deadline_at ?? undefined,
+    discount: catalog.discount ?? undefined,
     optionGroups: mergeSupabaseOptionStock(mapSupabaseOptionGroups(catalog.product_option_groups), row.event_option_stock),
     optionStockByCombo: optionStockByComboFromRows(row.event_option_stock),
   };
@@ -1875,6 +1886,7 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     items,
     total: row.total,
     shippingFee: row.shipping_fee ?? 0,
+    discountTotal: row.discount_total ?? 0,
     createdAt: row.created_at,
   };
 }

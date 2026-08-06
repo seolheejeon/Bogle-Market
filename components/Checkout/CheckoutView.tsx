@@ -11,6 +11,7 @@ import { useCart, type CartLine } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { unitPrice, findOverStockLines, optionSelectionLabel, buildOptionSnapshot, comboValueIds } from "@/lib/product-options";
 import { totalShippingFee } from "@/lib/shipping";
+import { groupDiscounts } from "@/lib/discount";
 import { getCurrentPushSubscription, sendPushToSelf } from "@/lib/push";
 import { PAYMENT_METHODS, allowedPaymentMethods } from "@/lib/payments";
 import { EVENT_TYPE_LABEL, type EventType } from "@/types";
@@ -150,6 +151,17 @@ export function CheckoutView() {
 
   const totalShippingAll = groups.reduce((sum, g) => sum + groupShippingFee(g), 0);
 
+  // 이 이벤트-주문에 적용되는 상품 할인 합계 — 배송비와 반대로 total에서
+  // 차감된다. 배송방식과 무관하게 적용되고(groupShippingFee와 달리 PARCEL로
+  // 거르지 않음), 같은 카탈로그 상품끼리만 묶어 계산한다(lib/discount.ts).
+  function groupDiscountAmount(group: { event: MarketEvent; items: typeof items }): number {
+    return groupDiscounts(
+      group.items.map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty, qty: i.line.qty })),
+    ).reduce((sum, g) => sum + g.amount, 0);
+  }
+
+  const totalDiscountAll = groups.reduce((sum, g) => sum + groupDiscountAmount(g), 0);
+
   // 결제수단은 이벤트가 아니라 실질 배송유형 기준으로 제한되므로(사다드림은
   // 무통장만) 장바구니 전체를 유형별로 다시 묶어서 결제수단 선택 UI와
   // 기본값 계산에 쓴다.
@@ -281,7 +293,8 @@ export function CheckoutView() {
     for (const group of groups) {
       const groupSubtotal = group.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
       const shippingFee = groupShippingFee(group);
-      const groupTotal = groupSubtotal + shippingFee;
+      const discountAmount = groupDiscountAmount(group);
+      const groupTotal = groupSubtotal + shippingFee - discountAmount;
       const groupNeedsEntranceMethod = group.items.some((i) => (i.product.deliveryType ?? group.event.type) !== "PARCEL");
       // 이벤트 하나는 실질 배송유형이 보통 하나로 통일돼 있으므로 대표로
       // 첫 상품의 유형을 기준삼아 그 유형에 맞게 선택된 결제수단을 적용한다.
@@ -319,6 +332,7 @@ export function CheckoutView() {
           })),
           total: groupTotal,
           shippingFee,
+          discountTotal: discountAmount,
         });
         newlySucceeded.push(order);
         // 성공한 그룹은 바로 장바구니에서 지운다 — 실패한 다른 그룹 때문에
@@ -452,7 +466,8 @@ export function CheckoutView() {
               0,
             );
             const typeShipping = typeGroups.reduce((sum, g) => sum + groupShippingFee(g), 0);
-            const typeTotal = typeSubtotal + typeShipping;
+            const typeDiscount = typeGroups.reduce((sum, g) => sum + groupDiscountAmount(g), 0);
+            const typeTotal = typeSubtotal + typeShipping - typeDiscount;
             const selected = methodFor(type);
             return (
               <div key={type} className="rounded-xl border border-border p-3">
@@ -467,6 +482,7 @@ export function CheckoutView() {
                   {typeGroups.map((g) => {
                     const groupSubtotal = g.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
                     const shippingFee = groupShippingFee(g);
+                    const discountAmount = groupDiscountAmount(g);
                     return (
                       <div key={g.event.id}>
                         <div className="mb-1 flex items-center justify-between">
@@ -490,10 +506,16 @@ export function CheckoutView() {
                             <span>{shippingFee > 0 ? formatPrice(shippingFee) : "무료"}</span>
                           </div>
                         )}
+                        {discountAmount > 0 && (
+                          <div className="mt-0.5 flex justify-between text-[11.5px] font-semibold text-accent-dark">
+                            <span>할인</span>
+                            <span>-{formatPrice(discountAmount)}</span>
+                          </div>
+                        )}
                         {typeGroups.length > 1 && (
                           <div className="mt-0.5 flex justify-between text-[11.5px] font-semibold">
                             <span>소계</span>
-                            <span>{formatPrice(groupSubtotal + shippingFee)}</span>
+                            <span>{formatPrice(groupSubtotal + shippingFee - discountAmount)}</span>
                           </div>
                         )}
                       </div>
@@ -536,9 +558,15 @@ export function CheckoutView() {
             </span>
           </div>
         )}
-        <div className={`flex justify-between text-base font-extrabold ${totalShippingAll > 0 ? "mt-1" : "mt-3.5 border-t border-border pt-3.5"}`}>
+        {totalDiscountAll > 0 && (
+          <div className={`flex justify-between text-[13px] text-accent-dark ${totalShippingAll > 0 ? "mt-1" : "mt-3.5 border-t border-border pt-3.5"}`}>
+            <span>할인</span>
+            <span>-{formatPrice(totalDiscountAll)}</span>
+          </div>
+        )}
+        <div className={`flex justify-between text-base font-extrabold ${totalShippingAll > 0 || totalDiscountAll > 0 ? "mt-1" : "mt-3.5 border-t border-border pt-3.5"}`}>
           <span>총 주문 금액</span>
-          <span>{formatPrice(total + totalShippingAll)}</span>
+          <span>{formatPrice(total + totalShippingAll - totalDiscountAll)}</span>
         </div>
 
         {error && <p className="mt-3 text-[12.5px] font-semibold text-red-600">{error}</p>}

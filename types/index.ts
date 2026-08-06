@@ -162,7 +162,22 @@ export interface CatalogProduct {
   // 지금은 이 배열이 곧 최종 추천 목록이지만, 나중엔 이 필드는 "관리자가 강제
   // 고정한 것"만 의미하고 자동 계산분과 합쳐지는 식으로 확장할 수 있다.
   recommendedProductIds?: string[];
+  // 수량 기반 할인 정책 — 상품마다 하나만 설정 가능(동시에 여러 개 중첩 안 됨).
+  // 종류별로 필요한 값이 달라 태그된 유니온으로 표현하고, 계산은
+  // lib/discount.ts의 calculateDiscount()가 전담한다. 나중에 새 정책 종류를
+  // 추가하고 싶으면 이 유니온에 케이스 하나만 늘리면 된다.
+  discount?: ProductDiscount;
 }
+
+export type ProductDiscount =
+  // N개 이상 구매 시 총액에서 정액 할인 (예: "2개 이상 구매 시 1,000원 할인")
+  | { type: "qty_threshold"; minQty: number; amountOff: number }
+  // 수량과 무관하게 개당 정액 할인 (예: "개당 500원 할인")
+  | { type: "per_unit"; amountOff: number }
+  // buyQty개 구매할 때마다 1개를 무료로 (예: "2개 사면 1개 무료" → buyQty=2)
+  | { type: "n_plus_1"; buyQty: number }
+  // bundleQty개를 묶어서 bundlePrice원에 (예: "3개 묶음 9,900원")
+  | { type: "bundle"; bundleQty: number; bundlePrice: number };
 
 // 이벤트에 실제로 노출되는 상품(리스팅) — 카탈로그 상품 하나를 이번 회차에
 // 어떤 가격/재고/노출 여부로 팔지 나타낸다. 장바구니/주문/재고 차감은 전부
@@ -234,6 +249,9 @@ export interface Product {
   // id,260 id")이 된다 — 예전엔 값 하나하나의 재고를 각각 차감해서, 색상+사이즈처럼
   // 옵션이 2개 이상일 때 서로 다른 조합끼리 재고가 잘못 간섭하는 문제가 있었다.
   optionStockByCombo?: Record<string, number>;
+  // 카탈로그(CatalogProduct.discount)에서 그대로 내려오는 값 — 리스팅마다
+  // 달라지지 않는다(origin/weight/badge와 동일한 성격).
+  discount?: ProductDiscount;
 }
 
 // 상품 카드/상세에 붙는 표시용 뱃지 — 관리자가 상품 관리(CatalogProduct.badge)
@@ -448,6 +466,10 @@ export interface Order {
   // 이 주문에 포함된 택배 배송비 스냅샷(무료배송 적용 후 값) — total에 이미
   // 더해져 있다. 문고리/사다드림 주문이나 배송비 없는 택배 주문은 0.
   shippingFee: number;
+  // 이 주문에 적용된 상품 할인 합계 스냅샷 — total은 이미 이 값을 뺀 뒤의
+  // 금액이다(shippingFee와 반대로 차감). 할인 없으면 0. shippingFee와 동일하게
+  // 클라이언트가 계산해서 그대로 넘기는 값(주문 시점 가격 정책 스냅샷 방식).
+  discountTotal: number;
   createdAt: string; // ISO
 }
 

@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { listCatalogProducts, createCatalogProduct, updateCatalogProduct, deleteCatalogProduct, listEvents, addEventProduct, removeEventProduct } from "@/lib/data";
-import type { CatalogProduct, EventBadge, ExpiryLabel, FulfillmentType, MarketEvent, ProductDetailBlock, ProductOptionGroup, ShippingFeeType } from "@/types";
+import type { CatalogProduct, EventBadge, ExpiryLabel, FulfillmentType, MarketEvent, ProductDetailBlock, ProductDiscount, ProductOptionGroup, ShippingFeeType } from "@/types";
 import { EVENT_TYPE_LABEL, COURIER_OPTIONS, FULFILLMENT_TYPE_LABEL, SHIPPING_FEE_TYPE_LABEL } from "@/types";
+import { describeDiscount } from "@/lib/discount";
 
 // 택배사 select에서 기본 목록(COURIER_OPTIONS)에 없는 값을 직접 입력할 때 쓰는
 // select 값 — 실제 저장값(courierCode)에는 절대 안 들어가고, 이 값이 select에
@@ -144,6 +145,7 @@ export default function AdminProductsPage() {
                     재고 {p.stock !== undefined ? `${p.stock}개` : "무제한"}
                     {(p.minQty ?? 1) > 1 && ` · 최소 ${p.minQty}개`}
                     {(p.shippingFee ?? 0) > 0 && ` · 배송비 ${formatPrice(p.shippingFee ?? 0)}`}
+                    {p.discount && ` · ${describeDiscount(p.discount)}`}
                   </p>
                 </div>
                 <div className="flex flex-wrap justify-end gap-1.5">
@@ -219,6 +221,17 @@ function CatalogProductForm({
   const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>(initial?.detailBlocks ?? []);
   const [optionGroups, setOptionGroups] = useState<ProductOptionGroup[]>(initial?.optionGroups ?? []);
   const [recommendedIds, setRecommendedIds] = useState<string[]>(initial?.recommendedProductIds ?? []);
+  // 할인 정책 — 상품당 하나만 설정 가능(중첩 안 됨, lib/discount.ts 참고).
+  // 종류별로 필요한 입력이 달라 필드를 전부 미리 만들어두고 discountType에
+  // 맞는 것만 화면에 보여준다 — 저장 시(submit)에만 선택된 종류에 맞게 조립한다.
+  const [discountType, setDiscountType] = useState<ProductDiscount["type"] | "">(initial?.discount?.type ?? "");
+  const [discountMinQty, setDiscountMinQty] = useState(initial?.discount?.type === "qty_threshold" ? String(initial.discount.minQty) : "2");
+  const [discountAmountOff, setDiscountAmountOff] = useState(
+    initial?.discount?.type === "qty_threshold" || initial?.discount?.type === "per_unit" ? String(initial.discount.amountOff) : "",
+  );
+  const [discountBuyQty, setDiscountBuyQty] = useState(initial?.discount?.type === "n_plus_1" ? String(initial.discount.buyQty) : "2");
+  const [discountBundleQty, setDiscountBundleQty] = useState(initial?.discount?.type === "bundle" ? String(initial.discount.bundleQty) : "3");
+  const [discountBundlePrice, setDiscountBundlePrice] = useState(initial?.discount?.type === "bundle" ? String(initial.discount.bundlePrice) : "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -262,6 +275,7 @@ function CatalogProductForm({
         // 이름을 안 채운 그룹/값은 저장하지 않는다(에디터에서 빈 값으로 남겨둔 것).
         optionGroups: optionGroups.filter((g) => g.name.trim()).map((g) => ({ ...g, values: g.values.filter((v) => v.name.trim()) })),
         recommendedProductIds: recommendedIds,
+        discount: buildDiscount(),
       });
       console.log("[상품 저장] DB 저장 완료");
     } catch (e) {
@@ -272,6 +286,31 @@ function CatalogProductForm({
       console.log("[상품 저장] 종료(응답 반환)");
     }
   }
+
+  // 선택된 discountType과 해당 종류의 입력값들로 ProductDiscount를 조립한다.
+  // 금액/수량이 비었거나 0이면 저장하지 않음(할인 없음과 동일하게 취급).
+  function buildDiscount(): ProductDiscount | undefined {
+    if (discountType === "qty_threshold") {
+      const minQty = Math.max(2, Number(discountMinQty) || 2);
+      const amountOff = Math.max(0, Number(discountAmountOff) || 0);
+      return amountOff > 0 ? { type: "qty_threshold", minQty, amountOff } : undefined;
+    }
+    if (discountType === "per_unit") {
+      const amountOff = Math.max(0, Number(discountAmountOff) || 0);
+      return amountOff > 0 ? { type: "per_unit", amountOff } : undefined;
+    }
+    if (discountType === "n_plus_1") {
+      const buyQty = Math.max(1, Number(discountBuyQty) || 1);
+      return { type: "n_plus_1", buyQty };
+    }
+    if (discountType === "bundle") {
+      const bundleQty = Math.max(2, Number(discountBundleQty) || 2);
+      const bundlePrice = Math.max(0, Number(discountBundlePrice) || 0);
+      return bundlePrice > 0 ? { type: "bundle", bundleQty, bundlePrice } : undefined;
+    }
+    return undefined;
+  }
+  const discountPreview = buildDiscount();
 
   return (
     <div className="flex flex-col gap-3">
@@ -378,6 +417,93 @@ function CatalogProductForm({
             아니라 실제 공급가도 다르면(예: 110g 8,000원/390g 24,000원) 기준 원가를 0으로 두고 공급가조정에 각 옵션의 실제 공급가를
             그대로 입력하면 돼요.
           </p>
+        </div>
+        <div className="mt-3">
+          <p className="mb-1.5 text-[12px] font-bold text-text-muted">수량 할인 (상품당 하나만 설정할 수 있어요)</p>
+          <select
+            className="w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+            value={discountType}
+            onChange={(e) => setDiscountType(e.target.value as ProductDiscount["type"] | "")}
+          >
+            <option value="">할인 없음</option>
+            <option value="qty_threshold">N개 이상 구매 시 정액 할인</option>
+            <option value="per_unit">개당 정액 할인</option>
+            <option value="n_plus_1">N개 사면 1개 무료</option>
+            <option value="bundle">묶음 할인</option>
+          </select>
+          {discountType === "qty_threshold" && (
+            <div className="mt-2 flex gap-2">
+              <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
+                최소 수량
+                <input
+                  className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                  type="number"
+                  min={2}
+                  value={discountMinQty}
+                  onChange={(e) => setDiscountMinQty(e.target.value)}
+                />
+              </label>
+              <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
+                할인 금액(원)
+                <input
+                  className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                  type="number"
+                  min={0}
+                  value={discountAmountOff}
+                  onChange={(e) => setDiscountAmountOff(e.target.value)}
+                />
+              </label>
+            </div>
+          )}
+          {discountType === "per_unit" && (
+            <label className="mt-2 block text-[11.5px] font-semibold text-text-muted">
+              개당 할인 금액(원)
+              <input
+                className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                type="number"
+                min={0}
+                value={discountAmountOff}
+                onChange={(e) => setDiscountAmountOff(e.target.value)}
+              />
+            </label>
+          )}
+          {discountType === "n_plus_1" && (
+            <label className="mt-2 block text-[11.5px] font-semibold text-text-muted">
+              N개 사면 1개 무료 — N
+              <input
+                className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                type="number"
+                min={1}
+                value={discountBuyQty}
+                onChange={(e) => setDiscountBuyQty(e.target.value)}
+              />
+            </label>
+          )}
+          {discountType === "bundle" && (
+            <div className="mt-2 flex gap-2">
+              <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
+                묶음 수량
+                <input
+                  className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                  type="number"
+                  min={2}
+                  value={discountBundleQty}
+                  onChange={(e) => setDiscountBundleQty(e.target.value)}
+                />
+              </label>
+              <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
+                묶음 가격(원)
+                <input
+                  className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                  type="number"
+                  min={0}
+                  value={discountBundlePrice}
+                  onChange={(e) => setDiscountBundlePrice(e.target.value)}
+                />
+              </label>
+            </div>
+          )}
+          {discountPreview && <p className="mt-1.5 text-[11px] text-accent-dark">미리보기: {describeDiscount(discountPreview)}</p>}
         </div>
       </section>
 

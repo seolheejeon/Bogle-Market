@@ -124,6 +124,14 @@ create table if not exists products (
   courier_code text,
   fulfillment_type text not null default 'same_day' check (fulfillment_type in ('same_day', 'rolling', 'scheduled')),
   ships_at date,
+  -- 수량 기반 할인 정책 — 상품(카탈로그) 단위, 상품당 하나만 설정 가능(중첩
+  -- 안 됨). 종류별로 필요한 값이 달라 {type, ...} 모양의 jsonb 하나로 저장하고
+  -- 계산은 애플리케이션(lib/discount.ts)이 전담한다 — shipping_fee처럼 여러
+  -- 컬럼으로 쪼개지 않은 이유는 종류가 늘어날수록 컬럼이 계속 늘어나는 걸
+  -- 피하기 위함. null이면 할인 없음. 예: {"type":"qty_threshold","minQty":2,
+  -- "amountOff":1000} / {"type":"per_unit","amountOff":500} /
+  -- {"type":"n_plus_1","buyQty":2} / {"type":"bundle","bundleQty":3,"bundlePrice":9900}
+  discount jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -333,6 +341,10 @@ create table if not exists orders (
   -- 바뀌어도 과거 주문 내역이 영향받지 않도록 따로 기록해둔다(price_snapshot과
   -- 같은 이유). 문고리/사다드림 주문이나 배송비가 없는 택배 주문은 0.
   shipping_fee integer not null default 0 check (shipping_fee >= 0),
+  -- 이 주문에 적용된 상품 할인 합계 스냅샷 — shipping_fee와 반대로 total에서
+  -- 이미 차감되어 있는 값이다(products.discount 정책이 나중에 바뀌어도 과거
+  -- 주문 내역이 영향받지 않도록 스냅샷으로 기록). 할인이 없으면 0.
+  discount_total integer not null default 0 check (discount_total >= 0),
   created_at timestamptz not null default now()
 );
 
@@ -855,7 +867,8 @@ create or replace function create_order(
   p_road_address text default null,
   p_detail_address text default null,
   p_entrance_method text default null,
-  p_delivery_memo text default null
+  p_delivery_memo text default null,
+  p_discount_total integer default 0
 )
 returns void
 language plpgsql
@@ -933,11 +946,11 @@ begin
   insert into orders (
     id, order_number, event_id, batch_id, profile_id, guest_name, guest_phone, guest_pin,
     recipient_name, recipient_phone, address_snapshot, road_address, detail_address, entrance_method, delivery_memo,
-    apartment_name, payment_method, status, total, shipping_fee, created_at
+    apartment_name, payment_method, status, total, shipping_fee, discount_total, created_at
   ) values (
     p_id, p_order_number, p_event_id, p_batch_id, p_profile_id, p_guest_name, p_guest_phone, p_guest_pin,
     p_recipient_name, p_recipient_phone, p_address_snapshot, p_road_address, p_detail_address, p_entrance_method, p_delivery_memo,
-    p_apartment_name, p_payment_method, 'wait', p_total, p_shipping_fee, p_created_at
+    p_apartment_name, p_payment_method, 'wait', p_total, p_shipping_fee, p_discount_total, p_created_at
   );
 
   insert into order_items (order_id, event_product_id, product_name, price_snapshot, quantity, options, stock_value_ids)
