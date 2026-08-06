@@ -13,6 +13,7 @@ import { ProductDetailContent } from "@/components/Product/ProductDetailContent"
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { ShareButton } from "@/components/ShareButton";
+import { WishlistButton } from "@/components/WishlistButton";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { ProductGridCard } from "@/components/ProductGridCard";
 import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
@@ -251,6 +252,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
           </p>
           <p className="truncate text-[13.5px] leading-tight font-extrabold">{product.name}</p>
         </div>
+        <WishlistButton productId={product.id} />
         <ShareButton productId={product.id} name={product.name} />
       </div>
       <div className="p-4">

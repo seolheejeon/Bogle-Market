@@ -6,6 +6,7 @@ import { ProductPhoto } from "@/components/ProductPhoto";
 import { EventBadgeTag } from "@/components/Badge";
 import { hasRequiredOptions } from "@/lib/product-options";
 import { isListingOrderable } from "@/lib/order-policy";
+import { WishlistButton } from "@/components/WishlistButton";
 
 // 색상/사이즈처럼 반드시 골라야 하는 옵션이 있는 상품은 그리드에서 바로
 // 수량을 못 담는다(어떤 옵션 조합인지 알 수 없어서) — 대신 상품 상세로
@@ -21,20 +22,26 @@ export function ProductGridCard({ product, rankBadge, closed }: { product: Produ
   const optionsRequired = hasRequiredOptions(product);
   return (
     <div>
-      <Link href={`/product/${product.id}`} className="relative block">
-        <ProductPhoto
-          photo={product.photos?.[0] ?? product.emoji}
-          className="flex aspect-square w-full items-center justify-center rounded-xl bg-accent-soft text-[58px] leading-none"
+      <div className="relative">
+        <Link href={`/product/${product.id}`} className="block">
+          <ProductPhoto
+            photo={product.photos?.[0] ?? product.emoji}
+            className="flex aspect-square w-full items-center justify-center rounded-xl bg-accent-soft text-[58px] leading-none"
+          />
+          {rankBadge && (
+            <span className="absolute top-1.5 left-1.5 rounded-md bg-accent px-2 py-1 text-[12px] font-extrabold text-white">{rankBadge}</span>
+          )}
+          {product.badge && product.badge !== "NONE" && (
+            <span className="absolute top-1.5 right-1.5">
+              <EventBadgeTag badge={product.badge} />
+            </span>
+          )}
+        </Link>
+        <WishlistButton
+          productId={product.id}
+          className="absolute right-1.5 bottom-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-bg-card/90 text-[14px] shadow-sm"
         />
-        {rankBadge && (
-          <span className="absolute top-1.5 left-1.5 rounded-md bg-accent px-2 py-1 text-[12px] font-extrabold text-white">{rankBadge}</span>
-        )}
-        {product.badge && product.badge !== "NONE" && (
-          <span className="absolute top-1.5 right-1.5">
-            <EventBadgeTag badge={product.badge} />
-          </span>
-        )}
-      </Link>
+      </div>
       <Link href={`/product/${product.id}`} className="mt-1.5 mb-0.5 block text-[13.5px] font-semibold">
         {product.name}
       </Link>

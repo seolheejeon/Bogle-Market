@@ -28,6 +28,7 @@ import { formatPrice, formatEventDateChip } from "@/lib/format";
 export default function AdminProductsPage() {
   const searchParams = useSearchParams();
   const [products, setProducts] = useState<CatalogProduct[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   // 운영 메인의 "품절 상품" 타일이 ?soldout=1로 들어온다 — 재고는 이벤트관리가
   // 아니라 여기(카탈로그)에서 관리되는 값이라, 여기서 걸러서 보여줘야
@@ -41,8 +42,15 @@ export default function AdminProductsPage() {
     if (searchParams.get("soldout") === "1") setSoldoutOnly(true);
   }, [searchParams]);
 
+  // listCatalogProducts()가 실패하면(예: 마이그레이션 미적용으로 존재하지
+  // 않는 테이블/컬럼을 조회) .then만 있고 .catch가 없어서 products가 계속
+  // null로 남아 "불러오는 중..."에서 영원히 멈춰있던 문제가 있었다 — 실패도
+  // 화면에 원인과 함께 보이도록 명시적으로 처리한다.
   function refresh() {
-    listCatalogProducts().then(setProducts);
+    setLoadError(null);
+    listCatalogProducts()
+      .then(setProducts)
+      .catch((e) => setLoadError(e instanceof Error ? e.message : "상품 목록을 불러오지 못했어요."));
   }
   useEffect(refresh, []);
 
@@ -107,7 +115,12 @@ export default function AdminProductsPage() {
         품절만 보기
       </button>
 
-      {products === null && <p className="text-sm text-text-muted">불러오는 중...</p>}
+      {loadError && (
+        <p className="mb-3 rounded-[9px] bg-bg-sunken px-3 py-2.5 text-[12px] font-semibold text-red-600">
+          상품 목록을 불러오지 못했어요: {loadError}
+        </p>
+      )}
+      {products === null && !loadError && <p className="text-sm text-text-muted">불러오는 중...</p>}
       {products !== null && filtered.length === 0 && (
         <p className="text-sm text-text-muted">{soldoutOnly ? "품절된 상품이 없어요." : "상품이 없어요."}</p>
       )}
