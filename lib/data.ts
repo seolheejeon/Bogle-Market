@@ -296,7 +296,7 @@ export async function listCatalogProducts(): Promise<CatalogProduct[]> {
     const { data, error } = await supabase
       .from("products")
       .select(
-        "*, product_costs(cost_price), product_option_groups(*, product_option_values(*, product_option_costs(cost_delta))), product_recommendations(recommended_product_id, sort_order)",
+        "*, product_costs(cost_price), product_option_groups(*, product_option_values(*, product_option_costs(cost_delta))), product_recommendations!product_recommendations_product_id_fkey(recommended_product_id, sort_order)",
       )
       .order("name", { ascending: true });
     if (error) throw error;
