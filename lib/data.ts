@@ -45,6 +45,7 @@ import type {
 import { EMPTY_STORE_SETTINGS } from "@/types";
 import { isEventOrderable } from "@/lib/order-policy";
 import { generateStockCombos, comboValueIds } from "@/lib/product-options";
+import { resolveListingId } from "@/lib/banner-link";
 
 // 이벤트 리스팅(EventProductSeed/event_products 행)과 카탈로그 상품을 합쳐서
 // 화면이 쓰는 평평한 Product로 만든다. mock/Supabase 두 모드 모두 최종적으로
@@ -149,6 +150,48 @@ export async function findProductWithEvent(productId: string): Promise<{ product
   return null;
 }
 
+// 관리자가 고른 "같이 구매하면 좋은 상품"을 상품 상세 화면이 바로 카드로
+// 그릴 수 있는 실제 리스팅(Product)으로 해석해서 돌려준다. 추천은 카탈로그
+// 상품 id로 저장돼 있어서(여러 이벤트에 걸쳐 공유), 지금 담을 수 있는
+// 리스팅으로 매번 다시 찾아야 한다 — resolveListingId가 이미 배너/알림에서
+// 쓰던 "카탈로그 id -> 가장 적합한 리스팅" 해석을 그대로 재사용한다. 지금
+// 걸린 이벤트가 하나도 없는 추천 상품은 조용히 목록에서 빠진다.
+export async function getRecommendedProducts(catalogProductId: string): Promise<Product[]> {
+  let ids: string[];
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase
+      .from("product_recommendations")
+      .select("recommended_product_id, sort_order")
+      .eq("product_id", catalogProductId)
+      .order("sort_order", { ascending: true });
+    if (error) throw error;
+    ids = (data ?? []).map((r) => r.recommended_product_id);
+  } else {
+    ids = loadCatalogProducts().find((c) => c.id === catalogProductId)?.recommendedProductIds ?? [];
+  }
+  if (ids.length === 0) return [];
+  const events = await listEvents();
+  const allListings = events.flatMap((e) => e.products);
+  return ids
+    .map((id) => resolveListingId(id, events))
+    .filter((listingId): listingId is string => listingId !== null)
+    .map((listingId) => allListings.find((p) => p.id === listingId))
+    .filter((p): p is Product => p !== undefined);
+}
+
+// 리스팅(Product) id 목록을 실제 Product로 되돌린다 — 최근 본 상품/찜한
+// 상품처럼 "그때 본 특정 리스팅"을 그대로 다시 보여줘야 하는 곳에서 쓴다
+// (추천 상품과 달리 카탈로그 id로 재해석하지 않음 — 그 리스팅 자체가 이미
+// 지워졌거나 다른 이벤트로 옮겨간 경우는 조용히 목록에서 빠진다). 순서는
+// 넘긴 id 순서를 그대로 유지한다(최근 본 순서 등 호출부가 이미 정렬해서 줌).
+export async function getProductsByListingIds(listingIds: string[]): Promise<Product[]> {
+  if (listingIds.length === 0) return [];
+  const events = await listEvents();
+  const byId = new Map(events.flatMap((e) => e.products).map((p) => [p.id, p]));
+  return listingIds.map((id) => byId.get(id)).filter((p): p is Product => p !== undefined);
+}
+
 export async function createEvent(input: Omit<MarketEvent, "id" | "products">): Promise<MarketEvent> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
@@ -250,7 +293,9 @@ export async function listCatalogProducts(): Promise<CatalogProduct[]> {
     // 안전하다(RLS가 어차피 비관리자에게는 이 조인을 null로 돌려준다).
     const { data, error } = await supabase
       .from("products")
-      .select("*, product_costs(cost_price), product_option_groups(*, product_option_values(*, product_option_costs(cost_delta)))")
+      .select(
+        "*, product_costs(cost_price), product_option_groups(*, product_option_values(*, product_option_costs(cost_delta))), product_recommendations(recommended_product_id, sort_order)",
+      )
       .order("name", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(mapSupabaseCatalogProduct);
@@ -308,8 +353,11 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
     if (input.optionGroups !== undefined && input.optionGroups.length > 0) {
       await saveOptionGroupsForProduct(supabase, data.id, input.optionGroups);
     }
+    if (input.recommendedProductIds !== undefined && input.recommendedProductIds.length > 0) {
+      await saveRecommendationsForProduct(supabase, data.id, input.recommendedProductIds);
+    }
     console.log("[lib/data] createCatalogProduct supabase insert 완료");
-    return { ...mapSupabaseCatalogProduct(data), costPrice: input.costPrice, optionGroups: input.optionGroups };
+    return { ...mapSupabaseCatalogProduct(data), costPrice: input.costPrice, optionGroups: input.optionGroups, recommendedProductIds: input.recommendedProductIds };
   }
   const product: CatalogProduct = { ...input, id: genId("cat") };
   saveCatalogProducts([product, ...loadCatalogProducts()]);
@@ -365,6 +413,9 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     }
     if (patch.optionGroups !== undefined) {
       await saveOptionGroupsForProduct(supabase, catalogProductId, patch.optionGroups);
+    }
+    if (patch.recommendedProductIds !== undefined) {
+      await saveRecommendationsForProduct(supabase, catalogProductId, patch.recommendedProductIds);
     }
     console.log("[lib/data] updateCatalogProduct supabase update 완료");
     return;
@@ -438,6 +489,22 @@ async function saveOptionGroupsForProduct(supabase: ReturnType<typeof getSupabas
   const costRows = groups.flatMap((g) => g.values.filter((v) => v.costDelta !== undefined).map((v) => ({ option_value_id: v.id, cost_delta: v.costDelta })));
   if (costRows.length > 0) {
     const { error } = await sb.from("product_option_costs").upsert(costRows);
+    if (error) throw error;
+  }
+}
+
+// "추천 상품" 목록 저장 — upsert-prune 대신 통째로 지우고 다시 넣는다.
+// 옵션 그룹/값과 달리 이 행을 참조하는 다른 테이블이 없어서(FK가 걸린 하위
+// 데이터가 없음) id를 보존할 이유가 없고, 관리자가 순서를 바꾸는 것도 결국
+// "새 목록으로 교체"와 같은 의미라 이 방식이 더 단순하다.
+async function saveRecommendationsForProduct(supabase: ReturnType<typeof getSupabaseBrowserClient>, productId: string, recommendedIds: string[]): Promise<void> {
+  const sb = supabase!;
+  const { error: delError } = await sb.from("product_recommendations").delete().eq("product_id", productId);
+  if (delError) throw delError;
+  if (recommendedIds.length > 0) {
+    const { error } = await sb
+      .from("product_recommendations")
+      .insert(recommendedIds.map((id, i) => ({ product_id: productId, recommended_product_id: id, sort_order: i })));
     if (error) throw error;
   }
 }
@@ -1683,6 +1750,10 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     // undefined가 된다(별도 분기 불필요).
     costPrice: Array.isArray(row.product_costs) ? row.product_costs[0]?.cost_price : row.product_costs?.cost_price,
     optionGroups: mapSupabaseOptionGroups(row.product_option_groups),
+    recommendedProductIds: (row.product_recommendations ?? [])
+      .slice()
+      .sort((a: { sort_order: number }, b: { sort_order: number }) => a.sort_order - b.sort_order)
+      .map((r: { recommended_product_id: string }) => r.recommended_product_id),
   };
 }
 

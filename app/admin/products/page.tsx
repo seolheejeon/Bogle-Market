@@ -16,6 +16,7 @@ import { PhotoUploader } from "@/components/admin/PhotoUploader";
 import { DetailBlockEditor } from "@/components/admin/DetailBlockEditor";
 import { ProductOptionEditor } from "@/components/admin/ProductOptionEditor";
 import { ProductBadgePicker } from "@/components/admin/ProductBadgePicker";
+import { SearchPicker } from "@/components/admin/SearchPicker";
 import { EventBadgeTag } from "@/components/Badge";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
 
@@ -77,6 +78,7 @@ export default function AdminProductsPage() {
       {creating && (
         <div className="mb-4 rounded-xl border border-dashed border-accent bg-accent-soft p-3.5">
           <CatalogProductForm
+            allProducts={products ?? []}
             onSubmit={async (values) => {
               await createCatalogProduct(values);
               setCreating(false);
@@ -114,6 +116,7 @@ export default function AdminProductsPage() {
             <div key={p.id} className="rounded-xl border border-accent bg-accent-soft p-3.5">
               <CatalogProductForm
                 initial={p}
+                allProducts={products ?? []}
                 onSubmit={async (values) => {
                   await updateCatalogProduct(p.id, values);
                   setEditingId(null);
@@ -169,11 +172,13 @@ export default function AdminProductsPage() {
 
 function CatalogProductForm({
   initial,
+  allProducts,
   onSubmit,
   onCancel,
   submitLabel,
 }: {
   initial?: CatalogProduct;
+  allProducts: CatalogProduct[];
   onSubmit: (values: Omit<CatalogProduct, "id">) => Promise<void>;
   onCancel: () => void;
   submitLabel: string;
@@ -213,6 +218,7 @@ function CatalogProductForm({
   const [photos, setPhotos] = useState<string[]>(initial?.photos ?? []);
   const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>(initial?.detailBlocks ?? []);
   const [optionGroups, setOptionGroups] = useState<ProductOptionGroup[]>(initial?.optionGroups ?? []);
+  const [recommendedIds, setRecommendedIds] = useState<string[]>(initial?.recommendedProductIds ?? []);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -255,6 +261,7 @@ function CatalogProductForm({
         detailBlocks,
         // 이름을 안 채운 그룹/값은 저장하지 않는다(에디터에서 빈 값으로 남겨둔 것).
         optionGroups: optionGroups.filter((g) => g.name.trim()).map((g) => ({ ...g, values: g.values.filter((v) => v.name.trim()) })),
+        recommendedProductIds: recommendedIds,
       });
       console.log("[상품 저장] DB 저장 완료");
     } catch (e) {
@@ -372,6 +379,42 @@ function CatalogProductForm({
             그대로 입력하면 돼요.
           </p>
         </div>
+      </section>
+
+      <section className="rounded-[9px] border border-border p-3">
+        <p className="mb-1.5 text-[12px] font-bold text-text-muted">추천 상품 (상품 상세 하단 "같이 구매하면 좋은 상품"에 표시돼요)</p>
+        <SearchPicker
+          items={allProducts.filter((p) => p.id !== initial?.id && !recommendedIds.includes(p.id))}
+          value={null}
+          onChange={(picked) => {
+            if (picked) setRecommendedIds((prev) => [...prev, picked.id]);
+          }}
+          getId={(p) => p.id}
+          getLabel={(p) => p.name}
+          renderIcon={(p) => <ProductPhoto photo={p.photos?.[0] ?? p.emoji} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent-soft text-lg" />}
+          placeholder="추천할 상품 검색해서 추가"
+          emptyText="추가할 수 있는 상품이 없어요."
+        />
+        {recommendedIds.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1.5">
+            {recommendedIds.map((id) => {
+              const p = allProducts.find((x) => x.id === id);
+              return (
+                <div key={id} className="flex items-center gap-2 rounded-[7px] bg-bg-sunken px-2.5 py-1.5">
+                  <ProductPhoto photo={p?.photos?.[0] ?? p?.emoji ?? "📦"} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent-soft text-base" />
+                  <p className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{p?.name ?? "(삭제된 상품)"}</p>
+                  <button
+                    type="button"
+                    onClick={() => setRecommendedIds((prev) => prev.filter((x) => x !== id))}
+                    className="shrink-0 text-[11.5px] font-semibold text-text-muted underline"
+                  >
+                    제거
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <section className="rounded-[9px] border border-border p-3">

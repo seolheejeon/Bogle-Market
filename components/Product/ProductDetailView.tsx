@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { findProductWithEvent } from "@/lib/data";
+import { findProductWithEvent, getRecommendedProducts } from "@/lib/data";
+import { recordRecentlyViewed } from "@/lib/recently-viewed";
 import type { MarketEvent, Product } from "@/types";
 import { EVENT_TYPE_LABEL, COURIER_LABEL, FULFILLMENT_TYPE_LABEL } from "@/types";
 import { formatPrice, formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
@@ -13,6 +14,7 @@ import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { ShareButton } from "@/components/ShareButton";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
+import { ProductGridCard } from "@/components/ProductGridCard";
 import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 import { flyToCart, showAddedToast } from "@/lib/cart-feedback";
@@ -34,6 +36,9 @@ export function ProductDetailView({ productId }: { productId: string }) {
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
+  // "같이 구매하면 좋은 상품" — 관리자가 고른 추천이 지금 담을 수 있는
+  // 리스팅으로 해석된 것만 온다(lib/data.ts의 getRecommendedProducts).
+  const [recommended, setRecommended] = useState<Product[]>([]);
 
   useEffect(() => {
     findProductWithEvent(productId).then(setData);
@@ -41,7 +46,14 @@ export function ProductDetailView({ productId }: { productId: string }) {
     setOptionError(null);
     setQty(1);
     setPendingLines([]);
+    setRecommended([]);
   }, [productId]);
+
+  useEffect(() => {
+    if (!data) return;
+    getRecommendedProducts(data.product.catalogProductId).then(setRecommended);
+    recordRecentlyViewed(data.product.id);
+  }, [data]);
 
   // data가 로드되기 전엔 최소 구매 수량을 몰라 일단 1로 뒀다가, 로드되면
   // 그 상품의 최소 구매 수량으로 다시 맞춘다("처음 진입 시 최소 구매 수량으로 시작").
@@ -237,7 +249,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
           </p>
           <p className="truncate text-[13.5px] leading-tight font-extrabold">{product.name}</p>
         </div>
-        <ShareButton productId={product.id} name={product.name} price={product.price} />
+        <ShareButton productId={product.id} name={product.name} />
       </div>
       <div className="p-4">
         <div className="relative flex aspect-square w-full items-center justify-center rounded-2xl bg-accent-soft text-[76px]">
@@ -411,6 +423,19 @@ export function ProductDetailView({ productId }: { productId: string }) {
         {product.description && <p className="mt-4 text-[13px] leading-relaxed whitespace-pre-line text-text-muted">{product.description}</p>}
 
         <ProductDetailContent blocks={product.detailBlocks ?? DUMMY_DETAIL_BLOCKS} />
+
+        {recommended.length > 0 && (
+          <div className="mt-6">
+            <p className="mb-2 text-[13px] font-bold">같이 구매하면 좋은 상품</p>
+            <div className="flex gap-2.5 overflow-x-auto">
+              {recommended.map((p) => (
+                <div key={p.id} className="w-[130px] shrink-0">
+                  <ProductGridCard product={p} />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* fixed, not sticky-in-flow: a sticky footer nested in <main> ends up

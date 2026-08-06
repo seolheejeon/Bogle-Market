@@ -825,6 +825,34 @@ $$;
 - **검증**: `tsc`/`build` 통과 확인. mock 서버(포트 3001)에서 문고리 이벤트 하나의 마감시간을 어제로 조작해 "마감" 뱃지 + "재시작"/"종료" 버튼 노출 확인, "재시작" 클릭 → 연장 폼 노출 확인, "+1일" 클릭 → 마감시간이 오늘 기준 +1일로 바뀌고 카드가 즉시 "진행중" 목록으로 돌아가는 것(전체/진행중/종료 탭 개수까지) 확인
 - 마이그레이션 불필요(DB 변경 없음, `deadlineAt`은 기존에 이미 있는 컬럼)
 
+**공유 링크 정리 + 마감임박 상품 전체 노출 + 관리자 추천 상품 + 마이페이지 최근본/찜**
+- 배경: 한 번에 요청받은 개선사항 6개 중 설계 고민이 적은 4개를 먼저 처리 — 나머지 2개(수량 기반 할인 정책, 상품별 주문 마감시간)는 가격 계산/재고 로직 전반과 얽혀 있어 별도로 설계 후 진행
+- **공유 링크 정리**(`components/ShareButton.tsx`): 네이티브 공유(`navigator.share`)에 상품명/가격 문구(`text`)를 URL과 같이 넘기던 걸 없애고 `title`+`url`만 전달 — 카카오톡 등 일부 공유 대상이 `text`와 `url`을 이어붙여서 긴 문구 뒤에 URL이 그대로 노출되던 원인이었음. 클립보드 복사 폴백은 원래도 URL만 복사했어서 변경 없음. 링크 미리보기(썸네일/상품명/가격)는 이미 있는 OG 메타데이터(`lib/og.ts`)가 담당하니 문구를 따로 안 넘겨도 됨 — 예쁜 미리보기 자체(썸네일 등 카톡 렌더링 품질)는 이번 범위 밖(추후 개선)
+- **마감임박 상품 전체 노출**(`components/Home/HomeView.tsx`): "곧 마감되는 이벤트당 대표 상품 1개만" 보여주던 걸 "그 이벤트에 속한 상품 전부"로 변경(`event.products[0]`만 쓰던 걸 `flatMap`으로 전체 순회) — 개별 마감(`product.closed`)된 상품은 "이미 마감"이라 "곧 마감"에서 제외
+- **관리자 추천 상품**: 새 테이블 `product_recommendations`(카탈로그 상품 id ↔ 추천 카탈로그 상품 id, 관리자가 고른 순서 유지) 추가 — 지금은 관리자가 수동으로 고른 목록이 곧 최종 추천이지만, 나중에 자동 추천(같이 주문된 빈도 기반 등)을 얹고 싶으면 이 테이블은 "관리자 고정분"으로 남기고 자동 계산분과 합치는 식으로 확장 가능하게 분리해둠. 관리자 상품관리(`/admin/products`)에 `SearchPicker` 기반으로 상품을 검색해 추가/제거하는 "추천 상품" 섹션 추가. 고객 상품상세(`ProductDetailView.tsx`)엔 "같이 구매하면 좋은 상품" 섹션으로 노출 — 추천은 카탈로그 상품 id로 저장되므로, 화면에 보여줄 땐 배너/알림에서 이미 쓰던 `resolveListingId`(카탈로그 id → 지금 담을 수 있는 리스팅)로 매번 다시 해석해서 지금 걸린 이벤트가 없는 추천은 조용히 빠짐(`lib/data.ts`의 `getRecommendedProducts`)
+- **마이페이지 최근 본 상품**: 상품 상세를 열 때마다 리스팅 id를 기기 로컬(`localStorage`, `lib/recently-viewed.ts`, 최대 20개, 최신순, 계정과 무관)에 남기고 마이페이지에 노출
+- **마이페이지 찜한 상품**: 지금은 어디에도 찜 버튼이 없어 항상 비어 있지만, 나중에 찜 버튼이 생기면 바로 이어질 수 있도록 저장 구조(`lib/wishlist.ts`)만 미리 만들어둠 — 장바구니가 로그인 계정 간에 공유되던 버그를 겪은 뒤라, 같은 실수를 반복하지 않도록 처음부터 신원별(비회원/계정) 키로 분리(`bogle_wishlist_guest` / `bogle_wishlist_<profileId>`, 장바구니와 동일한 패턴)
+- **DB 변경**: `products` 테이블에 저장된 id를 실제 화면에 보여줄 `Product`로 되돌리는 공용 헬퍼 `getProductsByListingIds`도 `lib/data.ts`에 추가(최근본/찜 공용, 지워진 리스팅은 조용히 걸러짐)
+- **검증**: `tsc`/`build` 통과 확인. mock 서버(포트 3001)에서 실제로 확인함 — 같은 마감시간을 공유하는 이벤트의 상품 3개 전부가 "마감 임박 상품"에 뜨는 것, 관리자 화면에서 상품 검색으로 추천 2개를 추가하고 저장 후 다시 열어 그대로 남아있는 것(`recommendedProductIds` localStorage 직접 대조), 고객 상품상세에 "같이 구매하면 좋은 상품"으로 정확히 반영되는 것, 공유 버튼을 눌렀을 때 클립보드에 순수 URL만 담기는 것(clipboard API를 몽키패치해서 실제 전달값 확인), 상품 상세를 두 번 열었을 때 마이페이지 "최근 본 상품"이 최신순으로 쌓이는 것, "찜한 상품"이 빈 상태 문구로 정상 표시되는 것까지 확인
+- **마이그레이션 필요** — 실 Supabase 프로젝트에 아래 SQL 실행 필요(안 해도 다른 기능은 그대로 동작하고, 실행 전까지는 관리자가 추천 상품을 추가해도 저장만 실패함 — 최근본/찜은 로컬 저장이라 이 마이그레이션과 무관):
+  ```sql
+  create table if not exists product_recommendations (
+    id uuid primary key default gen_random_uuid(),
+    product_id uuid not null references products(id) on delete cascade,
+    recommended_product_id uuid not null references products(id) on delete cascade,
+    sort_order integer not null default 0,
+    created_at timestamptz not null default now(),
+    check (product_id <> recommended_product_id),
+    unique (product_id, recommended_product_id)
+  );
+  create index if not exists product_recommendations_product_id_idx on product_recommendations(product_id);
+
+  alter table product_recommendations enable row level security;
+  create policy "product_recommendations are publicly readable" on product_recommendations for select using (true);
+  create policy "admins manage product recommendations" on product_recommendations for all
+    using (is_admin()) with check (is_admin());
+  ```
+
 # 진행 중인 기능
 
 - **카드/카카오페이 결제**: Toss Payments 키가 없어서 지금은 무통장입금과 동일하게 관리자가 수동으로 확인하는 방식으로 대체 중

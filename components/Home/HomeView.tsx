@@ -76,17 +76,24 @@ export function HomeView() {
   // "마감 임박"은 실제로 곧 닫히는 회차만 의미가 있다 — 이미 마감됐거나(주문
   // 불가) 24시간보다 여유 있는 회차는 여기 안 보인다. 택배(PARCEL)는 상시
   // 판매라 마감 개념 자체가 없어서(lib/order-policy.ts의 ALWAYS_OPEN) 애초에
-  // 대상에서 뺀다. 이벤트당 대표 상품 하나(첫 상품)만 보여주는 건 기존과 동일.
+  // 대상에서 뺀다. 대표 상품 하나만 보여주던 것에서, 그 회차에 속한 상품
+  // 전부를 보여주는 것으로 변경(예: 목요일 문고리배송이 오늘 12시 마감이면
+  // 그 회차 상품 전부가 노출) — 다만 그 상품만 따로 마감된(product.closed)
+  // 경우는 "곧 마감"이 아니라 "이미 마감"이라 제외한다.
   const DEADLINE_SOON_MS = 24 * 60 * 60 * 1000;
   const deadlineItems = useMemo(() => {
     if (!events) return [];
     const now = Date.now();
     return events
       .filter((e) => e.type !== "PARCEL" && e.products.length > 0 && isEventOrderable(e))
-      .map((e) => ({ event: e, msLeft: new Date(e.deadlineAt).getTime() - now }))
-      .filter(({ msLeft }) => msLeft > 0 && msLeft <= DEADLINE_SOON_MS)
-      .sort((a, b) => a.msLeft - b.msLeft)
-      .map(({ event: e }) => ({ badgeType: e.type, eventId: e.id, product: e.products[0], deadlineAt: e.deadlineAt }));
+      .flatMap((e) => {
+        const msLeft = new Date(e.deadlineAt).getTime() - now;
+        if (!(msLeft > 0 && msLeft <= DEADLINE_SOON_MS)) return [];
+        return e.products
+          .filter((p) => p.closed !== true)
+          .map((p) => ({ badgeType: e.type, eventId: e.id, product: p, deadlineAt: e.deadlineAt, msLeft }));
+      })
+      .sort((a, b) => a.msLeft - b.msLeft);
   }, [events]);
 
   // 마감된(주문 불가) 이벤트의 상품은 인기상품에서 아예 제외한다 — 예전엔

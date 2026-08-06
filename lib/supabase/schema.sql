@@ -177,6 +177,24 @@ create table if not exists event_product_costs (
   cost_price integer not null default 0 check (cost_price >= 0)
 );
 
+-- 관리자가 상품마다 수동으로 고른 "같이 구매하면 좋은 상품" 목록 — 카탈로그
+-- 상품(products) 단위라 이 상품을 파는 모든 이벤트가 그대로 공유한다.
+-- sort_order는 관리자가 고른 순서(추천 우선순위). 지금은 이 테이블이 곧
+-- 최종 추천 목록이지만, 나중에 자동 추천(예: 같이 주문된 빈도 기반)을
+-- 추가하고 싶으면 이 테이블은 "관리자 고정분"으로 남기고 별도 계산 결과와
+-- 합치는 식으로 확장하면 된다. 공개 조회(고객도 상품 상세에서 봐야 함),
+-- 쓰기는 관리자만.
+create table if not exists product_recommendations (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null references products(id) on delete cascade,
+  recommended_product_id uuid not null references products(id) on delete cascade,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  check (product_id <> recommended_product_id),
+  unique (product_id, recommended_product_id)
+);
+create index if not exists product_recommendations_product_id_idx on product_recommendations(product_id);
+
 -- 상품 옵션 그룹(색상/사이즈/중량/추가옵션 등) — 카탈로그 상품에 속하며, 이
 -- 상품을 파는 모든 이벤트가 그대로 공유한다. required/multi/순서 같은 "구조"는
 -- origin/weight/storage와 동일하게 카탈로그 전용 값이라 이벤트별로 달라지지
@@ -429,6 +447,7 @@ alter table product_option_groups enable row level security;
 alter table product_option_values enable row level security;
 alter table product_option_costs enable row level security;
 alter table event_option_stock enable row level security;
+alter table product_recommendations enable row level security;
 
 -- SECURITY DEFINER helper: checks admin status while bypassing RLS itself.
 -- Policies must call this instead of subquerying `profiles` directly — a
@@ -467,6 +486,9 @@ drop policy if exists "product_option_values are publicly readable" on product_o
 create policy "product_option_values are publicly readable" on product_option_values for select using (true);
 drop policy if exists "event_option_stock are publicly readable" on event_option_stock;
 create policy "event_option_stock are publicly readable" on event_option_stock for select using (true);
+-- 추천 상품 목록도 상품 상세에서 고객이 봐야 하니 공개 조회.
+drop policy if exists "product_recommendations are publicly readable" on product_recommendations;
+create policy "product_recommendations are publicly readable" on product_recommendations for select using (true);
 
 -- Only admins can write the catalog
 drop policy if exists "admins manage events" on events;
@@ -487,6 +509,10 @@ create policy "admins manage product option groups" on product_option_groups for
   with check (is_admin());
 drop policy if exists "admins manage product option values" on product_option_values;
 create policy "admins manage product option values" on product_option_values for all
+  using (is_admin())
+  with check (is_admin());
+drop policy if exists "admins manage product recommendations" on product_recommendations;
+create policy "admins manage product recommendations" on product_recommendations for all
   using (is_admin())
   with check (is_admin());
 -- event_option_stock은 관리자 외에 decrement_option_stock/increment_option_stock

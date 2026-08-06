@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { listAddresses, updateAddress, saveAddress, deleteAddress, setDefaultAddress } from "@/lib/data";
-import type { Address, Profile } from "@/types";
+import { listAddresses, updateAddress, saveAddress, deleteAddress, setDefaultAddress, getProductsByListingIds } from "@/lib/data";
+import type { Address, Product, Profile } from "@/types";
 import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
 import { SupportLinks } from "@/components/SupportLinks";
+import { ProductGridCard } from "@/components/ProductGridCard";
+import { getRecentlyViewedIds } from "@/lib/recently-viewed";
+import { getWishlistIds, wishlistKey } from "@/lib/wishlist";
 
 type UsernameStatus = "unchecked" | "checking" | "available" | "taken";
 
@@ -559,6 +562,8 @@ function ProfilePanel({
         )}
       </div>
 
+      <RecentAndWishlistSection profileId={profile.id} />
+
       {profile.isAdmin && (
         <a href="/admin" className="mt-4 block rounded-[10px] bg-accent py-3 text-center text-[13.5px] font-bold text-white">
           관리자 화면으로 이동
@@ -567,6 +572,57 @@ function ProfilePanel({
       <button className="mt-3 w-full rounded-[10px] border border-border py-3 text-[13.5px] font-semibold" onClick={() => signOut()}>
         로그아웃
       </button>
+    </div>
+  );
+}
+
+// 최근 본 상품(기기 로컬 열람 이력)과 찜한 상품(계정별 저장, 지금은 어디에도
+// 찜 버튼이 없어 항상 비어 있음 — 나중에 찜 버튼이 생기면 이 자리가 그대로
+// 채워진다)을 나란히 보여준다. 두 목록 모두 저장된 id가 지워진 이벤트/상품을
+// 가리킬 수 있어 getProductsByListingIds가 조용히 걸러낸 결과만 받는다.
+function RecentAndWishlistSection({ profileId }: { profileId: string }) {
+  const [recent, setRecent] = useState<Product[] | null>(null);
+  const [wishlist, setWishlist] = useState<Product[] | null>(null);
+
+  useEffect(() => {
+    getProductsByListingIds(getRecentlyViewedIds()).then(setRecent);
+    getProductsByListingIds(getWishlistIds(wishlistKey(profileId))).then(setWishlist);
+  }, [profileId]);
+
+  function ProductRow({ products }: { products: Product[] }) {
+    return (
+      <div className="flex gap-2.5 overflow-x-auto">
+        {products.map((p) => (
+          <div key={p.id} className="w-[120px] shrink-0">
+            <ProductGridCard product={p} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 flex flex-col gap-4">
+      <div>
+        <p className="mb-2 text-[13px] font-bold">찜한 상품</p>
+        {wishlist === null ? (
+          <p className="text-[12px] text-text-muted">불러오는 중...</p>
+        ) : wishlist.length === 0 ? (
+          <p className="text-[12px] text-text-muted">아직 찜한 상품이 없어요.</p>
+        ) : (
+          <ProductRow products={wishlist} />
+        )}
+      </div>
+      <div>
+        <p className="mb-2 text-[13px] font-bold">최근 본 상품</p>
+        {recent === null ? (
+          <p className="text-[12px] text-text-muted">불러오는 중...</p>
+        ) : recent.length === 0 ? (
+          <p className="text-[12px] text-text-muted">최근 본 상품이 없어요.</p>
+        ) : (
+          <ProductRow products={recent} />
+        )}
+      </div>
     </div>
   );
 }
