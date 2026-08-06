@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { getEvent } from "@/lib/data";
 import type { MarketEvent } from "@/types";
 import { formatDeadlineLabel, formatEventDateChip, formatPrice } from "@/lib/format";
-import { isEventOrderable } from "@/lib/order-policy";
+import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
@@ -56,10 +56,10 @@ export function EventDetailView({ eventId }: { eventId: string }) {
 
         <div className="mt-4">
           {event.products.map((product) => {
-            // 이벤트는 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰을
-            // 수 있다(예약상품 발주마감 등, product.closed) — 둘 중 하나만
-            // 참이어도 이 줄은 마감 취급한다.
-            const itemClosed = closed || product.closed === true;
+            // 이벤트는 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰거나
+            // (수동 product.closed) 예약 마감시간(orderDeadlineAt)이 지났을
+            // 수 있다 — 셋 중 하나만 참이어도 이 줄은 마감 취급한다.
+            const itemClosed = closed || !isListingOrderable(product);
             return (
             <div key={product.id} className="flex items-center gap-3 border-b border-border py-3 last:border-none">
               <Link href={`/product/${product.id}`} className="block h-[52px] w-[52px] shrink-0">

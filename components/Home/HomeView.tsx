@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { listEvents, listBanners, isBannerLive } from "@/lib/data";
 import { resolveBannerHref } from "@/lib/banner-link";
-import { isEventOrderable, isEventVisibleToCustomers } from "@/lib/order-policy";
+import { isEventOrderable, isEventVisibleToCustomers, isListingOrderable } from "@/lib/order-policy";
 import type { Banner, EventType, MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatCountdownShort, formatDeadlineShort, formatPrice } from "@/lib/format";
@@ -90,7 +90,7 @@ export function HomeView() {
         const msLeft = new Date(e.deadlineAt).getTime() - now;
         if (!(msLeft > 0 && msLeft <= DEADLINE_SOON_MS)) return [];
         return e.products
-          .filter((p) => p.closed !== true)
+          .filter((p) => isListingOrderable(p))
           .map((p) => ({ badgeType: e.type, eventId: e.id, product: p, deadlineAt: e.deadlineAt, msLeft }));
       })
       .sort((a, b) => a.msLeft - b.msLeft);

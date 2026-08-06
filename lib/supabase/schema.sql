@@ -160,6 +160,12 @@ create table if not exists event_products (
   -- 상품 하나만 마감시키고 싶을 때 쓴다. visible과 달리 화면에는 계속
   -- 보이되(투명성) 주문만 막고 "마감" 표시가 붙는다.
   closed boolean not null default false,
+  -- 이 리스팅만의 예약된 주문 마감시간 — 이벤트 마감(events.deadline_at)보다
+  -- 먼저 와야 하는 예약상품(발주 마감이 배송일보다 훨씬 이른 경우)에 쓴다.
+  -- null이면 이벤트 마감을 그대로 따른다. 지나면 closed=true와 동일하게
+  -- 주문을 막지만(create_order RPC), closed와 달리 관리자가 이 값을 지우거나
+  -- 미래로 늦추면 그 즉시 다시 열린다("재고 추가 확보되면 다시 열기" 용도).
+  order_deadline_at timestamptz,
   -- 이 이벤트 안에서 상품이 노출되는 순서(오름차순) — 이벤트마다 독립적으로
   -- 관리자가 ▲▼로 바꿀 수 있다. 새로 추가되는 리스팅은 맨 뒤로 붙도록 그
   -- 시점의 최댓값+1로 채워진다. 관리자가 "마감"을 누르면 이 값을 맨 뒤로
@@ -868,15 +874,16 @@ begin
     raise exception 'profile_id must match the authenticated user';
   end if;
 
-  -- 개별 상품 마감(event_products.closed) 서버 검증 — 관리자가 예약상품처럼
-  -- 이벤트 전체보다 먼저 마감해야 하는 상품 하나만 "마감" 처리했을 때, RPC를
-  -- 직접 호출하는 경로까지 대비해 여기서 막는다.
+  -- 개별 상품 마감(event_products.closed, 즉시 수동 마감) + 리스팅별 예약
+  -- 마감시간(order_deadline_at, 지났으면 자동 마감) 서버 검증 — 관리자가
+  -- 예약상품처럼 이벤트 전체보다 먼저 마감해야 하는 상품 하나만 처리했을
+  -- 때, RPC를 직접 호출하는 경로까지 대비해 여기서 막는다.
   select p.name
   into v_closed_item
   from jsonb_array_elements(p_items) as i
   join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
   join products p on p.id = ep.product_id
-  where ep.closed
+  where ep.closed or (ep.order_deadline_at is not null and ep.order_deadline_at <= now())
   limit 1;
 
   if v_closed_item.name is not null then

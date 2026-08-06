@@ -216,6 +216,12 @@ export interface Product {
   // 관리자가 따로 마감시킬 때 쓴다. visible과 달리 화면에는 계속 보이고
   // "마감" 표시만 붙는다(재고와 무관하게 항상 주문 불가로 취급).
   closed?: boolean;
+  // 이 리스팅만의 예약된 주문 마감시간 — 이벤트 전체 마감(deadlineAt)보다
+  // 먼저 와야 하는 예약상품(발주 마감이 배송일보다 훨씬 이른 경우)에 쓴다.
+  // 지나면 closed=true와 동일하게 주문이 막히지만(lib/order-policy.ts의
+  // isListingOrderable), closed와 달리 "예정된 시각"이라 그 시각이 되기 전엔
+  // 정상 주문되고, 관리자가 이 값을 지우거나 미래로 늦추면 다시 열린다.
+  orderDeadlineAt?: string;
   // 색상/사이즈/중량/추가옵션 등 — 그룹 구조(required/multi/이름)는 카탈로그와
   // 동일하지만, 재고관리(hasStock) 대상 값의 stock은 이 리스팅(event_option_stock)
   // 기준으로 온다. 재고관리 그룹이 하나뿐이면 이 stock이 곧 그 값 하나의 재고고,
@@ -288,6 +294,7 @@ export interface EventProductSeed {
   deliveryType?: EventType;
   visible?: boolean;
   closed?: boolean;
+  orderDeadlineAt?: string;
   // 이 이벤트 안에서 노출되는 순서(오름차순) — 이벤트마다 독립적. 관리자가
   // ▲▼로 바꾸며, 새로 추가된 리스팅은 기존 최댓값+1로 맨 뒤에 붙는다.
   sortOrder?: number;

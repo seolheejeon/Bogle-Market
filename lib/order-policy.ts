@@ -1,4 +1,4 @@
-import type { MarketEvent } from "@/types";
+import type { MarketEvent, Product } from "@/types";
 
 export type OrderPolicy = "STRICT_DEADLINE" | "SOFT_DEADLINE" | "ALWAYS_OPEN";
 
@@ -55,4 +55,16 @@ export function isEventDeadlinePassed(event: Pick<MarketEvent, "type" | "deadlin
 
 export function isEventAdminEnded(event: Pick<MarketEvent, "type" | "status" | "deadlineAt">): boolean {
   return event.status === "ended" || isEventDeadlinePassed(event);
+}
+
+// 이 리스팅 하나만(이벤트 전체와 별개로) 주문 가능한지 — 관리자가 즉시
+// 마감시킨 경우(closed) 또는 이 리스팅만의 예약 마감시간(orderDeadlineAt)이
+// 지난 경우 둘 다 여기서 막는다. 예약상품(발주 마감이 이벤트 마감보다
+// 이른 경우)은 orderDeadlineAt만 지나 있어도 closed 없이 자동으로 막히고,
+// 관리자가 그 값을 지우거나 미래로 늦추면 다시 열린다 — closed는 "지금
+// 당장" 끄는 수동 스위치라 시간이 지나도 저절로 안 풀린다는 점이 다르다.
+export function isListingOrderable(product: Pick<Product, "closed" | "orderDeadlineAt">): boolean {
+  if (product.closed) return false;
+  if (product.orderDeadlineAt && new Date(product.orderDeadlineAt).getTime() <= Date.now()) return false;
+  return true;
 }

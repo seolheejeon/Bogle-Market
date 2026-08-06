@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { listEvents, createOrder, listAddresses, updateAddress, saveAddress, setDefaultAddress } from "@/lib/data";
 import { formatAddress, type Address, type MarketEvent, type Order, type PaymentMethod, type Product } from "@/types";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
-import { isEventOrderable } from "@/lib/order-policy";
+import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
 import { useCart, type CartLine } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { unitPrice, findOverStockLines, optionSelectionLabel, buildOptionSnapshot, comboValueIds } from "@/lib/product-options";
@@ -223,9 +223,9 @@ export function CheckoutView() {
       setError(`마감되어 더 이상 주문할 수 없는 이벤트가 있어요: ${closedGroups.map((g) => g.event.title).join(", ")}. 장바구니에서 빼주세요.`);
       return;
     }
-    // 이벤트 전체는 진행 중이어도 이 상품만 관리자가 따로 마감시켰을 수
-    // 있다(예약상품 발주마감 등) — closedGroups와 별개로 한 번 더 막는다.
-    const closedItems = items.filter((i) => i.product.closed === true);
+    // 이벤트 전체는 진행 중이어도 이 상품만 관리자가 따로 마감시켰거나
+    // 예약 마감시간이 지났을 수 있다 — closedGroups와 별개로 한 번 더 막는다.
+    const closedItems = items.filter((i) => !isListingOrderable(i.product));
     if (closedItems.length > 0) {
       setError(`마감된 상품이 있어요: ${Array.from(new Set(closedItems.map((i) => i.product.name))).join(", ")}. 장바구니에서 빼주세요.`);
       return;

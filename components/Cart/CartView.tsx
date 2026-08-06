@@ -11,6 +11,7 @@ import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { unitPrice, remainingForCombo, optionSelectionLabel } from "@/lib/product-options";
 import { totalShippingFee } from "@/lib/shipping";
+import { isListingOrderable } from "@/lib/order-policy";
 
 // 체크아웃 화면과 동일한 순서(components/Checkout/CheckoutView.tsx의
 // DELIVERY_TYPE_ORDER 참고) — 장바구니에서부터 체크아웃에서 나뉠 그룹을
@@ -156,9 +157,10 @@ export function CartView() {
                                 line.optionValueIds,
                                 lines.filter((l) => l.productId === product.id && l !== line).map((l) => ({ optionValueIds: l.optionValueIds, qty: l.qty })),
                               )}
-                              // 이벤트 전체는 진행 중이어도 이 상품만 관리자가 따로 마감시켰을
-                              // 수 있다 — 이 경우 수량을 못 늘리게 "마감" 표시로 대체한다.
-                              closed={product.closed === true}
+                              // 이벤트 전체는 진행 중이어도 이 상품만 관리자가 따로 마감시켰거나
+                              // 예약 마감시간이 지났을 수 있다 — 이 경우 수량을 못 늘리게 "마감"
+                              // 표시로 대체한다.
+                              closed={!isListingOrderable(product)}
                             />
                             {/* 최소 구매 수량은 이 조합 하나가 아니라 이 상품에 담은 모든
                                 조합의 합계로 따진다(체크아웃에서 검증) — 그래서 QtyControl에

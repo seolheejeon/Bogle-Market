@@ -7,7 +7,7 @@ import { recordRecentlyViewed } from "@/lib/recently-viewed";
 import type { MarketEvent, Product } from "@/types";
 import { EVENT_TYPE_LABEL, COURIER_LABEL, FULFILLMENT_TYPE_LABEL } from "@/types";
 import { formatPrice, formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
-import { isEventOrderable } from "@/lib/order-policy";
+import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
 import { useCart } from "@/lib/cart-context";
 import { ProductDetailContent } from "@/components/Product/ProductDetailContent";
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
@@ -91,9 +91,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
   const inCart = getQty(product.id, selectedOptionValueIds);
   const soldOut = product.stock === 0;
   const closed = !isEventOrderable(event);
-  // 이벤트 전체는 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰을 수
-  // 있다(예약상품 발주마감 등) — 이벤트 마감(closed)과 구분해 안내 문구를 다르게 준다.
-  const listingClosed = product.closed === true;
+  // 이벤트 전체는 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰거나
+  // (수동) 예약 마감시간이 지났을 수 있다 — 이벤트 마감(closed)과 구분해
+  // 안내 문구를 다르게 준다.
+  const listingClosed = !isListingOrderable(product);
   const maxQty = maxQtyForSelection(product, selectedOptionValueIds);
   const remaining = maxQty !== undefined ? Math.max(0, maxQty - inCart) : undefined;
   // 필수 옵션이 여러 개인 상품은 전부 고르기 전까지 수량 조절/담기 자체를

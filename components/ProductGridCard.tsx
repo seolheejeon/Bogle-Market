@@ -5,6 +5,7 @@ import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { EventBadgeTag } from "@/components/Badge";
 import { hasRequiredOptions } from "@/lib/product-options";
+import { isListingOrderable } from "@/lib/order-policy";
 
 // 색상/사이즈처럼 반드시 골라야 하는 옵션이 있는 상품은 그리드에서 바로
 // 수량을 못 담는다(어떤 옵션 조합인지 알 수 없어서) — 대신 상품 상세로
@@ -12,10 +13,11 @@ import { hasRequiredOptions } from "@/lib/product-options";
 // 사진/이름/옵션뱃지를 각각 별도 Link로 감싼다(EventDetailView와 같은 패턴).
 // closed는 이 상품이 속한 이벤트가 마감(종료 포함)돼서 더 이상 주문할 수
 // 없다는 뜻 — 호출부가 !isEventOrderable(event)로 계산해 넘겨준다. 이벤트는
-// 그대로 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰을 수 있어서
-// (product.closed, 예약상품 발주마감 등) 둘 중 하나라도 참이면 마감 취급한다.
+// 그대로 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰거나(수동
+// product.closed) 예약 마감시간(orderDeadlineAt)이 지났을 수 있어서
+// (isListingOrderable) 셋 중 하나라도 참이면 마감 취급한다.
 export function ProductGridCard({ product, rankBadge, closed }: { product: Product; rankBadge?: string; closed?: boolean }) {
-  const isClosed = closed || product.closed === true;
+  const isClosed = closed || !isListingOrderable(product);
   const optionsRequired = hasRequiredOptions(product);
   return (
     <div>
