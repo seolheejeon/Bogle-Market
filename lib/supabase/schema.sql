@@ -890,39 +890,41 @@ begin
   -- 개별 상품 마감(event_products.closed, 즉시 수동 마감) + 리스팅별 예약
   -- 마감시간(order_deadline_at, 지났으면 자동 마감) 서버 검증 — 관리자가
   -- 예약상품처럼 이벤트 전체보다 먼저 마감해야 하는 상품 하나만 처리했을
-  -- 때, RPC를 직접 호출하는 경로까지 대비해 여기서 막는다.
-  select p.name
-  into v_closed_item
-  from jsonb_array_elements(p_items) as i
-  join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
-  join products p on p.id = ep.product_id
-  where ep.closed or (ep.order_deadline_at is not null and ep.order_deadline_at <= now())
-  limit 1;
-
-  if v_closed_item.name is not null then
+  -- 때, RPC를 직접 호출하는 경로까지 대비해 여기서 막는다. `select ... into`
+  -- 대신 `for ... in (...) loop`를 쓰는 이유: Supabase Studio SQL 에디터가
+  -- 최상위 `select ... into <이름>`을 "새 테이블 생성"으로 잘못 인식해 RLS
+  -- 활성화 문구를 쿼리 중간에 끼워 넣어 실행 자체를 깨뜨리는 문제가 있었음
+  -- (`for ... in`은 이 오탐을 트리거하지 않음).
+  for v_closed_item in
+    select p.name
+    from jsonb_array_elements(p_items) as i
+    join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
+    join products p on p.id = ep.product_id
+    where ep.closed or (ep.order_deadline_at is not null and ep.order_deadline_at <= now())
+    limit 1
+  loop
     raise exception '%은(는) 마감되어 더 이상 주문할 수 없어요.', v_closed_item.name;
-  end if;
+  end loop;
 
   -- 최소 구매 수량 서버 검증 — 상품상세/장바구니에서 이미 막지만, RPC를 직접
   -- 호출하는 경우까지 대비해 여기서 한 번 더 막는다(체크아웃의 "서버 검증").
   -- 옵션 조합(주문 라인) 하나하나가 아니라 같은 상품(리스팅)에 담은 모든
   -- 조합의 합계로 따진다(예: 1번 옵션 1개 + 2번 옵션 2개 = 3개로 충족) —
   -- 그래서 라인별로 보지 않고 event_product_id(=상품)별로 합산한 뒤 비교한다.
-  select p.name as name, s.qty as qty, p.min_qty as min_qty
-  into v_bad_item
-  from (
-    select ep.product_id, sum((i->>'quantity')::integer) as qty
-    from jsonb_array_elements(p_items) as i
-    join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
-    group by ep.product_id
-  ) s
-  join products p on p.id = s.product_id
-  where s.qty < p.min_qty
-  limit 1;
-
-  if v_bad_item.name is not null then
+  for v_bad_item in
+    select p.name as name, s.qty as qty, p.min_qty as min_qty
+    from (
+      select ep.product_id, sum((i->>'quantity')::integer) as qty
+      from jsonb_array_elements(p_items) as i
+      join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
+      group by ep.product_id
+    ) s
+    join products p on p.id = s.product_id
+    where s.qty < p.min_qty
+    limit 1
+  loop
     raise exception '%은(는) 최소 %개부터 주문할 수 있어요. (현재 %개)', v_bad_item.name, v_bad_item.min_qty, v_bad_item.qty;
-  end if;
+  end loop;
 
   -- 재고 차감을 주문 생성과 같은 트랜잭션 안에서 수행한다 — decrement_stock/
   -- decrement_option_stock이 재고 부족 시 예외를 던지면 이 함수 전체가
