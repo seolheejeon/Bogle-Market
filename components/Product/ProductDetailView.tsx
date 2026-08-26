@@ -431,8 +431,9 @@ export function ProductDetailView({ productId }: { productId: string }) {
 
         {product.description && <p className="mt-4 text-[13px] leading-relaxed whitespace-pre-line text-text-muted">{product.description}</p>}
 
-        <ProductDetailContent blocks={product.detailBlocks ?? DUMMY_DETAIL_BLOCKS} />
-
+        {/* 상세설명(사진 위주 긴 스크롤 콘텐츠)보다 먼저 보여준다 — 상세설명
+            끝까지 스크롤해야만 보이면 놓치기 쉬워서, 상품 정보 표 바로
+            다음(상세설명 진입 직전)으로 옮겼다. */}
         {recommended.length > 0 && (
           <div className="mt-6">
             <p className="mb-2 text-[13px] font-bold">같이 구매하면 좋은 상품</p>
@@ -445,6 +446,8 @@ export function ProductDetailView({ productId }: { productId: string }) {
             </div>
           </div>
         )}
+
+        <ProductDetailContent blocks={product.detailBlocks ?? DUMMY_DETAIL_BLOCKS} />
       </div>
 
       {/* fixed, not sticky-in-flow: a sticky footer nested in <main> ends up
