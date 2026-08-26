@@ -186,6 +186,27 @@ export default function AdminProductsPage() {
   );
 }
 
+// 옵션/수량할인/추천상품/택배정보/상세설명처럼 대부분의 상품엔 안 쓰이는
+// 항목을 접어두는 아코디언 — 새 상품은 기본으로 접힌 채 시작하고(대부분
+// 필요 없어서), 이미 값이 있는 상품을 수정할 땐 defaultOpen으로 펼친 채
+// 열려서 설정해둔 게 숨겨져 보이지 않게 한다.
+function CollapsibleSection({ title, defaultOpen, children }: { title: string; defaultOpen: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="rounded-[9px] border border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 p-3 text-left"
+      >
+        <span className="text-[12px] font-bold text-text-muted">{title}</span>
+        <span className={`shrink-0 text-[11px] text-text-muted transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
+      </button>
+      {open && <div className="px-3 pb-3">{children}</div>}
+    </section>
+  );
+}
+
 function CatalogProductForm({
   initial,
   allProducts,
@@ -418,8 +439,10 @@ function CatalogProductForm({
         <p className="mt-1.5 text-[11px] text-text-muted">
           새 이벤트에 이 상품을 추가하면 기준 판매가·원가가 기본값으로 채워지고, 그 회차에서만 다르게(2+1 묶음 등) 바꿀 수 있어요. 재고는 이 상품을 쓰는 모든 이벤트가 실시간으로 함께 봐요 — 한 회차에서 주문이 들어가면 다른 회차 재고도 즉시 줄어들어요. 최소 구매 수량은 상품 상세/빠른 담기가 항상 이 수량으로 시작하고, 이 밑으로는 수량을 줄일 수 없어요.
         </p>
-        <div className="mt-3">
-          <p className="mb-1.5 text-[12px] font-bold text-text-muted">옵션 (색상/사이즈/중량/추가옵션 등)</p>
+      </section>
+
+      <CollapsibleSection title="옵션 (색상/사이즈/중량/추가옵션 등)" defaultOpen={optionGroups.length > 0}>
+        <div>
           <ProductOptionEditor
             groups={optionGroups}
             onChange={setOptionGroups}
@@ -432,8 +455,10 @@ function CatalogProductForm({
             그대로 입력하면 돼요.
           </p>
         </div>
-        <div className="mt-3">
-          <p className="mb-1.5 text-[12px] font-bold text-text-muted">수량 할인 (상품당 하나만 설정할 수 있어요)</p>
+      </CollapsibleSection>
+
+      <CollapsibleSection title="수량 할인 (상품당 하나만 설정할 수 있어요)" defaultOpen={discountType !== ""}>
+        <div>
           <select
             className="w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
             value={discountType}
@@ -519,10 +544,9 @@ function CatalogProductForm({
           )}
           {discountPreview && <p className="mt-1.5 text-[11px] text-accent-dark">미리보기: {describeDiscount(discountPreview)}</p>}
         </div>
-      </section>
+      </CollapsibleSection>
 
-      <section className="rounded-[9px] border border-border p-3">
-        <p className="mb-1.5 text-[12px] font-bold text-text-muted">추천 상품 (상품 상세 하단 "같이 구매하면 좋은 상품"에 표시돼요)</p>
+      <CollapsibleSection title='추천 상품 (상품 상세 하단 "같이 구매하면 좋은 상품"에 표시돼요)' defaultOpen={recommendedIds.length > 0}>
         <SearchPicker
           items={allProducts.filter((p) => p.id !== initial?.id && !recommendedIds.includes(p.id))}
           value={null}
@@ -555,10 +579,14 @@ function CatalogProductForm({
             })}
           </div>
         )}
-      </section>
+      </CollapsibleSection>
 
-      <section className="rounded-[9px] border border-border p-3">
-        <p className="mb-2 text-[12px] font-bold text-text-muted">택배 정보 (택배로 팔 때만 적용돼요)</p>
+      <CollapsibleSection
+        title="택배 정보 (택배로 팔 때만 적용돼요)"
+        defaultOpen={Boolean(
+          (initial?.shippingFee ?? 0) > 0 || (initial?.shippingFeeType && initial.shippingFeeType !== "fixed") || initial?.courierCode || (initial?.fulfillmentType && initial.fulfillmentType !== "same_day"),
+        )}
+      >
         <div className="mb-2 flex flex-wrap gap-3">
           {(Object.keys(SHIPPING_FEE_TYPE_LABEL) as ShippingFeeType[]).map((t) => (
             <label key={t} className="flex items-center gap-1.5 text-[12.5px]">
@@ -656,21 +684,26 @@ function CatalogProductForm({
             onChange={(e) => setShipsAt(e.target.value)}
           />
         )}
-      </section>
+      </CollapsibleSection>
 
-      <section className="rounded-[9px] border border-border p-3">
-        <p className="mb-1.5 text-[12px] font-bold text-text-muted">상세설명 (제목/본문/사진)</p>
+      <CollapsibleSection title="상세설명 (제목/본문/사진)" defaultOpen={detailBlocks.length > 0}>
         <DetailBlockEditor blocks={detailBlocks} onChange={setDetailBlocks} />
-      </section>
+      </CollapsibleSection>
 
-      {error && <p className="text-[12.5px] font-semibold text-red-600">{error}</p>}
-      <div className="flex gap-2">
-        <button onClick={submit} disabled={submitting || !name.trim()} className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50">
-          {submitting ? "저장 중..." : submitLabel}
-        </button>
-        <button onClick={onCancel} className="rounded-[8px] border border-border px-4 py-2 text-[13px] font-semibold">
-          취소
-        </button>
+      {/* 사진이 많은 상품은 폼이 길어져서, 살짝만 고쳐도 저장 버튼을 보려고
+          맨 아래까지 스크롤해야 하는 불편이 있었다 — 저장/취소를 화면 하단에
+          붙여서 스크롤 위치와 무관하게 항상 누를 수 있게 한다(장바구니/체크아웃과
+          같은 sticky 패턴). */}
+      <div className="sticky bottom-0 -mx-3.5 -mb-3.5 flex flex-col gap-1.5 border-t border-border bg-bg-card px-3.5 py-3">
+        {error && <p className="text-[12.5px] font-semibold text-red-600">{error}</p>}
+        <div className="flex gap-2">
+          <button onClick={submit} disabled={submitting || !name.trim()} className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-bold text-white disabled:opacity-50">
+            {submitting ? "저장 중..." : submitLabel}
+          </button>
+          <button onClick={onCancel} className="rounded-[8px] border border-border px-4 py-2 text-[13px] font-semibold">
+            취소
+          </button>
+        </div>
       </div>
     </div>
   );
