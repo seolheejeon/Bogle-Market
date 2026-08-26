@@ -52,7 +52,7 @@ export function PhotoUploader({ photos, onChange }: { photos: string[]; onChange
         className={`flex flex-wrap gap-2 rounded-lg p-1 outline-none ${dragOver ? "bg-accent-soft ring-2 ring-accent" : ""}`}
       >
         {photos.map((photo, i) => (
-          <div key={i} className="group relative h-14 w-14 overflow-hidden rounded-lg border border-border">
+          <div key={i} className="group relative h-24 w-24 overflow-hidden rounded-lg border border-border">
             <ProductPhoto photo={photo} className="flex h-full w-full items-center justify-center bg-accent-soft text-2xl" />
             <button
               type="button"
@@ -82,7 +82,7 @@ export function PhotoUploader({ photos, onChange }: { photos: string[]; onChange
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
-          className="flex h-14 w-14 flex-col items-center justify-center rounded-lg border border-dashed border-border text-[10px] text-text-muted disabled:opacity-50"
+          className="flex h-24 w-24 flex-col items-center justify-center rounded-lg border border-dashed border-border text-[10px] text-text-muted disabled:opacity-50"
         >
           {uploading ? "업로드 중" : "+ 사진"}
         </button>

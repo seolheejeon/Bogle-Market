@@ -44,6 +44,10 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
   // 블록 목록 맨 위(0)부터 각 블록 바로 앞자리까지, 어느 "+ 여기에 추가" 메뉴가
   // 펼쳐져 있는지 — 한 번에 하나만 열리고, 선택하면 자동으로 닫힌다.
   const [insertMenuAt, setInsertMenuAt] = useState<number | null>(null);
+  // 지금 드래그가 어느 블록 위에 올라가 있는지 — 사진 블록 위에 사진 블록을
+  // 올리면 "여기 놓으면 합쳐져요" 표시를 보여주기 위한 값(순서 변경 중인
+  // 드래그와 구분하기 위해 dragIndex와 별도로 둔다).
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   function update(i: number, block: ProductDetailBlock) {
     onChange(blocks.map((b, idx) => (idx === i ? block : b)));
@@ -85,16 +89,25 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
   // 사진 블록끼리만 서로 합치거나(최대 3장까지, 옆에 나란히 보여줄 열도 그
   // 수에 맞춰 자동으로 잡아준다) 다시 낱장으로 나눌 수 있다 — "1열/2열/3열을
   // 몇 장짜리 블록 하나가 아니라 내가 원하는 사진끼리 직접 골라 정한다"는
-  // 요청을 이 두 동작으로 구현했다.
-  function mergeWithPrevious(i: number) {
-    const prev = blocks[i - 1];
-    const cur = blocks[i];
-    if (!prev || prev.type !== "images" || cur.type !== "images") return;
-    const mergedUrls = [...prev.urls, ...cur.urls].slice(0, 3);
+  // 요청을 이 두 동작으로 구현했다. mergeBlocks는 인접하지 않은 두 블록도
+  // 합칠 수 있게 일반화한 버전 — 사진 블록을 다른 사진 블록 위로 드래그해서
+  // 놓으면 바로 합쳐지는 동작(아래 onDrop)에 쓴다. 버튼("이전 사진과 합치기")은
+  // 드래그가 안 되는 터치 기기를 위한 대체 경로라 그대로 남겨둔다.
+  function mergeBlocks(from: number, to: number) {
+    const a = blocks[from];
+    const b = blocks[to];
+    if (a.type !== "images" || b.type !== "images" || a.urls.length + b.urls.length > 3) return;
+    const mergedUrls = [...a.urls, ...b.urls].slice(0, 3);
     const merged: ProductDetailBlock = { type: "images", urls: mergedUrls, columns: Math.min(3, mergedUrls.length) as 1 | 2 | 3 };
     const next = blocks.slice();
-    next.splice(i - 1, 2, merged);
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    next.splice(hi, 1);
+    next.splice(lo, 1, merged);
     onChange(next);
+  }
+  function mergeWithPrevious(i: number) {
+    mergeBlocks(i - 1, i);
   }
   function splitRow(i: number) {
     const block = blocks[i];
@@ -183,18 +196,45 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
                 }}
                 onVideo={() => insertVideoAt(i)}
               />
-              <div
-                draggable
-                onDragStart={() => setDragIndex(i)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (dragIndex !== null && dragIndex !== i) reorder(dragIndex, i);
-                  setDragIndex(null);
-                }}
-                onDragEnd={() => setDragIndex(null)}
-                className={`flex items-start gap-2 rounded-lg border bg-bg-card p-2 transition-opacity ${dragIndex === i ? "border-accent opacity-40" : "border-border"}`}
-              >
+              {(() => {
+                const willMerge =
+                  dragIndex !== null &&
+                  dragIndex !== i &&
+                  dragOverIndex === i &&
+                  block.type === "images" &&
+                  blocks[dragIndex]?.type === "images" &&
+                  (blocks[dragIndex] as Extract<ProductDetailBlock, { type: "images" }>).urls.length + block.urls.length <= 3;
+                return (
+                  <div
+                    draggable
+                    onDragStart={() => setDragIndex(i)}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverIndex(i);
+                    }}
+                    onDragLeave={() => setDragOverIndex((v) => (v === i ? null : v))}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragIndex !== null && dragIndex !== i) {
+                        if (willMerge) mergeBlocks(dragIndex, i);
+                        else reorder(dragIndex, i);
+                      }
+                      setDragIndex(null);
+                      setDragOverIndex(null);
+                    }}
+                    onDragEnd={() => {
+                      setDragIndex(null);
+                      setDragOverIndex(null);
+                    }}
+                    className={`relative flex items-start gap-2 rounded-lg border bg-bg-card p-2 transition-opacity ${
+                      willMerge ? "border-accent ring-2 ring-accent" : dragIndex === i ? "border-accent opacity-40" : "border-border"
+                    }`}
+                  >
+                    {willMerge && (
+                      <span className="absolute inset-x-0 -top-2.5 mx-auto w-fit rounded-full bg-accent px-2 py-0.5 text-[10.5px] font-bold text-white">
+                        여기에 놓으면 합쳐져요
+                      </span>
+                    )}
               <div className="flex cursor-grab flex-col items-center gap-0.5 pt-0.5 select-none active:cursor-grabbing">
                 <span className="text-[13px] text-text-muted" title="드래그해서 순서 변경">
                   ⠿
@@ -254,7 +294,9 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
                 <button type="button" onClick={() => remove(i)} className="rounded-md bg-black/60 px-1.5 py-0.5 text-[11px] leading-relaxed text-white">
                   ×
                 </button>
-              </div>
+                  </div>
+                );
+              })()}
             </div>
           ))}
           <input
@@ -575,7 +617,7 @@ function ImagesBlockEditor({
               setDragIndex(null);
             }}
             onDragEnd={() => setDragIndex(null)}
-            className={`group relative h-16 w-16 cursor-grab overflow-hidden rounded-lg border transition-opacity active:cursor-grabbing ${
+            className={`group relative h-24 w-24 cursor-grab overflow-hidden rounded-lg border transition-opacity active:cursor-grabbing ${
               dragIndex === idx ? "border-accent opacity-40" : "border-border"
             }`}
           >
@@ -604,7 +646,7 @@ function ImagesBlockEditor({
             type="button"
             onClick={() => inputRef.current?.click()}
             disabled={uploading}
-            className="flex h-16 w-16 flex-col items-center justify-center rounded-lg border border-dashed border-border text-[10px] text-text-muted disabled:opacity-50"
+            className="flex h-24 w-24 flex-col items-center justify-center rounded-lg border border-dashed border-border text-[10px] text-text-muted disabled:opacity-50"
           >
             {uploading ? "업로드 중" : "+ 추가"}
           </button>
