@@ -286,7 +286,8 @@ export default function AdminHomePage() {
     if (cancelOnly && !o.cancelRequested) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!o.orderNumber.toLowerCase().includes(q) && !o.recipientName.toLowerCase().includes(q)) return false;
+      // 입금 내역의 이름으로도 찾을 수 있게 입금자명까지 검색한다.
+      if (!o.orderNumber.toLowerCase().includes(q) && !o.recipientName.toLowerCase().includes(q) && !(o.depositorName ?? "").toLowerCase().includes(q)) return false;
     }
     if (todayDeliveryOnly && !isToday(ev?.deliveryAt ?? "")) return false;
     if (todayDoneOnly && !isToday(ev?.deliveryAt ?? "")) return false;
@@ -459,7 +460,7 @@ export default function AdminHomePage() {
         </select>
         <input
           className="rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
-          placeholder="주문번호·고객명 검색"
+          placeholder="주문번호·고객명·입금자명 검색"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -492,6 +493,8 @@ export default function AdminHomePage() {
             {eventById.get(o.eventId) && <p className="mb-1 text-[12px] font-semibold text-accent-dark">{eventById.get(o.eventId)?.title}</p>}
             <p className="text-[13px]">
               {o.recipientName} ({o.recipientPhone}) · {PAYMENT_METHOD_LABEL[o.paymentMethod]}
+              {/* 받는 분과 다른 이름으로 입금한 경우만 눈에 띄게 — 입금 확인할 때 이 이름으로 찾는다. */}
+              {o.depositorName && <span className="ml-1 font-bold text-accent-dark">· 입금자 {o.depositorName}</span>}
             </p>
             {o.apartmentName && <p className="mt-1 text-[12.5px] font-semibold text-text-muted">🏢 {o.apartmentName}</p>}
             <p className="mt-1 text-[12.5px] text-text-muted">{o.addressSnapshot}</p>

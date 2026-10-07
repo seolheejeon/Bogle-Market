@@ -5,7 +5,7 @@ import Link from "next/link";
 import { listEvents } from "@/lib/data";
 import type { EventType, MarketEvent, Product } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
-import { formatPrice, formatDeadlineLabel } from "@/lib/format";
+import { formatPrice, formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
 import { useCart, type CartLine } from "@/lib/cart-context";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
@@ -132,11 +132,16 @@ export function CartView() {
                   const discountGroups = discountByEvent.find((g) => g.event.id === event.id)?.groups ?? [];
                   return (
                     <div key={event.id} className="mb-4">
-                      {typeGroups.length > 1 && (
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-bold text-accent-dark">{event.title}</p>
-                          <span className="text-[11px] text-text-muted">{formatDeadlineLabel(event.deadlineAt)}</span>
+                      {/* 문고리/사다드림은 회차가 하나뿐이어도 언제 마감하고 언제 받는지가
+                          중요해서 항상 보여준다. 택배는 마감/배송일 개념이 없어 여러 회차가
+                          섞였을 때만 이름으로 구분한다. */}
+                      {type !== "PARCEL" ? (
+                        <div className="mb-2 flex items-center justify-between gap-2 rounded-[8px] bg-bg-sunken px-2.5 py-1.5">
+                          <p className="text-xs font-bold text-accent-dark">{formatEventDateChip(event.deliveryAt)} 배송</p>
+                          <span className="text-[11px] font-semibold text-text-muted">{formatDeadlineLabel(event.deadlineAt)}</span>
                         </div>
+                      ) : (
+                        typeGroups.length > 1 && <p className="mb-2 text-xs font-bold text-accent-dark">{event.title}</p>
                       )}
                       {type === "PARCEL" && (
                         <p className="mb-1.5 text-[11.5px] text-text-muted">배송비 {shippingFee > 0 ? formatPrice(shippingFee) : "무료"}</p>

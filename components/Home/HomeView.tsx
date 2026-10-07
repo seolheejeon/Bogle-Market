@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { listEvents, listBanners, isBannerLive } from "@/lib/data";
+import { listEvents, listBanners, isBannerLive, getPopularListingIds } from "@/lib/data";
 import { resolveBannerHref } from "@/lib/banner-link";
-import { isEventOrderable, isEventVisibleToCustomers, isListingOrderable } from "@/lib/order-policy";
+import { ENABLED_EVENT_TYPES, isEventOrderable, isEventVisibleToCustomers, isListingOrderable } from "@/lib/order-policy";
 import type { Banner, EventType, MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatCountdownShort, formatDeadlineShort, formatPrice } from "@/lib/format";
@@ -23,6 +23,7 @@ export function HomeView() {
   const [events, setEvents] = useState<MarketEvent[] | null>(null);
   const [banners, setBanners] = useState<Banner[] | null>(null);
   const [heroIndex, setHeroIndex] = useState(0);
+  const [popularIds, setPopularIds] = useState<string[] | null>(null);
 
   useEffect(() => {
     // 노출 꺼둔 상품은 홈 화면 어디에도(히어로/마감임박/인기상품) 나오지 않게
@@ -34,6 +35,7 @@ export function HomeView() {
       ),
     );
     listBanners().then(setBanners);
+    getPopularListingIds().then(setPopularIds);
   }, []);
 
   // 1시간 특가 기능은 요청으로 화면에서 뺐다 — 예전에 특가로 저장된 이벤트가
@@ -96,15 +98,24 @@ export function HomeView() {
       .sort((a, b) => a.msLeft - b.msLeft);
   }, [events]);
 
-  // 마감된(주문 불가) 이벤트의 상품은 인기상품에서 아예 제외한다 — 예전엔
-  // closed 표시만 하고 그대로 목록에 남겨뒀었음.
-  const popular = useMemo(() => {
+  // 인기상품 — 실제로 많이 팔린 순서(getPopularListingIds)로, 배송방식별로 따로
+  // 뽑는다. 사다드림이 훨씬 잘 팔려도 문고리 인기상품이 묻히지 않도록 섹션을
+  // 나누고, 열려 있는 배송방식이 하나뿐이면 섹션도 하나만 보인다. 아직 안 팔린
+  // 상품은 순위 뒤에 등록순으로 채우되 "BEST" 딱지는 실제로 팔린 상품에만 붙인다.
+  // 마감된(주문 불가) 이벤트의 상품은 아예 제외한다.
+  const popularSections = useMemo(() => {
     if (!events) return [];
-    return events
-      .filter(isEventOrderable)
-      .flatMap((e) => e.products)
-      .slice(0, 4);
-  }, [events]);
+    const rankOf = new Map((popularIds ?? []).map((id, i) => [id, i]));
+    return ENABLED_EVENT_TYPES.map((type) => {
+      const products = events
+        .filter((e) => e.type === type && isEventOrderable(e))
+        .flatMap((e) => e.products)
+        .map((p, order) => ({ p, order, rank: rankOf.get(p.id) }))
+        .sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || a.order - b.order)
+        .slice(0, 4);
+      return { type, products };
+    }).filter((s) => s.products.length > 0);
+  }, [events, popularIds]);
 
   // Pointer Events unify mobile touch swipe and desktop mouse drag in one
   // handler set. `moved` distinguishes a drag from a tap so the hero's Link
@@ -250,16 +261,16 @@ export function HomeView() {
         </section>
       )}
 
-      {popular.length > 0 && (
-        <section className="mt-5">
-          <p className="mb-2 text-[12.5px] font-bold text-text-muted">🔥 인기상품</p>
+      {popularSections.map(({ type, products }) => (
+        <section key={type} className="mt-5">
+          <p className="mb-2 text-[12.5px] font-bold text-text-muted">🔥 {popularSections.length > 1 ? `${EVENT_TYPE_LABEL[type]} 인기상품` : "인기상품"}</p>
           <div className="grid grid-cols-2 gap-x-2 gap-y-2.5">
-            {popular.map((product, i) => (
-              <ProductGridCard key={product.id} product={product} rankBadge={`BEST ${i + 1}`} />
+            {products.map(({ p, rank }, i) => (
+              <ProductGridCard key={p.id} product={p} rankBadge={rank !== undefined ? `BEST ${i + 1}` : undefined} />
             ))}
           </div>
         </section>
-      )}
+      ))}
     </div>
   );
 }

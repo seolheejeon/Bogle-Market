@@ -345,8 +345,12 @@ create table if not exists orders (
   -- 이미 차감되어 있는 값이다(products.discount 정책이 나중에 바뀌어도 과거
   -- 주문 내역이 영향받지 않도록 스냅샷으로 기록). 할인이 없으면 0.
   discount_total integer not null default 0 check (discount_total >= 0),
+  -- 입금자명 — 받는 분과 입금하는 사람이 다를 때(가족 계좌 등) 관리자가 입금
+  -- 내역과 주문을 맞추기 위한 값. 비어 있으면 받는 분 이름으로 입금한 것.
+  depositor_name text,
   created_at timestamptz not null default now()
 );
+alter table orders add column if not exists depositor_name text;
 
 create table if not exists order_items (
   id uuid primary key default gen_random_uuid(),
@@ -701,15 +705,19 @@ $$;
 -- 빈 배열로만 보게 되는 버그가 있었다(체크아웃 직후 리다이렉트되는 주문상세,
 -- 마이페이지의 비회원 주문조회 둘 다 영향받음). SECURITY DEFINER인 이 함수
 -- 안에서 order_items까지 함께 조회해 RLS를 우회한다.
+-- 2026-10-07: 주문 상세의 "배송지 수정" 폼을 기존 값으로 채우려고 배송지
+-- 구성요소/입금자명/배송비/할인 컬럼을 추가 — 반환 타입이 바뀌어 지우고 다시 만든다.
+drop function if exists lookup_guest_orders(text, text);
 create or replace function lookup_guest_orders(p_name text, p_pin text)
 returns table (
   id uuid, order_number text, event_id uuid, batch_id uuid, profile_id uuid,
   guest_name text, guest_phone text, guest_pin text, recipient_name text, recipient_phone text,
-  address_snapshot text, apartment_name text, payment_method text, status text,
+  address_snapshot text, road_address text, detail_address text, entrance_method text, delivery_memo text,
+  apartment_name text, depositor_name text, payment_method text, status text,
   cancel_requested boolean, cancel_reason text, courier_code text, tracking_number text,
   refund_reason text, refund_reason_detail text, refund_photo_url text, refund_requested_at timestamptz,
   refund_reject_reason text,
-  total integer, created_at timestamptz, items jsonb
+  total integer, shipping_fee integer, discount_total integer, created_at timestamptz, items jsonb
 )
 language sql
 security definer
@@ -718,11 +726,12 @@ as $$
   select
     o.id, o.order_number, o.event_id, o.batch_id, o.profile_id,
     o.guest_name, o.guest_phone, o.guest_pin, o.recipient_name, o.recipient_phone,
-    o.address_snapshot, o.apartment_name, o.payment_method, o.status,
+    o.address_snapshot, o.road_address, o.detail_address, o.entrance_method, o.delivery_memo,
+    o.apartment_name, o.depositor_name, o.payment_method, o.status,
     o.cancel_requested, o.cancel_reason, o.courier_code, o.tracking_number,
     o.refund_reason, o.refund_reason_detail, o.refund_photo_url, o.refund_requested_at,
     o.refund_reject_reason,
-    o.total, o.created_at,
+    o.total, o.shipping_fee, o.discount_total, o.created_at,
     coalesce(
       (select jsonb_agg(jsonb_build_object(
         'event_product_id', oi.event_product_id,
@@ -831,6 +840,81 @@ begin
 end;
 $$;
 
+-- 홈 "인기상품" 순위용 — 취소 안 된 주문 수량 합계가 많은 리스팅 순서대로
+-- id만 돌려준다(판매 수량 자체는 노출하지 않음). order_items는 RLS로 본인
+-- 주문만 보이므로 집계는 SECURITY DEFINER로 한다.
+create or replace function popular_listing_ids()
+returns table (event_product_id uuid)
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select oi.event_product_id
+  from order_items oi
+  join orders o on o.id = oi.order_id
+  where o.status <> 'cancelled' and oi.event_product_id is not null
+  group by oi.event_product_id
+  order by sum(oi.quantity) desc
+  limit 200;
+$$;
+
+-- 고객이 주문 후 배송지/연락처/입금자명을 직접 고치는 RPC — 회원은 본인
+-- 주문(auth.uid()), 비회원은 이름+PIN으로 확인한다. 아직 발주확인 전
+-- (wait/paid)이고 이벤트 마감 전일 때만 허용(택배는 마감 개념이 없어 발주확인
+-- 전까지). 회원 RLS 정책은 status 전환만 허용하므로 회원도 이 RPC를 쓴다.
+-- guest_name은 건드리지 않아서 받는 분 이름을 바꿔도 기존 이름+PIN 조회는 그대로 된다.
+create or replace function update_order_delivery(
+  p_order_id uuid,
+  p_name text,
+  p_pin text,
+  p_recipient_name text,
+  p_recipient_phone text,
+  p_address_snapshot text,
+  p_road_address text,
+  p_detail_address text,
+  p_entrance_method text,
+  p_delivery_memo text,
+  p_apartment_name text,
+  p_depositor_name text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+begin
+  update orders o
+  set recipient_name = p_recipient_name,
+      recipient_phone = p_recipient_phone,
+      address_snapshot = p_address_snapshot,
+      road_address = p_road_address,
+      detail_address = p_detail_address,
+      entrance_method = nullif(trim(p_entrance_method), ''),
+      delivery_memo = nullif(trim(p_delivery_memo), ''),
+      apartment_name = nullif(trim(p_apartment_name), ''),
+      depositor_name = nullif(trim(p_depositor_name), '')
+  from events e
+  where o.id = p_order_id
+    and e.id = o.event_id
+    and (
+      (auth.uid() is not null and o.profile_id = auth.uid())
+      or (o.profile_id is null and o.guest_pin = p_pin and lower(coalesce(o.guest_name, o.recipient_name)) = lower(p_name))
+    )
+    and o.status in ('wait', 'paid')
+    and o.cancel_requested = false
+    and e.status <> 'ended'
+    and (e.type = 'PARCEL' or e.deadline_at > now())
+  returning o.id into v_id;
+
+  if v_id is null then
+    raise exception '주문 마감이 지났거나 이미 발주가 확인된 주문이라 수정할 수 없어요. 변경이 필요하면 문의해 주세요.';
+  end if;
+end;
+$$;
+
 -- 주문 생성(orders + order_items를 한 트랜잭션으로) — 클라이언트에서 각각
 -- insert하던 방식은 게스트 주문에서 항상 실패했다: order_items의 INSERT
 -- 정책(`exists (select 1 from orders where id = order_id)`)이 검사하는
@@ -846,6 +930,8 @@ $$;
 -- 17개짜리 시그니처가 별도 오버로드로 남을 수 있다 — 먼저 지우고 새로
 -- 만든다(schema.sql 히스토리의 다른 함수들과 동일한 패턴).
 drop function if exists create_order(uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, text, text, integer, timestamptz, jsonb, integer);
+-- p_depositor_name 추가(2026-10-07)로 22개짜리 시그니처도 같은 이유로 지운다.
+drop function if exists create_order(uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, text, text, integer, timestamptz, jsonb, integer, text, text, text, text, integer);
 create or replace function create_order(
   p_id uuid,
   p_order_number text,
@@ -868,7 +954,8 @@ create or replace function create_order(
   p_detail_address text default null,
   p_entrance_method text default null,
   p_delivery_memo text default null,
-  p_discount_total integer default 0
+  p_discount_total integer default 0,
+  p_depositor_name text default null
 )
 returns void
 language plpgsql
@@ -948,11 +1035,11 @@ begin
   insert into orders (
     id, order_number, event_id, batch_id, profile_id, guest_name, guest_phone, guest_pin,
     recipient_name, recipient_phone, address_snapshot, road_address, detail_address, entrance_method, delivery_memo,
-    apartment_name, payment_method, status, total, shipping_fee, discount_total, created_at
+    apartment_name, payment_method, status, total, shipping_fee, discount_total, depositor_name, created_at
   ) values (
     p_id, p_order_number, p_event_id, p_batch_id, p_profile_id, p_guest_name, p_guest_phone, p_guest_pin,
     p_recipient_name, p_recipient_phone, p_address_snapshot, p_road_address, p_detail_address, p_entrance_method, p_delivery_memo,
-    p_apartment_name, p_payment_method, 'wait', p_total, p_shipping_fee, p_discount_total, p_created_at
+    p_apartment_name, p_payment_method, 'wait', p_total, p_shipping_fee, p_discount_total, nullif(trim(p_depositor_name), ''), p_created_at
   );
 
   insert into order_items (order_id, event_product_id, product_name, price_snapshot, quantity, options, stock_value_ids)

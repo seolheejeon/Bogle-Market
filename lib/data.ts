@@ -43,7 +43,7 @@ import type {
   StoreSettings,
 } from "@/types";
 import { EMPTY_STORE_SETTINGS } from "@/types";
-import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
+import { canEditOrderDelivery, isEventOrderable, isListingOrderable } from "@/lib/order-policy";
 import { generateStockCombos, comboValueIds } from "@/lib/product-options";
 import { resolveListingId } from "@/lib/banner-link";
 
@@ -762,6 +762,24 @@ export async function getSoldQuantities(eventId: string): Promise<Record<string,
   return result;
 }
 
+// 홈 "인기상품" 순위 — 많이 팔린(취소 제외) 리스팅 id를 순서대로. 판매 수량은
+// 손님 화면에 노출하지 않으려고 서버가 id 순서만 돌려준다(popular_listing_ids).
+// 실패해도 홈이 깨지지 않도록 빈 배열로 대신한다(아직 RPC가 없는 DB 포함).
+export async function getPopularListingIds(): Promise<string[]> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.rpc("popular_listing_ids");
+    if (error) return [];
+    return (data ?? []).map((row: { event_product_id: string }) => row.event_product_id);
+  }
+  const sold = new Map<string, number>();
+  for (const o of loadOrders()) {
+    if (o.status === "cancelled") continue;
+    for (const item of o.items) sold.set(item.productId, (sold.get(item.productId) ?? 0) + item.quantity);
+  }
+  return [...sold.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+}
+
 // ---------- Notifications ----------
 // profileId null (viewer not logged in) only ever returns broadcasts;
 // logged-in viewers get broadcasts plus whatever's personally addressed to them.
@@ -833,6 +851,7 @@ export interface NewOrderInput {
   entranceMethod?: string;
   deliveryMemo?: string;
   apartmentName?: string;
+  depositorName?: string;
   paymentMethod: PaymentMethod;
   items: OrderItem[];
   total: number;
@@ -926,6 +945,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       p_detail_address: input.detailAddress ?? null,
       p_entrance_method: input.entranceMethod || null,
       p_delivery_memo: input.deliveryMemo || null,
+      p_depositor_name: input.depositorName?.trim() || null,
     });
     if (error) throw error;
     const orderRow = {
@@ -945,6 +965,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       entrance_method: input.entranceMethod || null,
       delivery_memo: input.deliveryMemo || null,
       apartment_name: input.apartmentName || null,
+      depositor_name: input.depositorName?.trim() || null,
       payment_method: input.paymentMethod,
       status: "wait",
       cancel_requested: false,
@@ -987,6 +1008,7 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     apartmentName: input.apartmentName || null,
     recipientName: input.recipientName,
     recipientPhone: input.recipientPhone,
+    depositorName: input.depositorName?.trim() || null,
     paymentMethod: input.paymentMethod,
     status: "wait",
     cancelRequested: false,
@@ -1235,6 +1257,71 @@ export async function cancelOrder(orderId: string, opts: { profileId?: string | 
     throw new Error("이미 발주가 확인된 주문이에요. 취소가 필요하면 관리자에게 문의해 주세요.");
   }
   await updateOrderStatus(orderId, "cancelled");
+}
+
+export interface OrderDeliveryPatch {
+  recipientName: string;
+  recipientPhone: string;
+  addressSnapshot: string;
+  roadAddress: string;
+  detailAddress: string;
+  entranceMethod?: string;
+  deliveryMemo?: string;
+  apartmentName?: string;
+  depositorName?: string;
+}
+
+// 고객이 주문 후 배송지/연락처/입금자명을 고친다 — 발주확인 전 + 회차 마감 전만
+// (lib/order-policy.ts의 canEditOrderDelivery). 회원/비회원 모두 SECURITY
+// DEFINER RPC(update_order_delivery)가 본인 확인과 조건 검사를 서버에서 한다.
+export async function updateOrderDelivery(
+  orderId: string,
+  patch: OrderDeliveryPatch,
+  auth: { guestName?: string; guestPin?: string },
+): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.rpc("update_order_delivery", {
+      p_order_id: orderId,
+      p_name: auth.guestName ?? null,
+      p_pin: auth.guestPin ?? null,
+      p_recipient_name: patch.recipientName,
+      p_recipient_phone: patch.recipientPhone,
+      p_address_snapshot: patch.addressSnapshot,
+      p_road_address: patch.roadAddress,
+      p_detail_address: patch.detailAddress,
+      p_entrance_method: patch.entranceMethod ?? null,
+      p_delivery_memo: patch.deliveryMemo ?? null,
+      p_apartment_name: patch.apartmentName ?? null,
+      p_depositor_name: patch.depositorName ?? null,
+    });
+    if (error) throw error;
+    return;
+  }
+  const orders = loadOrders();
+  const target = orders.find((o) => o.id === orderId);
+  const event = target ? loadEvents().find((e) => e.id === target.eventId) : undefined;
+  if (!target || !canEditOrderDelivery(target, event)) {
+    throw new Error("주문 마감이 지났거나 이미 발주가 확인된 주문이라 수정할 수 없어요. 변경이 필요하면 문의해 주세요.");
+  }
+  saveOrders(
+    orders.map((o) =>
+      o.id === orderId
+        ? {
+            ...o,
+            recipientName: patch.recipientName,
+            recipientPhone: patch.recipientPhone,
+            addressSnapshot: patch.addressSnapshot,
+            roadAddress: patch.roadAddress,
+            detailAddress: patch.detailAddress,
+            entranceMethod: patch.entranceMethod?.trim() || null,
+            deliveryMemo: patch.deliveryMemo?.trim() || null,
+            apartmentName: patch.apartmentName?.trim() || null,
+            depositorName: patch.depositorName?.trim() || null,
+          }
+        : o,
+    ),
+  );
 }
 
 // 발주확인(confirmed)/배송중(ship) 단계의 취소는 즉시 처리하지 않고 "요청"만
@@ -1872,6 +1959,7 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     apartmentName: row.apartment_name ?? null,
     recipientName: row.recipient_name,
     recipientPhone: row.recipient_phone,
+    depositorName: row.depositor_name ?? null,
     paymentMethod: row.payment_method,
     status: row.status,
     cancelRequested: row.cancel_requested ?? false,
