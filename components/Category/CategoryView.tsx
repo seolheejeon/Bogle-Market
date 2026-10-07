@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { listEvents } from "@/lib/data";
-import { isEventOrderable, isEventVisibleToCustomers } from "@/lib/order-policy";
+import { ENABLED_EVENT_TYPES, isEventOrderable, isEventVisibleToCustomers } from "@/lib/order-policy";
 import type { EventType, MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
 import { ProductGridCard } from "@/components/ProductGridCard";
 
-const TABS: EventType[] = ["DOOR", "GROUP_BUY", "PARCEL"];
+// 아직 오픈 안 한 배송방식은 탭 자체를 안 보여준다(lib/order-policy.ts 참고).
+const TABS: EventType[] = ENABLED_EVENT_TYPES;
 
 // 상품 상세에서 "←"로 뒤로 왔을 때 마지막으로 보던 배송방식/날짜탭이 그대로
 // 남아있어야 해서(브라우저 back이 이 화면으로 돌아왔을 때), 선택 상태를 URL
@@ -24,7 +25,11 @@ export function CategoryView({ initialType }: { initialType?: EventType }) {
   const urlEventId = searchParams.get("event");
 
   const [events, setEvents] = useState<MarketEvent[] | null>(null);
-  const [type, setType] = useState<EventType>((urlType && TABS.includes(urlType) ? urlType : initialType) ?? "DOOR");
+  const [type, setType] = useState<EventType>(() => {
+    if (urlType && TABS.includes(urlType)) return urlType;
+    if (initialType && TABS.includes(initialType)) return initialType;
+    return TABS[0];
+  });
   const [selectedEventId, setSelectedEventId] = useState<string | null>(urlEventId);
 
   useEffect(() => {

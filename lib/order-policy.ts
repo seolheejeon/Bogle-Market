@@ -1,4 +1,21 @@
-import type { MarketEvent, Product } from "@/types";
+import type { EventType, MarketEvent, Product } from "@/types";
+
+const ALL_EVENT_TYPES: EventType[] = ["DOOR", "GROUP_BUY", "PARCEL"];
+
+// 운영 사이트에서 지금 열어둔 배송방식만 고객에게 노출한다 — 사다드림부터
+// 먼저 오픈하고 문고리/택배는 나중에 여는 식의 단계적 오픈용. Netlify 환경변수
+// `NEXT_PUBLIC_ENABLED_EVENT_TYPES`에 "GROUP_BUY"처럼 쉼표로 나열하면 그것만
+// 보이고, 비어있거나 알 수 없는 값뿐이면 전부 연다(개발 서버/기존 동작 그대로).
+// NEXT_PUBLIC_ 값은 빌드 시점에 박히므로, 값을 바꾼 뒤엔 재배포해야 반영된다.
+export const ENABLED_EVENT_TYPES: EventType[] = (() => {
+  const raw = (process.env.NEXT_PUBLIC_ENABLED_EVENT_TYPES ?? "").split(",").map((s) => s.trim());
+  const picked = ALL_EVENT_TYPES.filter((t) => raw.includes(t));
+  return picked.length > 0 ? picked : ALL_EVENT_TYPES;
+})();
+
+export function isEventTypeEnabled(type: EventType): boolean {
+  return ENABLED_EVENT_TYPES.includes(type);
+}
 
 export type OrderPolicy = "STRICT_DEADLINE" | "SOFT_DEADLINE" | "ALWAYS_OPEN";
 
@@ -31,8 +48,10 @@ export function isEventOrderable(event: Pick<MarketEvent, "type" | "flashSale" |
 // 의미가 없으므로(회차 개념 자체가 없음) 이 자동 숨김 대상에서 빼고,
 // 관리자가 직접 "종료"를 눌렀을 때만(status==='ended') 같은 규칙을 적용해
 // 숨긴다. 직접 링크(상품 상세 등)로 들어온 경우는 이 함수를 거치지 않으므로
-// 계속 열람은 가능하고 주문만 막힌다.
+// 계속 열람은 가능하고 주문만 막힌다. 아직 오픈 안 한 배송방식
+// (ENABLED_EVENT_TYPES 밖)은 상태와 무관하게 항상 숨긴다.
 export function isEventVisibleToCustomers(event: Pick<MarketEvent, "type" | "status" | "deliveryAt">): boolean {
+  if (!isEventTypeEnabled(event.type)) return false;
   if (event.type === "PARCEL" && event.status !== "ended") return true;
   const d = new Date(event.deliveryAt);
   const hideAt = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);

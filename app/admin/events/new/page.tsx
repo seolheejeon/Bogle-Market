@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createEvent } from "@/lib/data";
 import type { EventType } from "@/types";
+import { EVENT_TYPE_LABEL } from "@/types";
+import { ENABLED_EVENT_TYPES } from "@/lib/order-policy";
 import { toDateInputValue, dateInputValueToIso } from "@/lib/format";
 
 function toLocalInputValue(d: Date) {
@@ -13,7 +15,7 @@ function toLocalInputValue(d: Date) {
 
 export default function NewEventPage() {
   const router = useRouter();
-  const [type, setType] = useState<EventType>("DOOR");
+  const [type, setType] = useState<EventType>(ENABLED_EVENT_TYPES[0]);
   const [title, setTitle] = useState("");
   const [flashSale, setFlashSale] = useState(false);
   const [deadlineAt, setDeadlineAt] = useState(toLocalInputValue(new Date(Date.now() + 24 * 3600 * 1000)));
@@ -59,9 +61,12 @@ export default function NewEventPage() {
         <label className="text-[12.5px] font-semibold text-text-muted">
           구분
           <select className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" value={type} onChange={(e) => setType(e.target.value as EventType)}>
-            <option value="DOOR">문고리배송</option>
-            <option value="GROUP_BUY">사다드림</option>
-            <option value="PARCEL">택배</option>
+            {/* 아직 오픈 안 한 배송방식은 만들어도 고객에게 안 보이므로 선택지에서 뺀다. */}
+            {ENABLED_EVENT_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {EVENT_TYPE_LABEL[t]}
+              </option>
+            ))}
           </select>
         </label>
         <label className="text-[12.5px] font-semibold text-text-muted">
