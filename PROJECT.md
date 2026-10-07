@@ -106,7 +106,10 @@
 - **Netlify** — 배포 대상, GitHub 연동 + 자동배포 연결됨 (`netlify.toml`, `@netlify/plugin-nextjs`)
 - **개발/운영 서버 분리 (2026-10-07 결정)** — 사다드림을 먼저 실제 오픈하기 위해 운영(prd) 환경을 따로 만듦
   - 개발: 기존 Netlify 사이트(`main` 브랜치 자동배포) + 기존 Supabase 프로젝트(테스트 데이터 섞여 있음). 로컬 `.env.local`도 이쪽을 봄
-  - 운영: 새 Netlify 사이트(`prod` 브랜치 자동배포) + **새 Supabase 프로젝트**(`lib/supabase/schema.sql`로 깨끗하게 생성). 테스트가 끝난 것만 `main` → `prod`로 병합해서 반영
+  - 운영: 새 Netlify 사이트 **https://bogle-market-prd.netlify.app** (`prod` 브랜치 자동배포) + **새 Supabase 프로젝트 `bogle-prod`**(`lib/supabase/schema.sql`로 깨끗하게 생성, 2026-10-07 적용). 테스트가 끝난 것만 `main` → `prod`로 병합해서 반영(`git checkout prod; git merge --ff-only main; git push origin prod`)
+  - 운영 Netlify 환경변수: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`(publishable key), `NEXT_PUBLIC_ENABLED_EVENT_TYPES=GROUP_BUY`, `NEXT_PUBLIC_SITE_URL`. 웹 푸시(VAPID/service role)·토스 키는 아직 미설정
+  - 운영 관리자 계정: `bogle1` (SQL로 `is_admin=true` 지정)
+  - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저)
   - 단계적 오픈: 환경변수 `NEXT_PUBLIC_ENABLED_EVENT_TYPES`(예: `GROUP_BUY`)로 고객에게 노출할 배송방식을 제한 — 운영 사이트는 `GROUP_BUY`(사다드림)만. 비워두면 전부 노출(개발 서버). `lib/order-policy.ts`의 `ENABLED_EVENT_TYPES`/`isEventTypeEnabled`가 카테고리 탭, 홈/카테고리 목록(`isEventVisibleToCustomers`), 관리자 새 이벤트 등록의 구분 선택지에 적용됨. 빌드 시점에 박히는 값이라 바꾼 뒤 재배포 필요
 - **PWA + 웹 푸시** — 직접 작성한 서비스워커(`public/sw.js`, 프레임워크 플러그인 미사용) + `web-push`(VAPID 서명·발송) + `sharp`(devDependency, 아이콘 생성 스크립트 전용)
 - 마스코트: `public/images/bogle.png` (보글이)

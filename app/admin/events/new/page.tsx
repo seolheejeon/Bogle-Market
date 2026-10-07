@@ -17,7 +17,6 @@ export default function NewEventPage() {
   const router = useRouter();
   const [type, setType] = useState<EventType>(ENABLED_EVENT_TYPES[0]);
   const [title, setTitle] = useState("");
-  const [flashSale, setFlashSale] = useState(false);
   const [deadlineAt, setDeadlineAt] = useState(toLocalInputValue(new Date(Date.now() + 24 * 3600 * 1000)));
   const [deliveryAt, setDeliveryAt] = useState(toDateInputValue(new Date(Date.now() + 48 * 3600 * 1000).toISOString()));
   const [notice, setNotice] = useState("");
@@ -40,7 +39,8 @@ export default function NewEventPage() {
       const event = await createEvent({
         type,
         title: title.trim(),
-        flashSale: type === "PARCEL" ? false : flashSale,
+        // 1시간 특가 지정 기능은 관리자 화면에서 뺐다(요청) — 새 이벤트는 항상 일반 이벤트.
+        flashSale: false,
         status: "open",
         deadlineAt: type === "PARCEL" ? now : new Date(deadlineAt).toISOString(),
         deliveryAt: type === "PARCEL" ? now : dateInputValueToIso(deliveryAt),
@@ -75,10 +75,6 @@ export default function NewEventPage() {
         </label>
         {type !== "PARCEL" && (
           <>
-            <label className="flex items-center gap-2 text-[12.5px] font-semibold text-text-muted">
-              <input type="checkbox" checked={flashSale} onChange={(e) => setFlashSale(e.target.checked)} />
-              🔥 1시간 특가 이벤트로 지정 (마감이 지나면 배송방식과 무관하게 즉시 주문 마감)
-            </label>
             <label className="text-[12.5px] font-semibold text-text-muted">
               주문 마감
               <input type="datetime-local" className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" value={deadlineAt} onChange={(e) => setDeadlineAt(e.target.value)} />
