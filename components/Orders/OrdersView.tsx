@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { listOrdersForProfile, lookupGuestOrders, listEvents } from "@/lib/data";
+import { saveGuestLookup } from "@/lib/guest-session";
 import type { MarketEvent, Order, OrderStatus } from "@/types";
 import { ORDER_STATUS_LABEL } from "@/types";
 import { formatPrice, formatDateTime, formatEventDateChip } from "@/lib/format";
@@ -61,7 +62,12 @@ export function OrdersView() {
           />
           <button
             className="rounded-[10px] bg-accent py-2.5 text-[13px] font-bold text-white"
-            onClick={async () => setGuestOrders(await lookupGuestOrders(guestName.trim(), guestPin.trim()))}
+            onClick={async () => {
+              const found = await lookupGuestOrders(guestName.trim(), guestPin.trim());
+              // 주문 상세로 넘어갈 때 확인번호를 URL에 싣지 않도록 이 탭에 보관해둔다.
+              if (found.length > 0) saveGuestLookup(guestName.trim(), guestPin.trim());
+              setGuestOrders(found);
+            }}
           >
             조회하기
           </button>
@@ -70,7 +76,7 @@ export function OrdersView() {
         {guestOrders !== undefined && guestOrders.length > 0 && (
           <div className="mt-4">
             {guestOrders.map((o) => (
-              <OrderRow key={o.id} order={o} event={eventById.get(o.eventId)} href={`/orders/${o.id}?gn=${encodeURIComponent(guestName.trim())}&pin=${guestPin.trim()}`} />
+              <OrderRow key={o.id} order={o} event={eventById.get(o.eventId)} href={`/orders/${o.id}`} />
             ))}
           </div>
         )}

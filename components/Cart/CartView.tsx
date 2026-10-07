@@ -11,7 +11,7 @@ import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { unitPrice, remainingForCombo, optionSelectionLabel } from "@/lib/product-options";
 import { totalShippingFee } from "@/lib/shipping";
-import { groupDiscounts } from "@/lib/discount";
+import { eventDiscountTotal } from "@/lib/discount";
 import { isListingOrderable } from "@/lib/order-policy";
 
 // 체크아웃 화면과 동일한 순서(components/Checkout/CheckoutView.tsx의
@@ -74,11 +74,16 @@ export function CartView() {
   // 할인은 배송방식과 무관하게 적용되고(shippingByEvent와 달리 PARCEL로
   // 거르지 않음), 이벤트(=주문 단위) 안에서 같은 카탈로그 상품끼리만 묶어
   // 계산한다(lib/discount.ts) — 실제 체결금액과 항상 같은 방식으로.
+  // 함께 구매 할인(이벤트의 comboDiscounts)도 같은 이벤트 안에서 더한다 —
+  // 체크아웃(CheckoutView.tsx)과 같은 eventDiscountTotal로 계산해 금액이 항상 일치.
   const discountByEvent = grouped.map((g) => ({
     event: g.event,
-    groups: groupDiscounts(g.items.map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty, qty: i.line.qty }))),
+    ...eventDiscountTotal(
+      g.event.comboDiscounts,
+      g.items.map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty, qty: i.line.qty })),
+    ),
   }));
-  const totalDiscountAmount = discountByEvent.reduce((sum, g) => sum + g.groups.reduce((s, x) => s + x.amount, 0), 0);
+  const totalDiscountAmount = discountByEvent.reduce((sum, g) => sum + g.total, 0);
 
   // 체크아웃에서 배송방식별로 주문이 자동 분리되는 것과 같은 기준으로,
   // 장바구니도 배송방식별 섹션으로 먼저 나누고 그 안에서 이벤트(회차)별로
@@ -129,7 +134,8 @@ export function CartView() {
               {!collapsed &&
                 typeGroups.map(({ event, items }) => {
                   const shippingFee = shippingByEvent.find((g) => g.event.id === event.id)?.fee ?? 0;
-                  const discountGroups = discountByEvent.find((g) => g.event.id === event.id)?.groups ?? [];
+                  const discount = discountByEvent.find((g) => g.event.id === event.id);
+                  const nameOf = (catalogProductId: string) => event.products.find((p) => p.catalogProductId === catalogProductId)?.name ?? "상품";
                   return (
                     <div key={event.id} className="mb-4">
                       {/* 문고리/사다드림은 회차가 하나뿐이어도 언제 마감하고 언제 받는지가
@@ -146,11 +152,18 @@ export function CartView() {
                       {type === "PARCEL" && (
                         <p className="mb-1.5 text-[11.5px] text-text-muted">배송비 {shippingFee > 0 ? formatPrice(shippingFee) : "무료"}</p>
                       )}
-                      {discountGroups.length > 0 && (
+                      {discount && discount.total > 0 && (
                         <p className="mb-1.5 text-[11.5px] font-semibold text-accent-dark">
-                          할인 -{formatPrice(discountGroups.reduce((sum, g) => sum + g.amount, 0))}
+                          할인 -{formatPrice(discount.total)}
+                          {discount.combo.total > 0 && <span className="font-normal"> (함께 구매 -{formatPrice(discount.combo.total)} 포함)</span>}
                         </p>
                       )}
+                      {/* 하나라도 담았지만 덜 채운 함께 구매 할인 — 뭘 더 담으면 되는지 알려준다. */}
+                      {discount?.combo.hints.map(({ combo, missing }) => (
+                        <p key={combo.id} className="mb-1.5 rounded-[8px] bg-accent-soft px-2.5 py-1.5 text-[11.5px] font-semibold text-accent-dark">
+                          🎁 {missing.map((m) => `${nameOf(m.catalogProductId)} ${m.qty}개`).join(", ")} 더 담으면 {formatPrice(combo.amountOff)} 추가 할인
+                        </p>
+                      ))}
                       {items.map(({ product, line }) => (
                         <div key={`${product.id}::${line.optionValueIds.join(",")}`} className="flex items-center gap-3 py-2">
                           <ProductPhoto

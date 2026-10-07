@@ -14,6 +14,7 @@ import { OrderStatusBadge } from "@/components/Badge";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
 import { SupportLinks } from "@/components/SupportLinks";
 import { AddressFields, type AddressFieldsValue } from "@/components/AddressFields";
+import { saveGuestLookup, useGuestLookup, useIsClient } from "@/lib/guest-session";
 
 const STEPS: { value: OrderStatus; label: string }[] = [
   { value: "wait", label: "입금대기" },
@@ -23,9 +24,20 @@ const STEPS: { value: OrderStatus; label: string }[] = [
   { value: "done", label: "배송완료" },
 ];
 
-export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: string; guestName?: string; guestPin?: string }) {
+export function OrderDetailView({ orderId, legacyGuestName, legacyGuestPin }: { orderId: string; legacyGuestName?: string; legacyGuestPin?: string }) {
   const router = useRouter();
   const { profile, loading } = useAuth();
+  // 비회원 조회 정보는 이 탭의 sessionStorage에서 읽는다(lib/guest-session.ts).
+  // 예전 방식 링크(?gn=&pin=)로 들어오면 탭에 옮겨 담고 주소창에서 바로 지운다.
+  const storedGuest = useGuestLookup();
+  const isClient = useIsClient();
+  const guestName = storedGuest?.name ?? legacyGuestName;
+  const guestPin = storedGuest?.pin ?? legacyGuestPin;
+  useEffect(() => {
+    if (!legacyGuestName || !legacyGuestPin) return;
+    saveGuestLookup(legacyGuestName, legacyGuestPin);
+    router.replace(`/orders/${orderId}`);
+  }, [legacyGuestName, legacyGuestPin, orderId, router]);
   const [order, setOrder] = useState<Order | null | undefined>(undefined);
   // 한 번의 체크아웃(batchId)에서 같이 만들어진 다른 이벤트의 주문들 — 이벤트가
   // 하나뿐인 보통의 주문에서는 항상 빈 배열.
@@ -58,10 +70,10 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
   }
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || !isClient) return;
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, loading, orderId, guestName, guestPin]);
+  }, [profile, loading, isClient, orderId, guestName, guestPin]);
 
   useEffect(() => {
     if (!order) return;
@@ -76,7 +88,7 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
       ? STEPS.length - 1
       : STEPS.findIndex((s) => s.value === order.status)
     : -1;
-  const siblingHref = (id: string) => (guestName && guestPin ? `/orders/${id}?gn=${encodeURIComponent(guestName)}&pin=${guestPin}` : `/orders/${id}`);
+  const siblingHref = (id: string) => `/orders/${id}`;
 
   const canSelfCancel = order?.status === "wait" || order?.status === "paid";
   const cancelPending = order?.cancelRequested ?? false;
@@ -163,7 +175,14 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
       </div>
       <div className="p-4">
         {order === undefined && <p className="text-sm text-text-muted">불러오는 중...</p>}
-        {order === null && <p className="text-sm text-text-muted">주문을 찾을 수 없어요. 로그인하거나 주문번호로 조회해 주세요.</p>}
+        {order === null && (
+          <div className="text-sm text-text-muted">
+            <p className="mb-3">주문을 찾을 수 없어요. 회원은 로그인하고, 비회원은 이름과 확인번호로 다시 조회해 주세요.</p>
+            <Link href="/orders" className="inline-block rounded-[10px] bg-accent px-4 py-2.5 text-[13px] font-bold text-white">
+              내 주문 조회하기
+            </Link>
+          </div>
+        )}
         {order && (
           <>
             <div className="mb-2 flex items-center justify-between">

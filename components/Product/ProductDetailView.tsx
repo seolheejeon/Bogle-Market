@@ -19,7 +19,7 @@ import { ProductGridCard } from "@/components/ProductGridCard";
 import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 import { flyToCart, showAddedToast } from "@/lib/cart-feedback";
-import { describeDiscount } from "@/lib/discount";
+import { describeCombo, describeDiscount } from "@/lib/discount";
 
 export function ProductDetailView({ productId }: { productId: string }) {
   const router = useRouter();
@@ -299,6 +299,14 @@ export function ProductDetailView({ productId }: { productId: string }) {
             {describeDiscount(product.discount)}
           </p>
         )}
+        {/* 이 상품이 들어간 함께 구매 할인 — 같이 사면 좋은 상품을 바로 알 수 있게. */}
+        {(event.comboDiscounts ?? [])
+          .filter((c) => c.items.some((it) => it.catalogProductId === product.catalogProductId))
+          .map((c) => (
+            <p key={c.id} className="mb-1.5 rounded-[8px] bg-accent-soft px-2.5 py-1.5 text-[12px] font-bold text-accent-dark">
+              🎁 {describeCombo(c, (id) => event.products.find((p) => p.catalogProductId === id)?.name ?? "상품")}
+            </p>
+          ))}
 
         {(product.optionGroups ?? []).length > 0 && (
           <div className="mb-4 flex flex-col gap-3">
