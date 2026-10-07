@@ -7,11 +7,12 @@ import { listEvents, createOrder, listAddresses, updateAddress, saveAddress, set
 import { formatAddress, type Address, type MarketEvent, type Order, type PaymentMethod, type Product } from "@/types";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
 import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
+import { saveGuestLookup } from "@/lib/guest-session";
 import { useCart, type CartLine } from "@/lib/cart-context";
 import { useAuth } from "@/lib/auth-context";
 import { unitPrice, findOverStockLines, optionSelectionLabel, buildOptionSnapshot, comboValueIds } from "@/lib/product-options";
 import { totalShippingFee } from "@/lib/shipping";
-import { groupDiscounts } from "@/lib/discount";
+import { eventDiscountTotal } from "@/lib/discount";
 import { getCurrentPushSubscription, sendPushToSelf } from "@/lib/push";
 import { PAYMENT_METHODS, allowedPaymentMethods } from "@/lib/payments";
 import { EVENT_TYPE_LABEL, type EventType } from "@/types";
@@ -153,13 +154,15 @@ export function CheckoutView() {
 
   const totalShippingAll = groups.reduce((sum, g) => sum + groupShippingFee(g), 0);
 
-  // 이 이벤트-주문에 적용되는 상품 할인 합계 — 배송비와 반대로 total에서
-  // 차감된다. 배송방식과 무관하게 적용되고(groupShippingFee와 달리 PARCEL로
-  // 거르지 않음), 같은 카탈로그 상품끼리만 묶어 계산한다(lib/discount.ts).
+  // 이 이벤트-주문에 적용되는 할인 합계(상품별 수량 할인 + 함께 구매 할인) —
+  // 배송비와 반대로 total에서 차감된다. 배송방식과 무관하게 적용되고
+  // (groupShippingFee와 달리 PARCEL로 거르지 않음), 장바구니(CartView.tsx)와
+  // 같은 eventDiscountTotal로 계산한다(lib/discount.ts).
   function groupDiscountAmount(group: { event: MarketEvent; items: typeof items }): number {
-    return groupDiscounts(
+    return eventDiscountTotal(
+      group.event.comboDiscounts,
       group.items.map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty, qty: i.line.qty })),
-    ).reduce((sum, g) => sum + g.amount, 0);
+    ).total;
   }
 
   const totalDiscountAll = groups.reduce((sum, g) => sum + groupDiscountAmount(g), 0);
@@ -377,11 +380,9 @@ export function CheckoutView() {
     const first = all[0];
     setSubmitting(false);
     if (!first) return;
-    if (profile) {
-      router.push(`/orders/${first.id}`);
-    } else {
-      router.push(`/orders/${first.id}?gn=${encodeURIComponent(name)}&pin=${pin}`);
-    }
+    // 비회원은 조회용 이름+확인번호를 URL이 아니라 이 탭에만 보관한다(lib/guest-session.ts).
+    if (!profile) saveGuestLookup(name, pin);
+    router.push(`/orders/${first.id}`);
   }
 
   return (
