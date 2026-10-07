@@ -3,6 +3,7 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { CartProvider } from "@/lib/cart-context";
 import { PwaRegister } from "@/components/PwaRegister";
+import { EnvBadge } from "@/components/EnvBadge";
 
 export const metadata: Metadata = {
   title: "보글마켓",
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="ko">
       <body className="min-h-screen antialiased">
         <PwaRegister />
+        <EnvBadge />
         <AuthProvider>
           <CartProvider>{children}</CartProvider>
         </AuthProvider>
