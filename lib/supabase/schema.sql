@@ -62,10 +62,11 @@ create table if not exists events (
   -- "마감"으로만 노출되고, 배송일 다음날 00:00부터는 고객 화면에서 완전히
   -- 숨겨진다(관리자 화면에는 계속 남아 "재시작"으로 되돌릴 수 있음).
   status text not null default 'open' check (status in ('open', 'ended')),
-  -- 함께 구매 할인 규칙 목록(2026-10-07) — 같은 회차에서 여러 상품을 같이 사면
-  -- 주문 총액에서 추가로 깎아준다. 계산은 lib/discount.ts(calculateComboDiscounts),
-  -- 결과는 orders.discount_total에 상품 수량 할인과 합쳐 스냅샷으로 남는다.
-  -- [{ "id", "items": [{ "catalogProductId", "qty" }], "amountOff" }]
+  -- 여러 품목 할인 구간(2026-10-07) — 같은 회차에서 서로 다른 상품을 몇 가지
+  -- 샀는지로(수량 무관) 주문 총액에서 추가로 깎아준다. 넘긴 구간 중 가장 큰
+  -- 할인 하나만. 계산은 lib/discount.ts(calculateVarietyDiscount), 결과는
+  -- orders.discount_total에 상품 수량 할인과 합쳐 스냅샷으로 남는다.
+  -- [{ "minKinds": 2, "amountOff": 1000 }, ...] (컬럼 이름은 처음 설계 때 그대로)
   combo_discounts jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );

@@ -154,13 +154,13 @@ export function CheckoutView() {
 
   const totalShippingAll = groups.reduce((sum, g) => sum + groupShippingFee(g), 0);
 
-  // 이 이벤트-주문에 적용되는 할인 합계(상품별 수량 할인 + 함께 구매 할인) —
+  // 이 이벤트-주문에 적용되는 할인 합계(상품별 수량 할인 + 여러 품목 할인) —
   // 배송비와 반대로 total에서 차감된다. 배송방식과 무관하게 적용되고
   // (groupShippingFee와 달리 PARCEL로 거르지 않음), 장바구니(CartView.tsx)와
   // 같은 eventDiscountTotal로 계산한다(lib/discount.ts).
   function groupDiscountAmount(group: { event: MarketEvent; items: typeof items }): number {
     return eventDiscountTotal(
-      group.event.comboDiscounts,
+      group.event.varietyDiscounts,
       group.items.map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty, qty: i.line.qty })),
     ).total;
   }

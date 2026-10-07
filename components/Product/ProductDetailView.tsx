@@ -19,7 +19,7 @@ import { ProductGridCard } from "@/components/ProductGridCard";
 import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 import { flyToCart, showAddedToast } from "@/lib/cart-feedback";
-import { describeCombo, describeDiscount } from "@/lib/discount";
+import { describeDiscount, describeVarietyTiers } from "@/lib/discount";
 
 export function ProductDetailView({ productId }: { productId: string }) {
   const router = useRouter();
@@ -299,14 +299,12 @@ export function ProductDetailView({ productId }: { productId: string }) {
             {describeDiscount(product.discount)}
           </p>
         )}
-        {/* 이 상품이 들어간 함께 구매 할인 — 같이 사면 좋은 상품을 바로 알 수 있게. */}
-        {(event.comboDiscounts ?? [])
-          .filter((c) => c.items.some((it) => it.catalogProductId === product.catalogProductId))
-          .map((c) => (
-            <p key={c.id} className="mb-1.5 rounded-[8px] bg-accent-soft px-2.5 py-1.5 text-[12px] font-bold text-accent-dark">
-              🎁 {describeCombo(c, (id) => event.products.find((p) => p.catalogProductId === id)?.name ?? "상품")}
-            </p>
-          ))}
+        {/* 이 회차의 여러 품목 할인 — 다른 상품도 같이 담으면 더 싸진다는 걸 바로 알 수 있게. */}
+        {describeVarietyTiers(event.varietyDiscounts) && (
+          <p className="mb-1.5 rounded-[8px] bg-accent-soft px-2.5 py-1.5 text-[12px] font-bold text-accent-dark">
+            🎁 이 회차 상품 여러 가지 함께 사면 추가 할인: {describeVarietyTiers(event.varietyDiscounts)}
+          </p>
+        )}
 
         {(product.optionGroups ?? []).length > 0 && (
           <div className="mb-4 flex flex-col gap-3">
