@@ -1,5 +1,6 @@
 import type { EventType, MarketEvent, Order, Product } from "@/types";
 
+
 const ALL_EVENT_TYPES: EventType[] = ["DOOR", "GROUP_BUY", "PARCEL"];
 
 // 운영 사이트에서 지금 열어둔 배송방식만 고객에게 노출한다 — 사다드림부터
@@ -42,18 +43,14 @@ export function isEventOrderable(event: Pick<MarketEvent, "type" | "flashSale" |
   return new Date(event.deadlineAt).getTime() > Date.now();
 }
 
-// 고객이 주문 후 배송지/연락처/입금자명을 직접 고칠 수 있는지 — 발주확인 전
-// (wait/paid)이고 그 회차 마감 전일 때만(택배는 마감이 없어 발주확인 전까지).
-// 서버 RPC(update_order_delivery)도 같은 조건을 다시 검사한다.
-export function canEditOrderDelivery(
-  order: Pick<Order, "status" | "cancelRequested">,
-  event: Pick<MarketEvent, "type" | "status" | "deadlineAt"> | null | undefined,
-): boolean {
-  if (order.status !== "wait" && order.status !== "paid") return false;
-  if (order.cancelRequested) return false;
-  if (!event || event.status === "ended") return false;
-  if (event.type === "PARCEL") return true;
-  return new Date(event.deadlineAt).getTime() > Date.now();
+// 손님이 주문 후 배송지/연락처/입금자명을 직접 고칠 수 있는지 — 손님이 중간에
+// 마음대로 바꾸면 안 되므로, 관리자가 그 주문에 한해 열어줬을 때만(손님이
+// 문의로 요청 → 관리자가 "배송지 수정 허용") 배송 시작 전까지 가능하다.
+// 한 번 고치면 다시 잠긴다. 서버 RPC(update_order_delivery)도 같은 조건을 검사한다.
+export const DELIVERY_EDITABLE_STATUSES: Order["status"][] = ["wait", "paid", "confirmed"];
+
+export function canEditOrderDelivery(order: Pick<Order, "status" | "cancelRequested" | "deliveryEditOpen">): boolean {
+  return order.deliveryEditOpen && !order.cancelRequested && DELIVERY_EDITABLE_STATUSES.includes(order.status);
 }
 
 // 고객 화면(홈/카테고리 등 목록)에 이 이벤트를 아예 노출할지 여부.

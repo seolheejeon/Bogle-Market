@@ -8,8 +8,8 @@ import { listOrdersForProfile, lookupGuestOrders, getEvent, cancelOrder, request
 import { uploadRefundPhoto } from "@/lib/supabase/storage";
 import type { MarketEvent, Order, OrderStatus, RefundReasonCode } from "@/types";
 import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL, COURIER_LABEL, COURIER_TRACKING_URL, REFUND_REASON_LABEL, formatAddress } from "@/types";
-import { formatDateTime, formatPrice, formatEventDateChip, formatDeadlineLabel } from "@/lib/format";
-import { canEditOrderDelivery } from "@/lib/order-policy";
+import { formatDateTime, formatPrice, formatEventDateChip } from "@/lib/format";
+import { canEditOrderDelivery, DELIVERY_EDITABLE_STATUSES } from "@/lib/order-policy";
 import { OrderStatusBadge } from "@/components/Badge";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
 import { SupportLinks } from "@/components/SupportLinks";
@@ -95,8 +95,10 @@ export function OrderDetailView({ orderId, legacyGuestName, legacyGuestPin }: { 
   const canRequestCancel = (order?.status === "confirmed" || order?.status === "ship") && !cancelPending;
   // 반려된 후에도 재신청할 수 있게 둔다(연락 없이 막다른 상태가 되지 않도록).
   const canRequestRefund = order?.status === "done" || order?.status === "refund_rejected";
-  // 발주확인 전 + 회차 마감 전에만 손님이 직접 배송지/연락처/입금자명을 고칠 수 있다.
-  const canEditDelivery = order ? canEditOrderDelivery(order, event) : false;
+  // 관리자가 이 주문에 한해 열어줬을 때만 손님이 직접 배송지/연락처/입금자명을 고칠 수 있다.
+  const canEditDelivery = order ? canEditOrderDelivery(order) : false;
+  // 아직 안 열렸지만 배송 시작 전이라 요청하면 열어줄 수 있는 상태 — 요청 방법을 안내한다.
+  const canRequestDeliveryEdit = !!order && !canEditDelivery && !order.cancelRequested && DELIVERY_EDITABLE_STATUSES.includes(order.status);
 
   async function handleCancel() {
     if (!order) return;
@@ -233,9 +235,11 @@ export function OrderDetailView({ orderId, legacyGuestName, legacyGuestPin }: { 
                   onClick={() => setEditingDelivery(true)}
                   className="mt-2.5 w-full rounded-[9px] border border-accent py-2 text-[12.5px] font-bold text-accent-dark"
                 >
-                  배송지 · 연락처 수정
-                  {event && event.type !== "PARCEL" && <span className="ml-1 font-semibold text-text-muted">({formatDeadlineLabel(event.deadlineAt)} 전까지)</span>}
+                  배송지 · 연락처 수정하기
                 </button>
+              )}
+              {canRequestDeliveryEdit && (
+                <p className="mt-2 text-[11.5px] text-text-muted">배송지·연락처 변경이 필요하면 아래 &lsquo;문의하기&rsquo;로 요청해 주세요. 확인 후 수정할 수 있게 열어드려요.</p>
               )}
             </div>
 
@@ -278,6 +282,13 @@ export function OrderDetailView({ orderId, legacyGuestName, legacyGuestPin }: { 
               <p className="mb-4 rounded-[10px] bg-bg-sunken p-3 text-[12.5px] text-text-muted">
                 취소 요청이 접수됐어요. 확인 후 승인되면 취소 처리되고, 어려운 경우 사유와 함께 알려드릴게요.
               </p>
+            )}
+            {/* 거절 사유는 알림뿐 아니라 여기서도 계속 보여준다(알림을 못 봤을 수 있어서). */}
+            {!cancelPending && order.status !== "cancelled" && order.cancelRejectReason && (
+              <div className="mb-4 rounded-[10px] bg-bg-sunken p-3 text-[12.5px] text-text-muted">
+                <p className="font-semibold text-red-600">취소 요청이 거절됐어요.</p>
+                <p className="mt-1">사유: {order.cancelRejectReason}</p>
+              </div>
             )}
             {canRequestRefund && !refundFormOpen && (
               <button

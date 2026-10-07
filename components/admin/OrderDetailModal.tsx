@@ -7,6 +7,7 @@ import { OrderStatusBadge } from "@/components/Badge";
 import { Modal } from "@/components/admin/Modal";
 import { CopyButton } from "@/components/admin/CopyButton";
 import { naverMapSearchUrl, kakaoMapSearchUrl } from "@/lib/maps";
+import { DELIVERY_EDITABLE_STATUSES } from "@/lib/order-policy";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -27,14 +28,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 // 관리자 주문 상세 모달 — 목록 카드에서 다 못 보여주는 정보를 전부 모아
-// 보여준다. 순수 조회용이라 상태 전환 등 액션 버튼은 목록 카드 쪽에 그대로
-// 두고 여기서는 중복 구현하지 않는다.
+// 보여준다. 상태 전환 등 액션 버튼은 목록 카드 쪽에 그대로 두고 여기서는
+// 중복 구현하지 않는다(예외: 손님 배송지 수정 허용/잠금 토글).
 export function OrderDetailModal({
   order,
   event,
   ordererProfile,
   onClose,
   onViewCustomer,
+  onToggleDeliveryEdit,
 }: {
   order: Order;
   event: MarketEvent | undefined;
@@ -43,6 +45,8 @@ export function OrderDetailModal({
   ordererProfile: Profile | undefined;
   onClose: () => void;
   onViewCustomer?: (profileId: string) => void;
+  // 손님의 배송지/연락처 수정 허용/잠금 — 넘기지 않으면 버튼을 안 보여준다.
+  onToggleDeliveryEdit?: (open: boolean) => void;
 }) {
   const itemsTotal = order.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
   const hasStructuredAddress = Boolean(order.roadAddress);
@@ -198,6 +202,23 @@ export function OrderDetailModal({
             카카오맵
           </a>
         </div>
+        {order.deliveryEditedAt && <p className="mt-2 text-[11.5px] font-semibold text-accent-dark">✏️ 고객이 {formatDateTime(order.deliveryEditedAt)}에 배송지·연락처를 수정했어요.</p>}
+        {/* 손님이 문의로 배송지 변경을 요청하면 이 주문에 한해 열어준다 — 손님이 한 번
+            고치면 자동으로 다시 잠긴다(update_order_delivery). 배송 시작 전까지만. */}
+        {onToggleDeliveryEdit && DELIVERY_EDITABLE_STATUSES.includes(order.status) && (
+          <div className="mt-2.5 flex items-center justify-between gap-2 rounded-[8px] bg-bg-sunken px-2.5 py-2">
+            <span className="text-[12px]">
+              {order.deliveryEditOpen ? "🔓 고객이 배송지·연락처를 수정할 수 있어요 (한 번 수정하면 다시 잠겨요)" : "🔒 고객 배송지·연락처 수정 잠김"}
+            </span>
+            <button
+              type="button"
+              onClick={() => onToggleDeliveryEdit(!order.deliveryEditOpen)}
+              className={`shrink-0 rounded-[7px] px-2.5 py-1 text-[11.5px] font-bold ${order.deliveryEditOpen ? "border border-border" : "bg-accent text-white"}`}
+            >
+              {order.deliveryEditOpen ? "다시 잠그기" : "수정 허용"}
+            </button>
+          </div>
+        )}
       </Section>
 
       <Section title="결제">
@@ -207,6 +228,7 @@ export function OrderDetailModal({
         )}
         {order.courierCode && order.trackingNumber && <Row label="송장번호">{order.trackingNumber}</Row>}
         {order.cancelRequested && order.cancelReason && <Row label="취소 사유">{order.cancelReason}</Row>}
+        {!order.cancelRequested && order.cancelRejectReason && <Row label="취소 거절 사유">{order.cancelRejectReason}</Row>}
       </Section>
 
       {(order.status === "refund_requested" || order.status === "refunded" || order.status === "refund_rejected") && (
