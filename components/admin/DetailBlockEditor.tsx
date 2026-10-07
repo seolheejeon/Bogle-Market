@@ -26,6 +26,10 @@ const COLOR_PRESETS: { label: string; value: string | undefined }[] = [
   { label: "파랑", value: "#2563eb" },
 ];
 
+// 새 텍스트 블록의 기본 서식 — "보통" 크기 + "진하게"(검정). 이미 저장된 블록은
+// 저장된 값(없으면 예전 기본값인 작게/기본색)을 그대로 쓴다.
+const NEW_TEXT_BLOCK: TextBlock = { type: "text", text: "", size: "md", color: "#1a1a1a" };
+
 // 스마트스토어 상세편집기처럼 블록(제목/본문 대신 서식 있는 텍스트, 사진,
 // 동영상)을 자유롭게 쌓고 드래그로 순서를 바꾸는 편집기. 새 블록 종류(배너,
 // 유튜브, 버튼 등)를 추가하려면 types/index.ts의 ProductDetailBlock 유니온에
@@ -124,7 +128,7 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
   // 있는 "+ 여기에 추가" 지점을 각 블록 앞자리마다 두었다.
   function insertTextAt(index: number) {
     const next = blocks.slice();
-    next.splice(index, 0, { type: "text", text: "", size: "sm" });
+    next.splice(index, 0, { ...NEW_TEXT_BLOCK });
     onChange(next);
     setInsertMenuAt(null);
   }
@@ -313,7 +317,7 @@ export function DetailBlockEditor({ blocks, onChange }: { blocks: ProductDetailB
           <div className="flex flex-wrap gap-1.5">
             <button
               type="button"
-              onClick={() => onChange([...blocks, { type: "text", text: "", size: "sm" }])}
+              onClick={() => onChange([...blocks, { ...NEW_TEXT_BLOCK }])}
               className="rounded-[7px] border border-dashed border-border px-2.5 py-1.5 text-[12px] font-semibold text-text-muted"
             >
               + 텍스트

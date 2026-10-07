@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { listCatalogProducts, createCatalogProduct, updateCatalogProduct, deleteCatalogProduct, listEvents, addEventProduct, removeEventProduct } from "@/lib/data";
 import type { CatalogProduct, EventBadge, ExpiryLabel, FulfillmentType, MarketEvent, ProductDetailBlock, ProductDiscount, ProductOptionGroup, ShippingFeeType } from "@/types";
 import { EVENT_TYPE_LABEL, COURIER_OPTIONS, FULFILLMENT_TYPE_LABEL, SHIPPING_FEE_TYPE_LABEL } from "@/types";
-import { describeDiscount } from "@/lib/discount";
+import { describeDiscount, sortedTiers } from "@/lib/discount";
 import { isEventAdminEnded } from "@/lib/order-policy";
 
 // 택배사 select에서 기본 목록(COURIER_OPTIONS)에 없는 값을 직접 입력할 때 쓰는
@@ -259,11 +259,18 @@ function CatalogProductForm({
   // 할인 정책 — 상품당 하나만 설정 가능(중첩 안 됨, lib/discount.ts 참고).
   // 종류별로 필요한 입력이 달라 필드를 전부 미리 만들어두고 discountType에
   // 맞는 것만 화면에 보여준다 — 저장 시(submit)에만 선택된 종류에 맞게 조립한다.
-  const [discountType, setDiscountType] = useState<ProductDiscount["type"] | "">(initial?.discount?.type ?? "");
-  const [discountMinQty, setDiscountMinQty] = useState(initial?.discount?.type === "qty_threshold" ? String(initial.discount.minQty) : "2");
-  const [discountAmountOff, setDiscountAmountOff] = useState(
-    initial?.discount?.type === "qty_threshold" || initial?.discount?.type === "per_unit" ? String(initial.discount.amountOff) : "",
+  // 예전 형식(qty_threshold, 구간 1개)은 편집 화면에선 구간 할인(qty_tiers)의
+  // 첫 구간으로 열고, 저장하면 qty_tiers로 바뀐다.
+  const [discountType, setDiscountType] = useState<Exclude<ProductDiscount["type"], "qty_threshold"> | "">(
+    initial?.discount?.type === "qty_threshold" ? "qty_tiers" : (initial?.discount?.type ?? ""),
   );
+  const [discountTiers, setDiscountTiers] = useState<{ minQty: string; amountOff: string }[]>(() => {
+    const d = initial?.discount;
+    if (d?.type === "qty_threshold") return [{ minQty: String(d.minQty), amountOff: String(d.amountOff) }];
+    if (d?.type === "qty_tiers" && d.tiers.length > 0) return sortedTiers(d.tiers).map((t) => ({ minQty: String(t.minQty), amountOff: String(t.amountOff) }));
+    return [{ minQty: "2", amountOff: "" }];
+  });
+  const [discountAmountOff, setDiscountAmountOff] = useState(initial?.discount?.type === "per_unit" ? String(initial.discount.amountOff) : "");
   const [discountBuyQty, setDiscountBuyQty] = useState(initial?.discount?.type === "n_plus_1" ? String(initial.discount.buyQty) : "2");
   const [discountBundleQty, setDiscountBundleQty] = useState(initial?.discount?.type === "bundle" ? String(initial.discount.bundleQty) : "3");
   const [discountBundlePrice, setDiscountBundlePrice] = useState(initial?.discount?.type === "bundle" ? String(initial.discount.bundlePrice) : "");
@@ -325,10 +332,15 @@ function CatalogProductForm({
   // 선택된 discountType과 해당 종류의 입력값들로 ProductDiscount를 조립한다.
   // 금액/수량이 비었거나 0이면 저장하지 않음(할인 없음과 동일하게 취급).
   function buildDiscount(): ProductDiscount | undefined {
-    if (discountType === "qty_threshold") {
-      const minQty = Math.max(2, Number(discountMinQty) || 2);
-      const amountOff = Math.max(0, Number(discountAmountOff) || 0);
-      return amountOff > 0 ? { type: "qty_threshold", minQty, amountOff } : undefined;
+    if (discountType === "qty_tiers") {
+      // 금액이 빈 구간은 버리고, 같은 수량이 두 번 있으면 뒤의 것을 쓴다.
+      const byQty = new Map<number, number>();
+      for (const t of discountTiers) {
+        const amountOff = Math.max(0, Number(t.amountOff) || 0);
+        if (amountOff > 0) byQty.set(Math.max(2, Number(t.minQty) || 2), amountOff);
+      }
+      const tiers = sortedTiers(Array.from(byQty, ([minQty, amountOff]) => ({ minQty, amountOff })));
+      return tiers.length > 0 ? { type: "qty_tiers", tiers } : undefined;
     }
     if (discountType === "per_unit") {
       const amountOff = Math.max(0, Number(discountAmountOff) || 0);
@@ -462,36 +474,62 @@ function CatalogProductForm({
           <select
             className="w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
             value={discountType}
-            onChange={(e) => setDiscountType(e.target.value as ProductDiscount["type"] | "")}
+            onChange={(e) => setDiscountType(e.target.value as typeof discountType)}
           >
             <option value="">할인 없음</option>
-            <option value="qty_threshold">N개 이상 구매 시 정액 할인</option>
+            <option value="qty_tiers">N개 이상 구매 시 정액 할인 (구간 여러 개 가능)</option>
             <option value="per_unit">개당 정액 할인</option>
             <option value="n_plus_1">N개 사면 1개 무료</option>
             <option value="bundle">묶음 할인</option>
           </select>
-          {discountType === "qty_threshold" && (
-            <div className="mt-2 flex gap-2">
-              <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
-                최소 수량
-                <input
-                  className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-                  type="number"
-                  min={2}
-                  value={discountMinQty}
-                  onChange={(e) => setDiscountMinQty(e.target.value)}
-                />
-              </label>
-              <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
-                할인 금액(원)
-                <input
-                  className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-                  type="number"
-                  min={0}
-                  value={discountAmountOff}
-                  onChange={(e) => setDiscountAmountOff(e.target.value)}
-                />
-              </label>
+          {discountType === "qty_tiers" && (
+            <div className="mt-2 flex flex-col gap-1.5">
+              <p className="text-[11px] text-text-muted">담은 수량이 넘긴 구간 중 가장 큰 할인 하나만 적용돼요 (예: 2개 1,000원 / 3개 2,000원 → 4개 사면 2,000원 할인).</p>
+              {discountTiers.map((tier, i) => (
+                <div key={i} className="flex items-end gap-2">
+                  <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
+                    {i === 0 && "수량(개 이상)"}
+                    <input
+                      className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                      type="number"
+                      min={2}
+                      value={tier.minQty}
+                      onChange={(e) => setDiscountTiers((prev) => prev.map((t, j) => (j === i ? { ...t, minQty: e.target.value } : t)))}
+                    />
+                  </label>
+                  <label className="flex-1 text-[11.5px] font-semibold text-text-muted">
+                    {i === 0 && "할인 금액(원)"}
+                    <input
+                      className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+                      type="number"
+                      min={0}
+                      value={tier.amountOff}
+                      onChange={(e) => setDiscountTiers((prev) => prev.map((t, j) => (j === i ? { ...t, amountOff: e.target.value } : t)))}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={discountTiers.length === 1}
+                    onClick={() => setDiscountTiers((prev) => prev.filter((_, j) => j !== i))}
+                    className="mb-0.5 rounded-[7px] border border-border px-2 py-1.5 text-[12px] text-text-muted disabled:opacity-30"
+                    aria-label="구간 삭제"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setDiscountTiers((prev) => {
+                    const lastQty = Number(prev[prev.length - 1]?.minQty) || 1;
+                    return [...prev, { minQty: String(lastQty + 1), amountOff: "" }];
+                  })
+                }
+                className="self-start rounded-[7px] border border-dashed border-border px-2.5 py-1 text-[12px] font-semibold text-text-muted"
+              >
+                + 구간 추가
+              </button>
             </div>
           )}
           {discountType === "per_unit" && (

@@ -5,6 +5,7 @@
 // 하나하나가 아니라 상품 전체 수량이 정책의 기준). 정책은 상품당 하나만
 // 설정할 수 있다(types/index.ts의 ProductDiscount 참고):
 // - "qty_threshold": 총 수량이 minQty 이상이면 총액에서 amountOff 정액 할인
+// - "qty_tiers": qty_threshold의 여러 구간 버전 — 넘긴 구간 중 가장 큰 할인 하나만
 // - "per_unit": 수량과 무관하게 개당 amountOff 할인
 // - "n_plus_1": buyQty개 살 때마다 1개를 무료로(할인액 = 무료 개수 × 평균 단가)
 // - "bundle": bundleQty개 묶음마다 정가 대신 bundlePrice로(할인액 = 묶음 수 ×
@@ -13,10 +14,21 @@
 import type { Product, ProductDiscount } from "@/types";
 import { formatPrice } from "@/lib/format";
 
+type QtyTier = Extract<ProductDiscount, { type: "qty_tiers" }>["tiers"][number];
+
+export function sortedTiers(tiers: QtyTier[]): QtyTier[] {
+  return [...tiers].sort((a, b) => a.minQty - b.minQty);
+}
+
 export function describeDiscount(discount: ProductDiscount): string {
   switch (discount.type) {
     case "qty_threshold":
       return `${discount.minQty}개 이상 구매 시 ${formatPrice(discount.amountOff)} 할인`;
+    case "qty_tiers": {
+      const tiers = sortedTiers(discount.tiers);
+      if (tiers.length === 1) return `${tiers[0].minQty}개 이상 구매 시 ${formatPrice(tiers[0].amountOff)} 할인`;
+      return tiers.map((t) => `${t.minQty}개 ${formatPrice(t.amountOff)}`).join(" · ") + " 할인";
+    }
     case "per_unit":
       return `개당 ${formatPrice(discount.amountOff)} 할인`;
     case "n_plus_1":
@@ -35,6 +47,9 @@ export function calculateDiscount(discount: ProductDiscount | undefined, qty: nu
   switch (discount.type) {
     case "qty_threshold":
       raw = qty >= discount.minQty ? discount.amountOff : 0;
+      break;
+    case "qty_tiers":
+      raw = Math.max(0, ...discount.tiers.filter((t) => qty >= t.minQty).map((t) => t.amountOff));
       break;
     case "per_unit":
       raw = discount.amountOff * qty;

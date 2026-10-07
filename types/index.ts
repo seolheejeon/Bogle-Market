@@ -171,7 +171,12 @@ export interface CatalogProduct {
 
 export type ProductDiscount =
   // N개 이상 구매 시 총액에서 정액 할인 (예: "2개 이상 구매 시 1,000원 할인")
+  // — 구간 하나짜리 예전 형식. 새로 저장할 땐 qty_tiers를 쓰고, 이미 저장된
+  // 데이터 호환용으로 남겨둔다.
   | { type: "qty_threshold"; minQty: number; amountOff: number }
+  // 수량 구간별 정액 할인 (예: "2개 이상 1,000원 / 3개 이상 2,000원") — 담은
+  // 수량이 넘긴 구간 중 가장 큰 할인 하나만 적용(누적 아님)
+  | { type: "qty_tiers"; tiers: { minQty: number; amountOff: number }[] }
   // 수량과 무관하게 개당 정액 할인 (예: "개당 500원 할인")
   | { type: "per_unit"; amountOff: number }
   // buyQty개 구매할 때마다 1개를 무료로 (예: "2개 사면 1개 무료" → buyQty=2)
