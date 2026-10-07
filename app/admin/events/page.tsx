@@ -118,9 +118,6 @@ export default function AdminEventsPage() {
                 <div>
                   <div className="flex items-center gap-1.5">
                     <span className="rounded-md bg-bg-sunken px-1.5 py-0.5 text-[11px] font-bold text-text-muted">{EVENT_TYPE_LABEL[e.type]}</span>
-                    {e.flashSale && (
-                      <span className="rounded-md bg-[var(--badge-flash-bg)] px-1.5 py-0.5 text-[11px] font-bold text-[var(--badge-flash-fg)]">🔥 1시간 특가</span>
-                    )}
                     {manuallyEnded && <span className="rounded-md bg-text-muted px-1.5 py-0.5 text-[10.5px] font-bold text-white">종료됨</span>}
                     {!manuallyEnded && ended && <span className="rounded-md bg-text-muted px-1.5 py-0.5 text-[10.5px] font-bold text-white">마감</span>}
                     <span className="text-[14px] font-bold">{e.title}</span>

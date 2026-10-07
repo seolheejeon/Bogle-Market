@@ -36,7 +36,8 @@ export function HomeView() {
     listBanners().then(setBanners);
   }, []);
 
-  const flash = events?.find((e) => e.flashSale);
+  // 1시간 특가 기능은 요청으로 화면에서 뺐다 — 예전에 특가로 저장된 이벤트가
+  // 있어도 히어로에 "1시간 특가" 슬라이드를 따로 만들지 않는다.
   const door = events ? nearestOfType(events, "DOOR") : undefined;
   const group = events ? nearestOfType(events, "GROUP_BUY") : undefined;
 
@@ -48,11 +49,10 @@ export function HomeView() {
 
   const autoHeroSlides = useMemo(() => {
     const slides: { key: string; eyebrow: string; badge: string; eventId: string; product: MarketEvent["products"][number] }[] = [];
-    if (flash?.products[0]) slides.push({ key: "flash", eyebrow: "지금 특가로 만나보세요", badge: "🔥 1시간 특가", eventId: flash.id, product: flash.products[0] });
     if (door?.products[0]) slides.push({ key: "door", eyebrow: "집에서 즐기는 신선한 한 끼", badge: "이번 회차 PICK", eventId: door.id, product: door.products[0] });
     if (group?.products[0]) slides.push({ key: "group", eyebrow: "현지에서 직접 사다드려요", badge: group.title, eventId: group.id, product: group.products[0] });
     return slides;
-  }, [flash, door, group]);
+  }, [door, group]);
 
   const bannerHrefs = useMemo(() => (events ? liveBanners.map((b) => resolveBannerHref(b, events)) : liveBanners.map(() => null)), [liveBanners, events]);
 
