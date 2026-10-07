@@ -168,15 +168,9 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
             onChange={(e) => updateDraft({ title: e.target.value })}
           />
         </label>
-        {/* 1시간 특가는 배송방식과 무관하게 마감이 곧 종료로 취급되는(STRICT_DEADLINE)
-            특수 이벤트라 주문마감이 없는 택배에서는 의미가 없다 — 택배는 숨긴다.
-            상품 카드에 붙는 HOT/NEW 같은 표시용 뱃지는 이제 상품 관리에서 정한다. */}
-        {event.type !== "PARCEL" && (
-          <label className="flex items-center gap-2 text-[12.5px] font-semibold text-text-muted">
-            <input type="checkbox" checked={draft.flashSale} onChange={(e) => updateDraft({ flashSale: e.target.checked })} />
-            🔥 1시간 특가 이벤트로 지정 (마감이 지나면 배송방식과 무관하게 즉시 주문 마감)
-          </label>
-        )}
+        {/* 1시간 특가 지정 체크박스는 요청으로 뺐다 — 이미 특가로 저장된 이벤트의
+            값(draft.flashSale)은 저장 시 그대로 유지된다. 상품 카드에 붙는
+            HOT/NEW 같은 표시용 뱃지는 상품 관리에서 정한다. */}
         {/* 택배는 이벤트가 아니라 상품(출고방식/배송비/택배사) 기준으로 운영돼서
             이벤트 단위 주문마감/배송일이 의미가 없다 — 택배 이벤트에서는
             숨긴다(값 자체는 그대로 남아있고 저장 시 건드리지 않는다). */}
