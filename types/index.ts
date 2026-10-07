@@ -460,6 +460,15 @@ export interface Order {
   // 입금자명 — 받는 분과 입금하는 사람이 다를 때만 채워진다(비어 있으면 받는
   // 분 이름으로 입금). 관리자가 무통장 입금 내역과 주문을 맞출 때 쓴다.
   depositorName: string | null;
+  // 관리자가 이 주문에 한해 손님의 배송지/연락처 수정을 열어줬는지 — 손님이
+  // 한 번 고치면 다시 false가 되고 deliveryEditedAt에 시각이 남는다.
+  deliveryEditOpen: boolean;
+  deliveryEditedAt: string | null;
+  // 관리자가 확인한 시각(null이면 운영 메인에서 "NEW"). 상세를 열거나 상태를
+  // 바꾸면 채워지고, 손님이 배송지를 고치면 다시 비워진다.
+  adminCheckedAt: string | null;
+  // 취소 요청을 거절할 때 관리자가 남긴 사유 — 손님 주문 상세에도 보인다.
+  cancelRejectReason: string | null;
   paymentMethod: PaymentMethod;
   status: OrderStatus;
   // 발주확인(confirmed) 이후 고객이 취소를 "요청"하면 true — 상태 자체는 그대로

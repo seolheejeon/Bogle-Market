@@ -354,9 +354,22 @@ create table if not exists orders (
   -- 입금자명 — 받는 분과 입금하는 사람이 다를 때(가족 계좌 등) 관리자가 입금
   -- 내역과 주문을 맞추기 위한 값. 비어 있으면 받는 분 이름으로 입금한 것.
   depositor_name text,
+  -- 배송지/연락처 수정은 관리자가 이 주문에 한해 열어줬을 때만(true) 손님이 할 수
+  -- 있다 — 한 번 고치면 다시 잠기고 수정 시각이 delivery_edited_at에 남는다.
+  delivery_edit_open boolean not null default false,
+  delivery_edited_at timestamptz,
+  -- 취소 요청 거절 사유 — 알림뿐 아니라 주문 내역에서도 보이도록 저장.
+  cancel_reject_reason text,
+  -- 관리자가 확인한 시각(null이면 "신규") — 주문 상세를 열거나 상태를 바꾸면
+  -- 채워지고, 손님이 배송지를 고치면 다시 비워진다.
+  admin_checked_at timestamptz,
   created_at timestamptz not null default now()
 );
 alter table orders add column if not exists depositor_name text;
+alter table orders add column if not exists delivery_edit_open boolean not null default false;
+alter table orders add column if not exists delivery_edited_at timestamptz;
+alter table orders add column if not exists cancel_reject_reason text;
+alter table orders add column if not exists admin_checked_at timestamptz;
 
 create table if not exists order_items (
   id uuid primary key default gen_random_uuid(),
@@ -720,9 +733,9 @@ returns table (
   guest_name text, guest_phone text, guest_pin text, recipient_name text, recipient_phone text,
   address_snapshot text, road_address text, detail_address text, entrance_method text, delivery_memo text,
   apartment_name text, depositor_name text, payment_method text, status text,
-  cancel_requested boolean, cancel_reason text, courier_code text, tracking_number text,
+  cancel_requested boolean, cancel_reason text, cancel_reject_reason text, courier_code text, tracking_number text,
   refund_reason text, refund_reason_detail text, refund_photo_url text, refund_requested_at timestamptz,
-  refund_reject_reason text,
+  refund_reject_reason text, delivery_edit_open boolean, delivery_edited_at timestamptz,
   total integer, shipping_fee integer, discount_total integer, created_at timestamptz, items jsonb
 )
 language sql
@@ -734,9 +747,9 @@ as $$
     o.guest_name, o.guest_phone, o.guest_pin, o.recipient_name, o.recipient_phone,
     o.address_snapshot, o.road_address, o.detail_address, o.entrance_method, o.delivery_memo,
     o.apartment_name, o.depositor_name, o.payment_method, o.status,
-    o.cancel_requested, o.cancel_reason, o.courier_code, o.tracking_number,
+    o.cancel_requested, o.cancel_reason, o.cancel_reject_reason, o.courier_code, o.tracking_number,
     o.refund_reason, o.refund_reason_detail, o.refund_photo_url, o.refund_requested_at,
-    o.refund_reject_reason,
+    o.refund_reject_reason, o.delivery_edit_open, o.delivery_edited_at,
     o.total, o.shipping_fee, o.discount_total, o.created_at,
     coalesce(
       (select jsonb_agg(jsonb_build_object(
@@ -866,10 +879,13 @@ as $$
 $$;
 
 -- 고객이 주문 후 배송지/연락처/입금자명을 직접 고치는 RPC — 회원은 본인
--- 주문(auth.uid()), 비회원은 이름+PIN으로 확인한다. 아직 발주확인 전
--- (wait/paid)이고 이벤트 마감 전일 때만 허용(택배는 마감 개념이 없어 발주확인
--- 전까지). 회원 RLS 정책은 status 전환만 허용하므로 회원도 이 RPC를 쓴다.
--- guest_name은 건드리지 않아서 받는 분 이름을 바꿔도 기존 이름+PIN 조회는 그대로 된다.
+-- 주문(auth.uid()), 비회원은 이름+PIN으로 확인한다. 관리자가 그 주문에 한해
+-- 열어준 경우(delivery_edit_open)만, 배송 시작 전(wait/paid/confirmed)까지 허용
+-- (2026-10-07: 손님이 중간에 마음대로 바꾸면 안 된다는 요청으로 마감 기준에서
+-- 관리자 허용제로 변경). 한 번 고치면 다시 잠그고 관리자 확인 표시를 비워
+-- 신규로 다시 올라오게 한다. 회원 RLS 정책은 status 전환만 허용하므로 회원도
+-- 이 RPC를 쓴다. guest_name은 건드리지 않아서 받는 분 이름을 바꿔도 기존
+-- 이름+PIN 조회는 그대로 된다.
 create or replace function update_order_delivery(
   p_order_id uuid,
   p_name text,
@@ -901,22 +917,22 @@ begin
       entrance_method = nullif(trim(p_entrance_method), ''),
       delivery_memo = nullif(trim(p_delivery_memo), ''),
       apartment_name = nullif(trim(p_apartment_name), ''),
-      depositor_name = nullif(trim(p_depositor_name), '')
-  from events e
+      depositor_name = nullif(trim(p_depositor_name), ''),
+      delivery_edit_open = false,
+      delivery_edited_at = now(),
+      admin_checked_at = null
   where o.id = p_order_id
-    and e.id = o.event_id
     and (
       (auth.uid() is not null and o.profile_id = auth.uid())
       or (o.profile_id is null and o.guest_pin = p_pin and lower(coalesce(o.guest_name, o.recipient_name)) = lower(p_name))
     )
-    and o.status in ('wait', 'paid')
+    and o.delivery_edit_open
+    and o.status in ('wait', 'paid', 'confirmed')
     and o.cancel_requested = false
-    and e.status <> 'ended'
-    and (e.type = 'PARCEL' or e.deadline_at > now())
   returning o.id into v_id;
 
   if v_id is null then
-    raise exception '주문 마감이 지났거나 이미 발주가 확인된 주문이라 수정할 수 없어요. 변경이 필요하면 문의해 주세요.';
+    raise exception '지금은 배송지를 수정할 수 없어요. 변경이 필요하면 문의하기로 요청해 주세요.';
   end if;
 end;
 $$;
@@ -936,7 +952,10 @@ $$;
 -- 17개짜리 시그니처가 별도 오버로드로 남을 수 있다 — 먼저 지우고 새로
 -- 만든다(schema.sql 히스토리의 다른 함수들과 동일한 패턴).
 drop function if exists create_order(uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, text, text, integer, timestamptz, jsonb, integer);
--- p_depositor_name 추가(2026-10-07)로 22개짜리 시그니처도 같은 이유로 지운다.
+-- p_discount_total 추가 전의 21개짜리, p_depositor_name 추가(2026-10-07) 전의
+-- 22개짜리 시그니처도 같은 이유로 지운다(남아 있으면 일부 인자를 생략한 호출이
+-- PGRST203 "어느 함수인지 모호함"으로 실패한다).
+drop function if exists create_order(uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, text, text, integer, timestamptz, jsonb, integer, text, text, text, text);
 drop function if exists create_order(uuid, text, uuid, uuid, uuid, text, text, text, text, text, text, text, text, integer, timestamptz, jsonb, integer, text, text, text, text, integer);
 create or replace function create_order(
   p_id uuid,

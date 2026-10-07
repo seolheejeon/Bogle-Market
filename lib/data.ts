@@ -1022,6 +1022,10 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     recipientName: input.recipientName,
     recipientPhone: input.recipientPhone,
     depositorName: input.depositorName?.trim() || null,
+    deliveryEditOpen: false,
+    deliveryEditedAt: null,
+    adminCheckedAt: null,
+    cancelRejectReason: null,
     paymentMethod: input.paymentMethod,
     status: "wait",
     cancelRequested: false,
@@ -1313,9 +1317,8 @@ export async function updateOrderDelivery(
   }
   const orders = loadOrders();
   const target = orders.find((o) => o.id === orderId);
-  const event = target ? loadEvents().find((e) => e.id === target.eventId) : undefined;
-  if (!target || !canEditOrderDelivery(target, event)) {
-    throw new Error("주문 마감이 지났거나 이미 발주가 확인된 주문이라 수정할 수 없어요. 변경이 필요하면 문의해 주세요.");
+  if (!target || !canEditOrderDelivery(target)) {
+    throw new Error("지금은 배송지를 수정할 수 없어요. 변경이 필요하면 문의하기로 요청해 주세요.");
   }
   saveOrders(
     orders.map((o) =>
@@ -1331,10 +1334,40 @@ export async function updateOrderDelivery(
             deliveryMemo: patch.deliveryMemo?.trim() || null,
             apartmentName: patch.apartmentName?.trim() || null,
             depositorName: patch.depositorName?.trim() || null,
+            deliveryEditOpen: false,
+            deliveryEditedAt: new Date().toISOString(),
+            adminCheckedAt: null,
           }
         : o,
     ),
   );
+}
+
+// 관리자가 이 주문에 한해 손님의 배송지/연락처 수정을 열거나 닫는다(손님이
+// 문의로 요청했을 때). 열면 확인한 것으로도 표시한다.
+export async function setOrderDeliveryEditOpen(orderId: string, open: boolean): Promise<void> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("orders").update({ delivery_edit_open: open }).eq("id", orderId);
+    if (error) throw error;
+    return;
+  }
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, deliveryEditOpen: open } : o)));
+}
+
+// 관리자가 주문을 확인했다고 표시한다(운영 메인의 "NEW" 해제) — 주문 상세를
+// 열거나 상태를 바꿀 때, 또는 "신규 모두 확인"으로 한꺼번에.
+export async function markOrdersChecked(orderIds: string[]): Promise<void> {
+  if (orderIds.length === 0) return;
+  const now = new Date().toISOString();
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("orders").update({ admin_checked_at: now }).in("id", orderIds);
+    if (error) throw error;
+    return;
+  }
+  const ids = new Set(orderIds);
+  saveOrders(loadOrders().map((o) => (ids.has(o.id) ? { ...o, adminCheckedAt: now } : o)));
 }
 
 // 발주확인(confirmed)/배송중(ship) 단계의 취소는 즉시 처리하지 않고 "요청"만
@@ -1381,15 +1414,16 @@ export async function approveCancelRequest(orderId: string): Promise<void> {
 }
 
 // 관리자가 취소 요청을 거절 — 주문 상태(발주확인/배송중)는 그대로 두고 요청
-// 플래그만 내린다. 거절 사유는 고객 알림에 담아 보내는 쪽(호출부)에서 처리.
-export async function rejectCancelRequest(orderId: string): Promise<void> {
+// 플래그만 내린다. 거절 사유는 알림(호출부)뿐 아니라 주문에도 저장해서, 알림을
+// 못 본 손님도 주문 상세에서 확인할 수 있게 한다.
+export async function rejectCancelRequest(orderId: string, reason: string): Promise<void> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { error } = await supabase.from("orders").update({ cancel_requested: false }).eq("id", orderId);
+    const { error } = await supabase.from("orders").update({ cancel_requested: false, cancel_reject_reason: reason }).eq("id", orderId);
     if (error) throw error;
     return;
   }
-  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, cancelRequested: false } : o)));
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, cancelRequested: false, cancelRejectReason: reason } : o)));
 }
 
 // 고객이 배송완료(done) 후 반품/환불을 신청 — 관리자가 확인 후 승인(환불완료)
@@ -1974,6 +2008,10 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     recipientName: row.recipient_name,
     recipientPhone: row.recipient_phone,
     depositorName: row.depositor_name ?? null,
+    deliveryEditOpen: row.delivery_edit_open ?? false,
+    deliveryEditedAt: row.delivery_edited_at ?? null,
+    adminCheckedAt: row.admin_checked_at ?? null,
+    cancelRejectReason: row.cancel_reject_reason ?? null,
     paymentMethod: row.payment_method,
     status: row.status,
     cancelRequested: row.cancel_requested ?? false,

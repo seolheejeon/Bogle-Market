@@ -3,7 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { listAllOrders, listEvents, listAllProfiles, updateOrderStatus, createNotification, approveCancelRequest, rejectCancelRequest, rejectRefund } from "@/lib/data";
+import {
+  listAllOrders,
+  listEvents,
+  listAllProfiles,
+  updateOrderStatus,
+  createNotification,
+  approveCancelRequest,
+  rejectCancelRequest,
+  rejectRefund,
+  markOrdersChecked,
+  setOrderDeliveryEditOpen,
+} from "@/lib/data";
 import type { EventType, MarketEvent, Order, OrderStatus, Profile } from "@/types";
 import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL, COURIER_OPTIONS, COURIER_LABEL, REFUND_REASON_LABEL } from "@/types";
 import { formatDateTime, formatPrice } from "@/lib/format";
@@ -59,6 +70,13 @@ function isToday(iso: string): boolean {
   return new Date(iso).toDateString() === new Date().toDateString();
 }
 
+// 아직 관리자가 확인 안 한 주문 — 운영 메인에서 "NEW"로 강조하고 "신규 주문"
+// 타일로 모아 본다. 주문 상세를 열거나 상태를 바꾸면 확인 처리되고, 손님이
+// 배송지를 고치면 다시 신규로 올라온다. 취소된 주문은 더 볼 일이 없어 제외.
+function isNewOrder(o: Order): boolean {
+  return !o.adminCheckedAt && o.status !== "cancelled";
+}
+
 export default function AdminHomePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -74,6 +92,7 @@ export default function AdminHomePage() {
   const [search, setSearch] = useState("");
   const [period, setPeriod] = useState<keyof typeof PERIOD_DAYS | "all">("30");
   const [cancelOnly, setCancelOnly] = useState(false);
+  const [newOnly, setNewOnly] = useState(false);
   const [todayDeliveryOnly, setTodayDeliveryOnly] = useState(false);
   const [todayDoneOnly, setTodayDoneOnly] = useState(false);
   const [activeTile, setActiveTile] = useState<string | null>(null);
@@ -116,9 +135,44 @@ export default function AdminHomePage() {
     if (orderId) setSelectedOrderId(orderId);
   }, [searchParams]);
 
+  // 주문 상세를 열면(카드 클릭이든 링크로 들어왔든) 그 주문은 확인한 것으로 표시한다.
+  // 화면은 바로 바꾸고(NEW 해제), 저장은 뒤에서.
+  useEffect(() => {
+    if (!selectedOrderId) return;
+    const o = orders.find((x) => x.id === selectedOrderId);
+    if (o && isNewOrder(o)) void checkOrders([o.id]);
+  }, [selectedOrderId, orders]);
+
+  async function checkOrders(ids: string[]) {
+    if (ids.length === 0) return;
+    const now = new Date().toISOString();
+    const idSet = new Set(ids);
+    setOrders((prev) => prev.map((o) => (idSet.has(o.id) ? { ...o, adminCheckedAt: now } : o)));
+    await markOrdersChecked(ids);
+  }
+
+  // 손님이 문의로 배송지 변경을 요청했을 때 이 주문에 한해 수정을 열어준다 —
+  // 회원이면 "수정할 수 있어요" 알림도 보낸다(비회원은 알림을 받을 방법이 없어
+  // 문의 채널로 직접 안내).
+  async function toggleDeliveryEdit(order: Order, open: boolean) {
+    await setOrderDeliveryEditOpen(order.id, open);
+    if (open && order.profileId) {
+      await createNotification({
+        title: "배송지·연락처를 수정할 수 있어요",
+        message: `주문번호 ${order.orderNumber} 주문 상세에서 배송지·연락처를 수정해 주세요. 한 번 수정하면 다시 잠겨요.`,
+        icon: "✏️",
+        linkType: "ORDER",
+        linkId: order.id,
+        profileId: order.profileId,
+      });
+    }
+    refresh();
+  }
+
   async function advance(order: Order) {
     const next = NEXT_STATUS[order.status];
     if (!next) return;
+    await checkOrders([order.id]);
     await updateOrderStatus(order.id, next);
     await notifyStatusChange(order, next, eventById.get(order.eventId)?.title);
     refresh();
@@ -126,6 +180,7 @@ export default function AdminHomePage() {
   // 배송중 전환 전용 — 택배 방법을 골랐을 때만 택배사/송장번호를 같이 받아서
   // 저장하고 알림에도 포함해 보낸다. 문고리/사다드림/직접전달은 shipping이 없다.
   async function submitShipping(order: Order, shipping?: { courierCode: string; trackingNumber: string }) {
+    await checkOrders([order.id]);
     await updateOrderStatus(order.id, "ship", shipping);
     await notifyStatusChange(order, "ship", eventById.get(order.eventId)?.title, shipping);
     setShippingId(null);
@@ -133,11 +188,13 @@ export default function AdminHomePage() {
   }
   async function cancel(order: Order) {
     if (!confirm("이 주문을 취소할까요?")) return;
+    await checkOrders([order.id]);
     await updateOrderStatus(order.id, "cancelled");
     refresh();
   }
   async function markRefunded(order: Order) {
     if (!confirm("환불 처리를 완료했나요?")) return;
+    await checkOrders([order.id]);
     await updateOrderStatus(order.id, "refunded");
     await notifyStatusChange(order, "refunded", eventById.get(order.eventId)?.title);
     refresh();
@@ -145,6 +202,7 @@ export default function AdminHomePage() {
   async function rejectRefundRequest(order: Order) {
     const reason = window.prompt("반려 사유를 입력해주세요. 고객에게 그대로 전달돼요. (선택, 비워두고 확인해도 돼요)");
     if (reason === null) return;
+    await checkOrders([order.id]);
     await rejectRefund(order.id, reason.trim() || undefined);
     if (order.profileId) {
       await createNotification({
@@ -160,6 +218,7 @@ export default function AdminHomePage() {
   }
   async function approveCancel(order: Order) {
     if (!confirm("취소 요청을 승인할까요? 재고가 있으면 복구되고, 고객에게 취소 알림이 가요.")) return;
+    await checkOrders([order.id]);
     await approveCancelRequest(order.id);
     await notifyStatusChange(order, "cancelled", eventById.get(order.eventId)?.title);
     refresh();
@@ -171,7 +230,9 @@ export default function AdminHomePage() {
       alert("거절 사유를 입력해주세요.");
       return;
     }
-    await rejectCancelRequest(order.id);
+    // 사유는 알림뿐 아니라 주문에도 저장돼 손님 주문 상세에 계속 보인다.
+    await checkOrders([order.id]);
+    await rejectCancelRequest(order.id, reason.trim());
     if (order.profileId) {
       await createNotification({
         title: "취소 요청이 거절됐어요",
@@ -193,6 +254,7 @@ export default function AdminHomePage() {
     const soldoutProductIds = new Set(events.flatMap((e) => e.products.filter((p) => p.stock === 0).map((p) => p.catalogProductId)));
     const soldoutCount = soldoutProductIds.size;
     return [
+      { key: "new", label: "신규 주문", count: orders.filter(isNewOrder).length },
       { key: "all_orders", label: "전체 주문", count: orders.length },
       { key: "wait", label: "입금대기 주문", count: orders.filter((o) => o.status === "wait").length },
       { key: "paid", label: "발주확인 대기", count: orders.filter((o) => o.status === "paid").length },
@@ -242,10 +304,14 @@ export default function AdminHomePage() {
     setSearch("");
     setPeriod("all");
     setCancelOnly(false);
+    setNewOnly(false);
     setTodayDeliveryOnly(false);
     setTodayDoneOnly(false);
     if (key === "all_orders") {
       setStatusFilter("all");
+    } else if (key === "new") {
+      setStatusFilter("all");
+      setNewOnly(true);
     } else if (key === "deliverytoday") {
       setStatusFilter("confirmed");
       setTodayDeliveryOnly(true);
@@ -284,6 +350,7 @@ export default function AdminHomePage() {
     }
     if (statusFilter !== "all" && o.status !== statusFilter) return false;
     if (cancelOnly && !o.cancelRequested) return false;
+    if (newOnly && !isNewOrder(o)) return false;
     if (search) {
       const q = search.toLowerCase();
       // 입금 내역의 이름으로도 찾을 수 있게 입금자명까지 검색한다.
@@ -305,6 +372,7 @@ export default function AdminHomePage() {
     setSearch("");
     setPeriod("30");
     setCancelOnly(false);
+    setNewOnly(false);
     setTodayDeliveryOnly(false);
     setTodayDoneOnly(false);
     setActiveTile(null);
@@ -407,7 +475,20 @@ export default function AdminHomePage() {
         </div>
       )}
 
-      <p className="mb-2 text-[13.5px] font-bold">주문 ({filtered.length}건)</p>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-[13.5px] font-bold">주문 ({filtered.length}건)</p>
+        {/* 신규 주문만 보고 있을 때 한 번에 확인 처리 — 목록을 훑어본 뒤 NEW를 다 지울 때. */}
+        {newOnly && filtered.length > 0 && (
+          <button
+            onClick={() => {
+              if (confirm(`신규 주문 ${filtered.length}건을 모두 확인한 것으로 표시할까요?`)) void checkOrders(filtered.map((o) => o.id));
+            }}
+            className="rounded-[8px] border border-accent px-3 py-1.5 text-[12px] font-bold text-accent-dark"
+          >
+            신규 {filtered.length}건 모두 확인
+          </button>
+        )}
+      </div>
       <div className="mb-3 flex flex-wrap gap-2">
         <select
           className="rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px] font-semibold"
@@ -449,6 +530,7 @@ export default function AdminHomePage() {
           onChange={(e) => {
             setStatusFilter(e.target.value as OrderStatus | "all");
             setCancelOnly(false);
+            setNewOnly(false);
             setActiveTile(null);
           }}
         >
@@ -480,12 +562,22 @@ export default function AdminHomePage() {
       {!loading && filtered.length === 0 && <p className="text-sm text-text-muted">해당하는 주문이 없어요.</p>}
       <div className="flex flex-col gap-2">
         {filtered.map((o) => (
-          <div key={o.id} onClick={() => setSelectedOrderId(o.id)} className="cursor-pointer rounded-xl border border-border p-3.5">
+          <div
+            key={o.id}
+            onClick={() => setSelectedOrderId(o.id)}
+            // 확인 안 한 주문은 테두리/배경으로 눈에 띄게 — 확인하면 일반 카드로 돌아간다.
+            className={`cursor-pointer rounded-xl border p-3.5 ${isNewOrder(o) ? "border-2 border-accent bg-accent-soft/40" : "border-border"}`}
+          >
             <div className="mb-1.5 flex items-center justify-between">
-              <span className="text-[12px] text-text-muted">
+              <span className="flex items-center gap-1.5 text-[12px] text-text-muted">
+                {isNewOrder(o) && <span className="rounded-md bg-red-600 px-1.5 py-0.5 text-[10.5px] font-extrabold text-white">NEW</span>}
                 {o.orderNumber} · {formatDateTime(o.createdAt)}
               </span>
               <div className="flex items-center gap-1.5">
+                {o.deliveryEditedAt && isNewOrder(o) && (
+                  <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-700">배송지 수정됨</span>
+                )}
+                {o.deliveryEditOpen && <span className="rounded-md bg-bg-sunken px-1.5 py-0.5 text-[11px] font-bold text-text-muted">🔓 수정 허용 중</span>}
                 {o.cancelRequested && <span className="rounded-md bg-red-100 px-1.5 py-0.5 text-[11px] font-bold text-red-600">취소 요청</span>}
                 <OrderStatusBadge status={o.status} />
               </div>
@@ -595,6 +687,7 @@ export default function AdminHomePage() {
               ordererProfile={order.profileId ? profileById.get(order.profileId) : undefined}
               onClose={() => setSelectedOrderId(null)}
               onViewCustomer={(profileId) => router.push(`/admin/customers?customer=${profileId}`)}
+              onToggleDeliveryEdit={(open) => void toggleDeliveryEdit(order, open)}
             />
           );
         })()}
