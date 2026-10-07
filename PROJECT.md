@@ -1,4 +1,4 @@
-﻿# PROJECT.md
+# PROJECT.md
 # 🚀 개발 현황
 
 > Last Update : 2026-08-06
