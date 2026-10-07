@@ -443,6 +443,9 @@ export interface Order {
   apartmentName: string | null;
   recipientName: string;
   recipientPhone: string;
+  // 입금자명 — 받는 분과 입금하는 사람이 다를 때만 채워진다(비어 있으면 받는
+  // 분 이름으로 입금). 관리자가 무통장 입금 내역과 주문을 맞출 때 쓴다.
+  depositorName: string | null;
   paymentMethod: PaymentMethod;
   status: OrderStatus;
   // 발주확인(confirmed) 이후 고객이 취소를 "요청"하면 true — 상태 자체는 그대로

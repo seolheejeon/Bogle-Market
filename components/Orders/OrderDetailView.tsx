@@ -4,14 +4,16 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
-import { listOrdersForProfile, lookupGuestOrders, getEvent, cancelOrder, requestCancellation, requestRefund } from "@/lib/data";
+import { listOrdersForProfile, lookupGuestOrders, getEvent, cancelOrder, requestCancellation, requestRefund, updateOrderDelivery } from "@/lib/data";
 import { uploadRefundPhoto } from "@/lib/supabase/storage";
 import type { MarketEvent, Order, OrderStatus, RefundReasonCode } from "@/types";
-import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL, COURIER_LABEL, COURIER_TRACKING_URL, REFUND_REASON_LABEL } from "@/types";
-import { formatDateTime, formatPrice, formatEventDateChip } from "@/lib/format";
+import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL, COURIER_LABEL, COURIER_TRACKING_URL, REFUND_REASON_LABEL, formatAddress } from "@/types";
+import { formatDateTime, formatPrice, formatEventDateChip, formatDeadlineLabel } from "@/lib/format";
+import { canEditOrderDelivery } from "@/lib/order-policy";
 import { OrderStatusBadge } from "@/components/Badge";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
 import { SupportLinks } from "@/components/SupportLinks";
+import { AddressFields, type AddressFieldsValue } from "@/components/AddressFields";
 
 const STEPS: { value: OrderStatus; label: string }[] = [
   { value: "wait", label: "입금대기" },
@@ -37,6 +39,7 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
   const [refundDetail, setRefundDetail] = useState("");
   const [refundPhotoFile, setRefundPhotoFile] = useState<File | null>(null);
   const [refundPhotoPreview, setRefundPhotoPreview] = useState<string | null>(null);
+  const [editingDelivery, setEditingDelivery] = useState(false);
 
   function apply(all: Order[]) {
     const found = all.find((o) => o.id === orderId) ?? null;
@@ -80,6 +83,8 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
   const canRequestCancel = (order?.status === "confirmed" || order?.status === "ship") && !cancelPending;
   // 반려된 후에도 재신청할 수 있게 둔다(연락 없이 막다른 상태가 되지 않도록).
   const canRequestRefund = order?.status === "done" || order?.status === "refund_rejected";
+  // 발주확인 전 + 회차 마감 전에만 손님이 직접 배송지/연락처/입금자명을 고칠 수 있다.
+  const canEditDelivery = order ? canEditOrderDelivery(order, event) : false;
 
   async function handleCancel() {
     if (!order) return;
@@ -198,7 +203,35 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
               <p>
                 <span className="text-text-muted">결제 방법</span> {PAYMENT_METHOD_LABEL[order.paymentMethod]}
               </p>
+              {order.paymentMethod === "bank_transfer" && (
+                <p className="mt-1">
+                  <span className="text-text-muted">입금자명</span> {order.depositorName ?? `${order.recipientName} (받는 분과 같음)`}
+                </p>
+              )}
+              {canEditDelivery && !editingDelivery && (
+                <button
+                  type="button"
+                  onClick={() => setEditingDelivery(true)}
+                  className="mt-2.5 w-full rounded-[9px] border border-accent py-2 text-[12.5px] font-bold text-accent-dark"
+                >
+                  배송지 · 연락처 수정
+                  {event && event.type !== "PARCEL" && <span className="ml-1 font-semibold text-text-muted">({formatDeadlineLabel(event.deadlineAt)} 전까지)</span>}
+                </button>
+              )}
             </div>
+
+            {canEditDelivery && editingDelivery && event && (
+              <EditDeliveryForm
+                order={order}
+                needsEntranceMethod={event.type !== "PARCEL"}
+                onCancel={() => setEditingDelivery(false)}
+                onSave={async (patch) => {
+                  await updateOrderDelivery(order.id, patch, { guestName, guestPin });
+                  setEditingDelivery(false);
+                  refresh();
+                }}
+              />
+            )}
 
             {order.courierCode && order.trackingNumber && <TrackingSection courierCode={order.courierCode} trackingNumber={order.trackingNumber} />}
 
@@ -369,6 +402,93 @@ export function OrderDetailView({ orderId, guestName, guestPin }: { orderId: str
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// 주문 후 배송지/연락처/입금자명 수정 폼 — 체크아웃과 같은 AddressFields를 쓰고,
+// 같은 필수 항목(이름/전화/주소/상세주소, 문고리·사다드림은 공동현관 출입방법)을 검사한다.
+function EditDeliveryForm({
+  order,
+  needsEntranceMethod,
+  onCancel,
+  onSave,
+}: {
+  order: Order;
+  needsEntranceMethod: boolean;
+  onCancel: () => void;
+  onSave: (patch: Parameters<typeof updateOrderDelivery>[1]) => Promise<void>;
+}) {
+  const [name, setName] = useState(order.recipientName);
+  const [phone, setPhone] = useState(order.recipientPhone);
+  const [address, setAddress] = useState<AddressFieldsValue>({
+    zonecode: "",
+    roadAddress: order.roadAddress ?? "",
+    apartmentName: order.apartmentName ?? "",
+    detailAddress: order.detailAddress ?? "",
+    entranceMethod: order.entranceMethod ?? "",
+    memo: order.deliveryMemo ?? "",
+  });
+  const [depositorName, setDepositorName] = useState(order.depositorName ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (!name.trim()) return setError("받는 분 이름을 입력해 주세요.");
+    if (!phone.trim()) return setError("전화번호를 입력해 주세요.");
+    if (!address.roadAddress) return setError("주소검색으로 주소를 입력해 주세요.");
+    if (!address.detailAddress.trim()) return setError("상세주소를 입력해 주세요.");
+    if (needsEntranceMethod && !address.entranceMethod.trim()) return setError("공동현관 출입방법을 입력해 주세요.");
+    setError(null);
+    setSaving(true);
+    try {
+      const entranceMethod = needsEntranceMethod ? address.entranceMethod.trim() : "";
+      await onSave({
+        recipientName: name.trim(),
+        recipientPhone: phone.trim(),
+        addressSnapshot: formatAddress({
+          roadAddress: address.roadAddress,
+          detailAddress: address.detailAddress.trim(),
+          entranceMethod: entranceMethod || undefined,
+          memo: address.memo.trim() || undefined,
+        }),
+        roadAddress: address.roadAddress,
+        detailAddress: address.detailAddress.trim(),
+        entranceMethod,
+        deliveryMemo: address.memo.trim(),
+        apartmentName: address.apartmentName,
+        depositorName: order.paymentMethod === "bank_transfer" ? depositorName.trim() : undefined,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "저장 중 오류가 발생했어요.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mb-4 flex flex-col gap-2 rounded-[10px] border border-accent p-3">
+      <p className="text-[12.5px] font-bold">배송지 · 연락처 수정</p>
+      <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="받는 분 이름" value={name} onChange={(e) => setName(e.target.value)} />
+      <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 (010-0000-0000)" value={phone} onChange={(e) => setPhone(e.target.value)} />
+      <AddressFields value={address} onChange={(patch) => setAddress((v) => ({ ...v, ...patch }))} showEntranceMethod={needsEntranceMethod} />
+      {order.paymentMethod === "bank_transfer" && (
+        <input
+          className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]"
+          placeholder="입금자명 (받는 분과 다른 이름으로 입금하면 입력)"
+          value={depositorName}
+          onChange={(e) => setDepositorName(e.target.value)}
+        />
+      )}
+      {error && <p className="text-[12px] font-semibold text-red-600">{error}</p>}
+      <div className="mt-1 flex gap-2">
+        <button type="button" onClick={onCancel} className="flex-1 rounded-[9px] border border-border py-2 text-[12.5px] font-semibold text-text-muted">
+          취소
+        </button>
+        <button type="button" onClick={save} disabled={saving} className="flex-1 rounded-[9px] bg-accent py-2 text-[12.5px] font-bold text-white disabled:opacity-50">
+          {saving ? "저장 중..." : "저장"}
+        </button>
       </div>
     </div>
   );

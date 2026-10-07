@@ -37,6 +37,8 @@ export function CheckoutView() {
   const [selectedAddressId, setSelectedAddressId] = useState<string | "new">("new");
   const [saveAsDefault, setSaveAsDefault] = useState(false);
   const [pin, setPin] = useState("");
+  // 입금자명 — 받는 분과 다를 때만 입력(가족 계좌 등). 무통장입금 주문에만 저장한다.
+  const [depositorName, setDepositorName] = useState("");
   // 배송유형(문고리/사다드림/택배)마다 결제 가능 수단이 달라서(사다드림은
   // 무통장입금만) 결제수단을 유형별로 따로 선택받는다 — 장바구니에 없는
   // 유형은 굳이 채워둘 필요 없어 필요한 것만 담는 partial map으로 둔다.
@@ -320,6 +322,7 @@ export function CheckoutView() {
           entranceMethod: groupNeedsEntranceMethod ? address.entranceMethod.trim() || undefined : undefined,
           deliveryMemo: address.memo.trim() || undefined,
           apartmentName: address.apartmentName || undefined,
+          depositorName: methodFor(groupType) === "bank_transfer" ? depositorName.trim() || undefined : undefined,
           paymentMethod: methodFor(groupType),
           items: group.items.map((i) => ({
             productId: i.product.id,
@@ -550,6 +553,18 @@ export function CheckoutView() {
             );
           })}
         </div>
+        {deliveryTypesPresent.some((t) => methodFor(t) === "bank_transfer") && (
+          <label className="mt-3 block text-[12px] font-semibold text-text-muted">
+            입금자명
+            <input
+              className="mt-1 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px] font-normal text-text"
+              placeholder={name.trim() ? `${name.trim()} (다른 이름으로 입금하면 입력)` : "받는 분과 다른 이름으로 입금하면 입력"}
+              value={depositorName}
+              onChange={(e) => setDepositorName(e.target.value)}
+            />
+            <span className="mt-1 block text-[11px] font-normal">비워두면 받는 분 이름으로 입금하신 걸로 확인해요.</span>
+          </label>
+        )}
         {totalShippingAll > 0 && (
           <div className="mt-3.5 flex justify-between border-t border-border pt-3.5 text-[13px] text-text-muted">
             <span>상품 + 배송비</span>

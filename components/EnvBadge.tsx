@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
 // 개발(STG) 사이트와 운영 사이트를 한눈에 구분하기 위한 딱지 — 화면이 완전히
 // 똑같아서 관리자 작업을 엉뚱한 쪽에서 하는 실수를 막으려는 용도.
@@ -27,20 +27,9 @@ export function EnvBadge() {
     () => null,
   );
 
-  // 브라우저 탭 제목에도 붙여서 탭만 보고도 구분되게 한다. 페이지 이동 시
-  // Next가 <title> 요소를 통째로 갈아끼우므로 <head> 전체를 지켜보다가 다시 붙인다.
-  useEffect(() => {
-    if (!label) return;
-    const prefix = `[${label}] `;
-    const apply = () => {
-      if (!document.title.startsWith(prefix)) document.title = prefix + document.title;
-    };
-    apply();
-    const observer = new MutationObserver(apply);
-    observer.observe(document.head, { childList: true, characterData: true, subtree: true });
-    return () => observer.disconnect();
-  }, [label]);
-
+  // 탭 제목(document.title)에도 "[STG]"를 붙였었는데, Next/React가 관리하는
+  // <title>과 서로 덮어쓰다 상품 페이지 제목이 "[LOCAL] [LOCAL]"로 깨져서 뺐다 —
+  // 화면 위 딱지만으로 구분한다.
   if (!label) return null;
   return (
     <div className="pointer-events-none fixed top-1 left-1/2 z-[100] -translate-x-1/2 rounded-full bg-[#2563eb] px-2.5 py-0.5 text-[11px] font-extrabold tracking-wide text-white shadow">

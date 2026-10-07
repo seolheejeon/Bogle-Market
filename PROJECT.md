@@ -109,8 +109,18 @@
   - 운영: 새 Netlify 사이트 **https://bogle-market-prd.netlify.app** (`prod` 브랜치 자동배포) + **새 Supabase 프로젝트 `bogle-prod`**(`lib/supabase/schema.sql`로 깨끗하게 생성, 2026-10-07 적용). 테스트가 끝난 것만 `main` → `prod`로 병합해서 반영(`git checkout prod; git merge main; git push origin prod; git checkout main`)
   - 운영 Netlify 환경변수: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`(publishable key), `NEXT_PUBLIC_ENABLED_EVENT_TYPES=GROUP_BUY`, `NEXT_PUBLIC_SITE_URL`. 웹 푸시(VAPID/service role)·토스 키는 아직 미설정
   - 운영 관리자 계정: `bogle1` (SQL로 `is_admin=true` 지정)
-  - 환경 딱지(`components/EnvBadge.tsx`): 개발 사이트는 화면 상단에 "STG 테스트 서버", 로컬은 "LOCAL" 딱지 + 탭 제목 앞에 `[STG]`/`[LOCAL]`. 접속 주소로 자동 판단(운영은 표시 없음), `NEXT_PUBLIC_ENV_LABEL`로 직접 지정도 가능
-  - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저)
+  - 환경 딱지(`components/EnvBadge.tsx`): 개발 사이트는 화면 상단에 "STG 테스트 서버", 로컬은 "LOCAL" 딱지(탭 제목 표시는 충돌로 제거). 접속 주소로 자동 판단(운영은 표시 없음), `NEXT_PUBLIC_ENV_LABEL`로 직접 지정도 가능
+  - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
+  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ⏳
+
+**주문 후 배송지 수정 + 입금자명 + 인기상품 실판매순 (2026-10-07)**
+- 배경: 운영 사이트를 손님 입장에서 점검했더니 네이버폼 대비 핵심 불편이던 "주문 후 주소 수정"이 여전히 불가했고, 무통장입금만 받는데 입금자명을 안 받아 입금 매칭이 어려움
+- **배송지/연락처/입금자명 수정**: 주문 상세에 "배송지 · 연락처 수정" 버튼 — 발주확인 전(wait/paid) + 회차 마감 전에만(택배는 발주확인 전까지) 보임(`lib/order-policy.ts`의 `canEditOrderDelivery`). 서버 RPC `update_order_delivery`가 본인 확인(회원 auth.uid / 비회원 이름+PIN)과 같은 조건을 다시 검사. `guest_name`은 안 바꿔서 받는 분 이름을 고쳐도 원래 이름+PIN 조회가 계속 됨
+- **입금자명**: `orders.depositor_name`(선택, 비면 받는 분 이름으로 입금). 체크아웃에서 무통장입금일 때 입력칸, 관리자 주문 카드/상세에 표시, 관리자 검색 대상에 포함. `create_order`에 `p_depositor_name` 추가(시그니처 변경으로 drop 후 재생성), `lookup_guest_orders`가 배송지 구성요소/입금자명/배송비/할인도 반환
+- **장바구니 회차 표시**: 문고리/사다드림은 회차가 하나여도 "10/16(금) 배송 · 마감시각"을 항상 표시(예전엔 회차 2개 이상일 때만)
+- **인기상품**: 예전엔 그냥 앞에서 4개였음 → `popular_listing_ids()` RPC(취소 제외 판매수량 순 리스팅 id만 반환, 수량은 비노출)로 실판매순 정렬. BEST 딱지는 실제 팔린 상품에만. 열린 배송방식별로 섹션 분리(하나뿐이면 "인기상품" 하나)
+- 검증: 개발 DB에서 RPC 시나리오(입금자명 저장 → 틀린 PIN 수정 거부 → 수정 → 원래 이름으로 재조회 → 취소 후 수정 거부) 전부 통과, 로컬 화면에서 수정 폼 저장/입금자명 표시/체크아웃 입금자명 칸/인기상품 BEST 확인. 테스트 주문은 취소 처리함
+- 함께 수정: 환경 딱지의 탭 제목 `[STG]` 표시는 Next의 `<title>` 관리와 충돌(상품 페이지 제목이 "[LOCAL] [LOCAL]"로 깨짐)해서 제거, 화면 딱지만 유지
   - 단계적 오픈: 환경변수 `NEXT_PUBLIC_ENABLED_EVENT_TYPES`(예: `GROUP_BUY`)로 고객에게 노출할 배송방식을 제한 — 운영 사이트는 `GROUP_BUY`(사다드림)만. 비워두면 전부 노출(개발 서버). `lib/order-policy.ts`의 `ENABLED_EVENT_TYPES`/`isEventTypeEnabled`가 카테고리 탭, 홈/카테고리 목록(`isEventVisibleToCustomers`), 관리자 새 이벤트 등록의 구분 선택지에 적용됨. 빌드 시점에 박히는 값이라 바꾼 뒤 재배포 필요
 - **PWA + 웹 푸시** — 직접 작성한 서비스워커(`public/sw.js`, 프레임워크 플러그인 미사용) + `web-push`(VAPID 서명·발송) + `sharp`(devDependency, 아이콘 생성 스크립트 전용)
 - 마스코트: `public/images/bogle.png` (보글이)

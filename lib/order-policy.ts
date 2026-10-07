@@ -1,4 +1,4 @@
-import type { EventType, MarketEvent, Product } from "@/types";
+import type { EventType, MarketEvent, Order, Product } from "@/types";
 
 const ALL_EVENT_TYPES: EventType[] = ["DOOR", "GROUP_BUY", "PARCEL"];
 
@@ -39,6 +39,20 @@ export function getOrderPolicy(event: Pick<MarketEvent, "type" | "flashSale">): 
 export function isEventOrderable(event: Pick<MarketEvent, "type" | "flashSale" | "status" | "deadlineAt">): boolean {
   if (event.status === "ended") return false;
   if (getOrderPolicy(event) !== "STRICT_DEADLINE") return true;
+  return new Date(event.deadlineAt).getTime() > Date.now();
+}
+
+// 고객이 주문 후 배송지/연락처/입금자명을 직접 고칠 수 있는지 — 발주확인 전
+// (wait/paid)이고 그 회차 마감 전일 때만(택배는 마감이 없어 발주확인 전까지).
+// 서버 RPC(update_order_delivery)도 같은 조건을 다시 검사한다.
+export function canEditOrderDelivery(
+  order: Pick<Order, "status" | "cancelRequested">,
+  event: Pick<MarketEvent, "type" | "status" | "deadlineAt"> | null | undefined,
+): boolean {
+  if (order.status !== "wait" && order.status !== "paid") return false;
+  if (order.cancelRequested) return false;
+  if (!event || event.status === "ended") return false;
+  if (event.type === "PARCEL") return true;
   return new Date(event.deadlineAt).getTime() > Date.now();
 }
 

@@ -202,6 +202,9 @@ export function OrderDetailModal({
 
       <Section title="결제">
         <Row label="결제수단">{PAYMENT_METHOD_LABEL[order.paymentMethod]}</Row>
+        {order.paymentMethod === "bank_transfer" && (
+          <Row label="입금자명">{order.depositorName ? <strong>{order.depositorName}</strong> : `${order.recipientName} (받는 분과 같음)`}</Row>
+        )}
         {order.courierCode && order.trackingNumber && <Row label="송장번호">{order.trackingNumber}</Row>}
         {order.cancelRequested && order.cancelReason && <Row label="취소 사유">{order.cancelReason}</Row>}
       </Section>
