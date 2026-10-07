@@ -206,9 +206,9 @@ export async function createEvent(input: Omit<MarketEvent, "id" | "products">): 
         deadline_at: input.deadlineAt,
         delivery_at: input.deliveryAt,
         notice: input.notice,
-        // 함께 구매 할인이 없는 보통 이벤트는 컬럼을 아예 안 보낸다 — 마이그레이션
+        // 여러 품목 할인이 없는 보통 이벤트는 컬럼을 아예 안 보낸다 — 마이그레이션
         // 전 DB에서도 이벤트 등록 자체는 계속 되도록.
-        ...(input.comboDiscounts && input.comboDiscounts.length > 0 ? { combo_discounts: input.comboDiscounts } : {}),
+        ...(input.varietyDiscounts && input.varietyDiscounts.length > 0 ? { combo_discounts: input.varietyDiscounts } : {}),
       })
       .select()
       .single();
@@ -232,7 +232,7 @@ export async function updateEvent(id: string, patch: Partial<Omit<MarketEvent, "
     if (patch.deadlineAt !== undefined) row.deadline_at = patch.deadlineAt;
     if (patch.deliveryAt !== undefined) row.delivery_at = patch.deliveryAt;
     if (patch.notice !== undefined) row.notice = patch.notice;
-    if (patch.comboDiscounts !== undefined) row.combo_discounts = patch.comboDiscounts;
+    if (patch.varietyDiscounts !== undefined) row.combo_discounts = patch.varietyDiscounts;
     const { error } = await supabase.from("events").update(row).eq("id", id);
     if (error) throw error;
     return;
@@ -258,8 +258,8 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
     deadlineAt: overrides.deadlineAt,
     deliveryAt: overrides.deliveryAt,
     notice: source.notice,
-    // 카탈로그 상품 id로 저장돼 있어 새 리스팅에도 그대로 들어맞는다.
-    comboDiscounts: source.comboDiscounts,
+    // 품목 수 기준이라 리스팅이 새로 생겨도 그대로 들어맞는다.
+    varietyDiscounts: source.varietyDiscounts,
   });
   // 원가도 가격/재고와 마찬가지로 "원본 이벤트의 스냅샷"을 그대로 복사한다 —
   // 마스터(카탈로그) 기준 원가가 아니라, 이 회차에서 실제로 쓰던 값을 이어받음.
@@ -1968,7 +1968,11 @@ function mapSupabaseEvent(row: Record<string, any>): MarketEvent {
     deadlineAt: row.deadline_at,
     deliveryAt: row.delivery_at,
     notice: row.notice ?? "",
-    comboDiscounts: row.combo_discounts ?? [],
+    // 컬럼 이름은 처음 설계(상품 조합 할인) 때 붙인 combo_discounts 그대로 —
+    // 지금은 품목 수 구간 [{minKinds, amountOff}]만 담는다. 모양이 다른 값은 버린다.
+    varietyDiscounts: ((row.combo_discounts ?? []) as Record<string, unknown>[])
+      .filter((t) => typeof t.minKinds === "number" && typeof t.amountOff === "number")
+      .map((t) => ({ minKinds: t.minKinds as number, amountOff: t.amountOff as number })),
     // 이벤트 안에서의 노출 순서(sort_order) 오름차순 — 관리자가 ▲▼로 바꾼다.
     products: (row.event_products ?? [])
       .slice()

@@ -293,19 +293,19 @@ export interface MarketEvent {
   deadlineAt: string; // ISO
   deliveryAt: string; // ISO
   notice: string;
-  // 함께 구매 할인 — 같은 회차에서 여러 상품을 같이 사면 주문 총액에서 추가로
-  // 깎아준다(lib/discount.ts의 calculateComboDiscounts). 상품별 수량 할인
-  // (Product.discount)과 따로 계산돼 둘 다 적용된다. 없으면 빈 배열/undefined.
-  comboDiscounts?: EventComboDiscount[];
+  // 여러 품목 할인 — 같은 회차에서 "서로 다른 상품을 몇 가지" 샀는지로 주문
+  // 총액에서 추가로 깎아준다(수량은 안 봄 — 같은 상품 여러 개는 상품별 구간
+  // 할인(Product.discount)이 담당). 넘긴 구간 중 가장 큰 할인 하나만 적용되고,
+  // 상품별 할인과는 따로 더해진다(lib/discount.ts의 calculateVarietyDiscount).
+  // DB 컬럼은 events.combo_discounts. 없으면 빈 배열/undefined.
+  varietyDiscounts?: EventVarietyTier[];
   products: Product[];
 }
 
-// 예: "에그타르트 1개 + 닭강정 2개 함께 사면 1,000원 할인". 상품은 카탈로그
-// 상품 id로 가리켜서 이벤트를 복제(리스팅 id가 새로 생김)해도 그대로 유지된다.
-// 조건을 채우면 주문(=회차)당 한 번 적용 — 세트를 두 번 채워도 한 번만.
-export interface EventComboDiscount {
-  id: string;
-  items: { catalogProductId: string; qty: number }[];
+// 예: [{ minKinds: 2, amountOff: 1000 }, { minKinds: 3, amountOff: 2000 }] →
+// 2가지 사면 1,000원, 3가지 이상이면 2,000원.
+export interface EventVarietyTier {
+  minKinds: number;
   amountOff: number;
 }
 
@@ -352,7 +352,7 @@ export interface MarketEventSeed {
   deadlineAt: string;
   deliveryAt: string;
   notice: string;
-  comboDiscounts?: EventComboDiscount[];
+  varietyDiscounts?: EventVarietyTier[];
   products: EventProductSeed[];
 }
 

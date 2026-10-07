@@ -11,7 +11,7 @@
 // - "bundle": bundleQty개 묶음마다 정가 대신 bundlePrice로(할인액 = 묶음 수 ×
 //   (정가 묶음가 - bundlePrice), 나머지 단품은 할인 없음)
 
-import type { EventComboDiscount, Product, ProductDiscount } from "@/types";
+import type { EventVarietyTier, Product, ProductDiscount } from "@/types";
 import { formatPrice } from "@/lib/format";
 
 type QtyTier = Extract<ProductDiscount, { type: "qty_tiers" }>["tiers"][number];
@@ -107,61 +107,49 @@ export function totalDiscount(items: DiscountLineItem[]): number {
   return groupDiscounts(items).reduce((sum, g) => sum + g.amount, 0);
 }
 
-// ---------- 함께 구매 할인 (이벤트 단위) ----------
-// 같은 회차(=주문 하나)에 담긴 상품들을 카탈로그 상품별 수량으로 합친 뒤,
-// 이벤트의 comboDiscounts 규칙마다 "모든 상품이 필요한 수량 이상인지" 본다.
-// 채워진 규칙은 주문당 한 번씩 amountOff를 깎고(세트를 두 번 채워도 한 번),
-// 상품별 수량 할인과 별개로 더해진다. 하나라도 담았지만 덜 채운 규칙은
-// "OO 1개 더 담으면 1,000원 추가 할인" 안내용으로 따로 돌려준다.
+// ---------- 여러 품목 할인 (이벤트 단위) ----------
+// 같은 회차(=주문 하나)에서 서로 다른 상품(카탈로그 상품 기준)을 몇 가지
+// 담았는지만 본다 — 수량은 상관없다(같은 상품 여러 개는 상품별 구간 할인이
+// 담당). 이벤트의 varietyDiscounts 구간 중 넘긴 것 가운데 가장 큰 할인 하나만
+// 적용되고, 상품별 수량 할인과 별개로 더해진다. 다음 구간이 남아 있으면
+// "1가지 더 담으면 2,000원 할인" 안내용으로 같이 돌려준다.
 
-export interface ComboLine {
-  catalogProductId: string;
-  qty: number;
+export interface VarietyResult {
+  kinds: number;
+  amount: number;
+  next: { moreKinds: number; amountOff: number } | null;
 }
 
-export interface ComboResult {
-  applied: { combo: EventComboDiscount; amount: number }[];
-  hints: { combo: EventComboDiscount; missing: { catalogProductId: string; qty: number }[] }[];
-  total: number;
+export function sortedVarietyTiers(tiers: EventVarietyTier[] | undefined): EventVarietyTier[] {
+  return [...(tiers ?? [])].filter((t) => t.minKinds >= 2 && t.amountOff > 0).sort((a, b) => a.minKinds - b.minKinds);
 }
 
-export function calculateComboDiscounts(combos: EventComboDiscount[] | undefined, lines: ComboLine[]): ComboResult {
-  const result: ComboResult = { applied: [], hints: [], total: 0 };
-  if (!combos || combos.length === 0) return result;
-  const have = new Map<string, number>();
-  for (const l of lines) have.set(l.catalogProductId, (have.get(l.catalogProductId) ?? 0) + l.qty);
-  for (const combo of combos) {
-    if (combo.items.length === 0 || combo.amountOff <= 0) continue;
-    const missing = combo.items
-      .map((it) => ({ catalogProductId: it.catalogProductId, qty: it.qty - (have.get(it.catalogProductId) ?? 0) }))
-      .filter((m) => m.qty > 0);
-    if (missing.length === 0) {
-      result.applied.push({ combo, amount: combo.amountOff });
-      result.total += combo.amountOff;
-    } else if (combo.items.some((it) => (have.get(it.catalogProductId) ?? 0) > 0)) {
-      result.hints.push({ combo, missing });
-    }
-  }
-  return result;
+export function calculateVarietyDiscount(tiers: EventVarietyTier[] | undefined, catalogProductIds: string[]): VarietyResult {
+  const sorted = sortedVarietyTiers(tiers);
+  const kinds = new Set(catalogProductIds).size;
+  const amount = Math.max(0, ...sorted.filter((t) => kinds >= t.minKinds).map((t) => t.amountOff));
+  const nextTier = sorted.find((t) => t.minKinds > kinds && t.amountOff > amount);
+  return { kinds, amount, next: nextTier ? { moreKinds: nextTier.minKinds - kinds, amountOff: nextTier.amountOff } : null };
 }
 
-export function describeCombo(combo: EventComboDiscount, nameOf: (catalogProductId: string) => string): string {
-  const parts = combo.items.map((it) => `${nameOf(it.catalogProductId)} ${it.qty}개`).join(" + ");
-  return `${parts} 함께 구매 시 ${formatPrice(combo.amountOff)} 추가 할인`;
+export function describeVarietyTiers(tiers: EventVarietyTier[] | undefined): string | null {
+  const sorted = sortedVarietyTiers(tiers);
+  if (sorted.length === 0) return null;
+  return sorted.map((t) => `${t.minKinds}가지 ${formatPrice(t.amountOff)}`).join(" · ") + " 할인";
 }
 
 // 장바구니/체크아웃이 한 이벤트(=주문 단위)의 할인 합계를 똑같이 계산하도록
-// 묶어둔 것 — 상품별 수량 할인 + 함께 구매 할인, 단 상품 금액 합계를 넘지 않게.
+// 묶어둔 것 — 상품별 수량 할인 + 여러 품목 할인, 단 상품 금액 합계를 넘지 않게.
 export function eventDiscountTotal(
-  combos: EventComboDiscount[] | undefined,
+  tiers: EventVarietyTier[] | undefined,
   items: DiscountLineItem[],
-): { productDiscount: number; combo: ComboResult; total: number } {
+): { productDiscount: number; variety: VarietyResult; total: number } {
   const productDiscount = totalDiscount(items);
-  const combo = calculateComboDiscounts(
-    combos,
-    items.map((i) => ({ catalogProductId: i.product.catalogProductId, qty: i.qty })),
+  const variety = calculateVarietyDiscount(
+    tiers,
+    items.filter((i) => i.qty > 0).map((i) => i.product.catalogProductId),
   );
   const subtotal = items.reduce((sum, i) => sum + i.lineTotal, 0);
-  const total = Math.min(productDiscount + combo.total, subtotal);
-  return { productDiscount, combo, total };
+  const total = Math.min(productDiscount + variety.amount, subtotal);
+  return { productDiscount, variety, total };
 }

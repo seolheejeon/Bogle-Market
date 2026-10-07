@@ -14,8 +14,8 @@ import {
   getEventProductCosts,
   getSoldQuantities,
 } from "@/lib/data";
-import type { CatalogProduct, EventComboDiscount, EventType, MarketEvent, Product } from "@/types";
-import { describeCombo } from "@/lib/discount";
+import type { CatalogProduct, EventType, EventVarietyTier, MarketEvent, Product } from "@/types";
+import { describeVarietyTiers, sortedVarietyTiers } from "@/lib/discount";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice, toDateInputValue, dateInputValueToIso } from "@/lib/format";
 import { generateStockCombos } from "@/lib/product-options";
@@ -279,73 +279,62 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
       <AddExistingProductForm eventId={event.id} eventType={event.type} alreadyAddedIds={event.products.map((p) => p.catalogProductId)} onAdded={refresh} />
 
       {/* key로 이벤트의 저장된 규칙이 바뀔 때(저장 직후 등) 편집 상태를 새로 채운다. */}
-      <ComboDiscountEditor key={JSON.stringify(event.comboDiscounts ?? [])} event={event} onSaved={refresh} />
+      <VarietyDiscountEditor key={JSON.stringify(event.varietyDiscounts ?? [])} event={event} onSaved={refresh} />
     </div>
   );
 }
 
-// 함께 구매 할인 편집 — "에그타르트 1개 + 닭강정 2개 함께 사면 1,000원 추가
-// 할인"처럼 이 회차 상품 2개 이상을 묶는다. 상품별 수량 할인과 따로 더해지고,
-// 주문당 한 번 적용된다(lib/discount.ts의 calculateComboDiscounts). 상단 정보처럼
-// 이 섹션도 저장 버튼을 눌러야 반영된다.
-interface ComboDraft {
-  id: string;
-  items: { catalogProductId: string; qty: string }[];
+// 여러 품목 할인 편집 — 이 회차에서 서로 다른 상품을 몇 가지 샀는지로 주문
+// 금액에서 추가로 깎아준다(수량 무관 — 같은 상품 여러 개는 상품별 구간 할인).
+// 예: 2가지 1,000원 / 3가지 2,000원 → 넘긴 구간 중 가장 큰 할인 하나만 적용.
+// 상단 정보처럼 이 섹션도 저장 버튼을 눌러야 반영된다.
+interface VarietyDraft {
+  minKinds: string;
   amountOff: string;
 }
 
-function toComboDrafts(event: MarketEvent): ComboDraft[] {
-  return (event.comboDiscounts ?? []).map((c) => ({
-    id: c.id,
-    items: c.items.map((it) => ({ catalogProductId: it.catalogProductId, qty: String(it.qty) })),
-    amountOff: String(c.amountOff),
-  }));
+function toVarietyDrafts(event: MarketEvent): VarietyDraft[] {
+  return sortedVarietyTiers(event.varietyDiscounts).map((t) => ({ minKinds: String(t.minKinds), amountOff: String(t.amountOff) }));
 }
 
-function ComboDiscountEditor({ event, onSaved }: { event: MarketEvent; onSaved: () => void }) {
-  const [drafts, setDrafts] = useState<ComboDraft[]>(() => toComboDrafts(event));
+function VarietyDiscountEditor({ event, onSaved }: { event: MarketEvent; onSaved: () => void }) {
+  const [drafts, setDrafts] = useState<VarietyDraft[]>(() => toVarietyDrafts(event));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const products = event.products;
-  const nameOf = (catalogProductId: string) => products.find((p) => p.catalogProductId === catalogProductId)?.name ?? "(이 회차에 없는 상품)";
-  const dirty = JSON.stringify(drafts) !== JSON.stringify(toComboDrafts(event));
+  const productCount = new Set(event.products.map((p) => p.catalogProductId)).size;
+  const dirty = JSON.stringify(drafts) !== JSON.stringify(toVarietyDrafts(event));
 
-  function patchCombo(index: number, patch: Partial<ComboDraft>) {
+  function patchRow(index: number, patch: Partial<VarietyDraft>) {
     setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
   }
 
-  function addCombo() {
-    const [a, b] = products;
-    setDrafts((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        items: [
-          { catalogProductId: a?.catalogProductId ?? "", qty: "1" },
-          { catalogProductId: b?.catalogProductId ?? "", qty: "1" },
-        ],
-        amountOff: "",
-      },
-    ]);
+  function addRow() {
+    setDrafts((prev) => {
+      const lastKinds = Number(prev[prev.length - 1]?.minKinds) || 1;
+      const lastAmount = Number(prev[prev.length - 1]?.amountOff) || 0;
+      return [...prev, { minKinds: String(lastKinds + 1), amountOff: lastAmount > 0 ? String(lastAmount + 1000) : "" }];
+    });
+  }
+
+  function buildTiers(): EventVarietyTier[] | string {
+    const byKinds = new Map<number, number>();
+    for (const [i, d] of drafts.entries()) {
+      const minKinds = Number(d.minKinds) || 0;
+      const amountOff = Math.max(0, Number(d.amountOff) || 0);
+      if (minKinds < 2) return `${i + 1}번째 줄: 2가지 이상부터 설정할 수 있어요.`;
+      if (amountOff <= 0) return `${i + 1}번째 줄: 할인 금액을 입력해 주세요.`;
+      byKinds.set(minKinds, amountOff);
+    }
+    return sortedVarietyTiers(Array.from(byKinds, ([minKinds, amountOff]) => ({ minKinds, amountOff })));
   }
 
   async function save() {
-    const cleaned: EventComboDiscount[] = [];
-    for (const [i, d] of drafts.entries()) {
-      const items = d.items
-        .filter((it) => it.catalogProductId)
-        .map((it) => ({ catalogProductId: it.catalogProductId, qty: Math.max(1, Number(it.qty) || 1) }));
-      const distinct = new Set(items.map((it) => it.catalogProductId));
-      const amountOff = Math.max(0, Number(d.amountOff) || 0);
-      if (distinct.size < 2) return setError(`${i + 1}번 할인: 서로 다른 상품을 2개 이상 골라 주세요.`);
-      if (distinct.size !== items.length) return setError(`${i + 1}번 할인: 같은 상품이 두 번 들어가 있어요. 수량으로 조절해 주세요.`);
-      if (amountOff <= 0) return setError(`${i + 1}번 할인: 할인 금액을 입력해 주세요.`);
-      cleaned.push({ id: d.id, items, amountOff });
-    }
+    const tiers = buildTiers();
+    if (typeof tiers === "string") return setError(tiers);
     setError(null);
     setSaving(true);
     try {
-      await updateEvent(event.id, { comboDiscounts: cleaned });
+      await updateEvent(event.id, { varietyDiscounts: tiers });
       onSaved();
     } catch (e) {
       setError(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
@@ -354,88 +343,53 @@ function ComboDiscountEditor({ event, onSaved }: { event: MarketEvent; onSaved: 
     }
   }
 
+  const preview = (() => {
+    const tiers = buildTiers();
+    return typeof tiers === "string" ? null : describeVarietyTiers(tiers);
+  })();
+
   return (
     <div className="mt-6 rounded-xl border border-border p-4">
-      <p className="text-[13.5px] font-bold">🎁 함께 구매 할인</p>
+      <p className="text-[13.5px] font-bold">🎁 여러 품목 할인</p>
       <p className="mb-3 text-[11.5px] text-text-muted">
-        이 회차 상품을 같이 사면 주문 금액에서 추가로 깎아줘요. 상품별 수량 할인과 따로 더해지고, 주문 한 건에 한 번만 적용돼요.
+        이 회차에서 서로 다른 상품을 몇 가지 샀는지로 추가 할인해요(수량은 상관없어요 — 같은 상품 여러 개는 상품별 구간 할인에서). 넘긴 구간 중 가장 큰 할인 하나만 적용되고, 상품별 할인과는 따로 더해져요.
       </p>
-      {products.length < 2 && <p className="mb-2 text-[12px] text-text-muted">상품이 2개 이상 있어야 만들 수 있어요.</p>}
-      <div className="flex flex-col gap-3">
-        {drafts.map((d, i) => {
-          const amount = Number(d.amountOff) || 0;
-          const preview =
-            amount > 0 && d.items.every((it) => it.catalogProductId)
-              ? describeCombo({ id: d.id, items: d.items.map((it) => ({ catalogProductId: it.catalogProductId, qty: Number(it.qty) || 1 })), amountOff: amount }, nameOf)
-              : null;
-          return (
-            <div key={d.id} className="rounded-[10px] bg-bg-sunken p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-[12px] font-bold">{i + 1}번 할인</span>
-                <button type="button" onClick={() => setDrafts((prev) => prev.filter((_, j) => j !== i))} className="text-[11.5px] font-semibold text-red-600">
-                  삭제
-                </button>
-              </div>
-              {d.items.map((it, j) => (
-                <div key={j} className="mb-1.5 flex items-center gap-1.5">
-                  <select
-                    className="min-w-0 flex-1 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
-                    value={it.catalogProductId}
-                    onChange={(e) => patchCombo(i, { items: d.items.map((x, k) => (k === j ? { ...x, catalogProductId: e.target.value } : x)) })}
-                  >
-                    <option value="">상품 선택</option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.catalogProductId}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    min={1}
-                    className="w-14 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
-                    value={it.qty}
-                    onChange={(e) => patchCombo(i, { items: d.items.map((x, k) => (k === j ? { ...x, qty: e.target.value } : x)) })}
-                  />
-                  <span className="text-[12px] text-text-muted">개</span>
-                  <button
-                    type="button"
-                    disabled={d.items.length <= 2}
-                    onClick={() => patchCombo(i, { items: d.items.filter((_, k) => k !== j) })}
-                    className="rounded-[7px] border border-border px-1.5 py-1 text-[11px] text-text-muted disabled:opacity-30"
-                    aria-label="상품 빼기"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={() => patchCombo(i, { items: [...d.items, { catalogProductId: "", qty: "1" }] })}
-                className="mb-2 rounded-[7px] border border-dashed border-border px-2.5 py-1 text-[11.5px] font-semibold text-text-muted"
-              >
-                + 상품 추가
-              </button>
-              <label className="flex items-center gap-1.5 text-[12px] font-semibold text-text-muted">
-                할인 금액
-                <input
-                  type="number"
-                  min={0}
-                  className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[12.5px]"
-                  value={d.amountOff}
-                  onChange={(e) => patchCombo(i, { amountOff: e.target.value })}
-                />
-                원
-              </label>
-              {preview && <p className="mt-1.5 text-[11.5px] text-accent-dark">손님 화면: 🎁 {preview}</p>}
-            </div>
-          );
-        })}
+      <div className="flex flex-col gap-1.5">
+        {drafts.map((d, i) => (
+          <div key={i} className="flex items-center gap-1.5 text-[12.5px]">
+            <input
+              type="number"
+              min={2}
+              className="w-16 rounded-[7px] border border-border bg-bg-card px-2 py-1.5"
+              value={d.minKinds}
+              onChange={(e) => patchRow(i, { minKinds: e.target.value })}
+            />
+            <span className="text-text-muted">가지 이상 사면</span>
+            <input
+              type="number"
+              min={0}
+              className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5"
+              value={d.amountOff}
+              onChange={(e) => patchRow(i, { amountOff: e.target.value })}
+            />
+            <span className="text-text-muted">원 할인</span>
+            <button
+              type="button"
+              onClick={() => setDrafts((prev) => prev.filter((_, j) => j !== i))}
+              className="ml-auto rounded-[7px] border border-border px-1.5 py-1 text-[11px] text-text-muted"
+              aria-label="구간 삭제"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
       </div>
-      {products.length >= 2 && (
-        <button type="button" onClick={addCombo} className="mt-3 rounded-[9px] border border-dashed border-accent px-3 py-1.5 text-[12.5px] font-semibold text-accent-dark">
-          + 함께 구매 할인 추가
-        </button>
+      <button type="button" onClick={addRow} className="mt-2 rounded-[9px] border border-dashed border-accent px-3 py-1.5 text-[12.5px] font-semibold text-accent-dark">
+        + 구간 추가
+      </button>
+      {preview && <p className="mt-2 text-[11.5px] text-accent-dark">손님 화면: 🎁 이 회차 상품 여러 가지 함께 사면 추가 할인: {preview}</p>}
+      {productCount > 0 && drafts.some((d) => Number(d.minKinds) > productCount) && (
+        <p className="mt-1 text-[11.5px] text-text-muted">※ 지금 이 회차 상품은 {productCount}가지라, 그보다 큰 구간은 상품을 더 등록해야 적용돼요.</p>
       )}
       {error && <p className="mt-2 text-[11.5px] font-semibold text-red-600">{error}</p>}
       <div className="mt-3 flex items-center gap-2">
@@ -444,7 +398,7 @@ function ComboDiscountEditor({ event, onSaved }: { event: MarketEvent; onSaved: 
         </button>
         <button
           onClick={() => {
-            setDrafts(toComboDrafts(event));
+            setDrafts(toVarietyDrafts(event));
             setError(null);
           }}
           disabled={!dirty || saving}
