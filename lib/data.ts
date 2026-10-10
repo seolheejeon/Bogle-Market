@@ -158,19 +158,29 @@ export async function findProductWithEvent(productId: string): Promise<{ product
 // 리스팅으로 매번 다시 찾아야 한다 — resolveListingId가 이미 배너/알림에서
 // 쓰던 "카탈로그 id -> 가장 적합한 리스팅" 해석을 그대로 재사용한다. 지금
 // 걸린 이벤트가 하나도 없는 추천 상품은 조용히 목록에서 빠진다.
+// 추천은 양방향으로 보여준다 — A에 B를 추천으로 걸면 B 상세에도 A가 자동으로
+// 뜬다(관리자가 양쪽에 따로 걸 필요 없음). A가 직접 고른 순서가 먼저, 그 뒤에
+// "A를 추천으로 건 다른 상품들"이 붙는다(중복 제거). 저장 데이터는 그대로라
+// A에서 B를 빼면 B 쪽에서도 같이 사라진다.
 export async function getRecommendedProducts(catalogProductId: string): Promise<Product[]> {
   let ids: string[];
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
     const { data, error } = await supabase
       .from("product_recommendations")
-      .select("recommended_product_id, sort_order")
-      .eq("product_id", catalogProductId)
+      .select("product_id, recommended_product_id, sort_order")
+      .or(`product_id.eq.${catalogProductId},recommended_product_id.eq.${catalogProductId}`)
       .order("sort_order", { ascending: true });
     if (error) throw error;
-    ids = (data ?? []).map((r) => r.recommended_product_id);
+    const rows = data ?? [];
+    const forward = rows.filter((r) => r.product_id === catalogProductId).map((r) => r.recommended_product_id);
+    const reverse = rows.filter((r) => r.recommended_product_id === catalogProductId).map((r) => r.product_id);
+    ids = [...new Set([...forward, ...reverse])].filter((id) => id !== catalogProductId);
   } else {
-    ids = loadCatalogProducts().find((c) => c.id === catalogProductId)?.recommendedProductIds ?? [];
+    const catalog = loadCatalogProducts();
+    const forward = catalog.find((c) => c.id === catalogProductId)?.recommendedProductIds ?? [];
+    const reverse = catalog.filter((c) => c.recommendedProductIds?.includes(catalogProductId)).map((c) => c.id);
+    ids = [...new Set([...forward, ...reverse])].filter((id) => id !== catalogProductId);
   }
   if (ids.length === 0) return [];
   const events = await listEvents();
