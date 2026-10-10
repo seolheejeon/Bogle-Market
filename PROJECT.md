@@ -111,7 +111,7 @@
   - 운영 관리자 계정: `bogle1` (SQL로 `is_admin=true` 지정)
   - 환경 딱지(`components/EnvBadge.tsx`): 개발 사이트는 화면 상단에 "STG 테스트 서버", 로컬은 "LOCAL" 딱지(탭 제목 표시는 충돌로 제거). 접속 주소로 자동 판단(운영은 표시 없음), `NEXT_PUBLIC_ENV_LABEL`로 직접 지정도 가능
   - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
-  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ⏳ / 운영 ⏳
+  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ✅(종료된 7/31 회차 주문 거부 확인) / 운영 ✅(사장님 실행)
 
 **주문 마감 표시 강화 + 장바구니 마감 상품 차단 + 회차 마감 서버 검증 (2026-10-11)**
 - 상품 카드(`ProductGridCard`)·상품 상세 대표 사진: 마감(회차 마감·상품별 마감)이면 사진을 흐리게(opacity+grayscale) + 가운데 "주문 마감" 도장. 예전엔 작은 "마감" 글자뿐이라 손님이 잘 몰랐음
