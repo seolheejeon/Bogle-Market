@@ -291,6 +291,9 @@ export function ProductDetailView({ productId }: { productId: string }) {
             {formatDeadlineLabel(event.deadlineAt)} · 배송예정 {formatEventDateChip(event.deliveryAt)}
           </p>
         )}
+        {/* 이벤트 안내문구(배송 시간대, 수령 방법 등) — 예전엔 거의 안 들어가는
+            이벤트 페이지에만 보여서 손님이 못 봤다. */}
+        {event.notice && <p className="mt-1.5 rounded-[8px] bg-bg-sunken px-2.5 py-1.5 text-[12px] whitespace-pre-line">📢 {event.notice}</p>}
 
         <p className="mt-2 text-[17px] font-extrabold">{product.name}</p>
         <p className="my-1.5 text-xl font-extrabold">{formatPrice(unitPriceWithOptions)}</p>

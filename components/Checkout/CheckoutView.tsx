@@ -382,7 +382,8 @@ export function CheckoutView() {
     if (!first) return;
     // 비회원은 조회용 이름+확인번호를 URL이 아니라 이 탭에만 보관한다(lib/guest-session.ts).
     if (!profile) saveGuestLookup(name, pin);
-    router.push(`/orders/${first.id}`);
+    // ?new=1 — 주문 상세 맨 위에 "주문 접수 완료" 안내를 띄운다(민감정보 아님).
+    router.push(`/orders/${first.id}?new=1`);
   }
 
   return (

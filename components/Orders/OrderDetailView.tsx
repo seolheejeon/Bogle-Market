@@ -24,7 +24,17 @@ const STEPS: { value: OrderStatus; label: string }[] = [
   { value: "done", label: "배송완료" },
 ];
 
-export function OrderDetailView({ orderId, legacyGuestName, legacyGuestPin }: { orderId: string; legacyGuestName?: string; legacyGuestPin?: string }) {
+export function OrderDetailView({
+  orderId,
+  legacyGuestName,
+  legacyGuestPin,
+  justOrdered = false,
+}: {
+  orderId: string;
+  legacyGuestName?: string;
+  legacyGuestPin?: string;
+  justOrdered?: boolean;
+}) {
   const router = useRouter();
   const { profile, loading } = useAuth();
   // 비회원 조회 정보는 이 탭의 sessionStorage에서 읽는다(lib/guest-session.ts).
@@ -187,6 +197,25 @@ export function OrderDetailView({ orderId, legacyGuestName, legacyGuestPin }: { 
         )}
         {order && (
           <>
+            {/* 체크아웃 직후 — 비회원은 확인번호가 URL에 안 남으니(탭을 닫으면 다시
+                조회해야 함) 이름+확인번호를 여기서 한 번 크게 보여주고 기억하게 한다. */}
+            {justOrdered && (
+              <div className="mb-4 rounded-[12px] border-2 border-accent bg-accent-soft p-3.5">
+                <p className="text-[15px] font-extrabold text-accent-dark">✅ 주문이 접수됐어요!</p>
+                <p className="mt-1 text-[12.5px]">
+                  {order.paymentMethod === "bank_transfer" ? "아래 계좌로 입금해 주시면 확인 후 순서대로 진행돼요." : "확인 후 순서대로 진행돼요."}
+                </p>
+                {!profile && guestName && guestPin && (
+                  <div className="mt-2.5 rounded-[9px] bg-bg-card p-2.5 text-[12.5px]">
+                    <p className="font-bold">나중에 주문 확인할 때 필요해요 (캡처해 두세요 📸)</p>
+                    <p className="mt-1">
+                      이름 <strong>{guestName}</strong> · 확인번호 <strong className="tracking-widest">{guestPin}</strong>
+                    </p>
+                    <p className="mt-1 text-[11.5px] text-text-muted">아래 &lsquo;내 주문&rsquo; 메뉴에서 이 이름과 확인번호로 언제든 조회할 수 있어요.</p>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[13px] text-text-muted">{order.orderNumber}</span>
               <OrderStatusBadge status={order.status} />
@@ -215,6 +244,7 @@ export function OrderDetailView({ orderId, legacyGuestName, legacyGuestPin }: { 
                   <span className="text-text-muted">이벤트</span> {event.title} · 배송예정 {formatEventDateChip(event.deliveryAt)}
                 </p>
               )}
+              {event?.notice && <p className="mb-1 rounded-[8px] bg-bg-sunken px-2.5 py-1.5 text-[12px] whitespace-pre-line">📢 {event.notice}</p>}
               <p className="mb-1">
                 <span className="text-text-muted">받는 분</span> {order.recipientName} ({order.recipientPhone})
               </p>

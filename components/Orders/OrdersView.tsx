@@ -73,6 +73,8 @@ export function OrdersView() {
           </button>
         </div>
         {guestOrders !== undefined && guestOrders.length === 0 && <p className="mt-3 text-[12.5px] text-red-600">일치하는 주문을 찾을 수 없어요.</p>}
+        {/* 확인번호를 잊은 비회원은 스스로 찾을 방법이 없어서 문의 채널로 안내한다. */}
+        <p className="mt-3 text-[11.5px] text-text-muted">확인번호가 기억나지 않으면 마이페이지의 &lsquo;문의하기&rsquo;로 주문하신 이름과 연락처를 알려 주세요.</p>
         {guestOrders !== undefined && guestOrders.length > 0 && (
           <div className="mt-4">
             {guestOrders.map((o) => (
