@@ -24,10 +24,19 @@ export function ProductGridCard({ product, rankBadge, closed }: { product: Produ
     <div>
       <div className="relative">
         <Link href={`/product/${product.id}`} className="block">
-          <ProductPhoto
-            photo={product.photos?.[0] ?? product.emoji}
-            className="flex aspect-square w-full items-center justify-center rounded-xl bg-accent-soft text-[58px] leading-none"
-          />
+          {/* 마감된 상품은 사진을 흐리게 + 가운데 "주문 마감" 도장 — 작은 글자만으론
+              손님이 잘 못 알아봐서 사진 자체로 한눈에 보이게 한다. */}
+          <div className={isClosed ? "opacity-45 grayscale" : ""}>
+            <ProductPhoto
+              photo={product.photos?.[0] ?? product.emoji}
+              className="flex aspect-square w-full items-center justify-center rounded-xl bg-accent-soft text-[58px] leading-none"
+            />
+          </div>
+          {isClosed && (
+            <span className="absolute inset-0 flex items-center justify-center">
+              <span className="rounded-full bg-black/70 px-3.5 py-1.5 text-[13px] font-extrabold text-white">주문 마감</span>
+            </span>
+          )}
           {rankBadge && (
             <span className="absolute top-1.5 left-1.5 rounded-md bg-accent px-2 py-1 text-[12px] font-extrabold text-white">{rankBadge}</span>
           )}
@@ -42,7 +51,7 @@ export function ProductGridCard({ product, rankBadge, closed }: { product: Produ
           className="absolute right-1.5 bottom-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-bg-card/90 text-[14px] shadow-sm"
         />
       </div>
-      <Link href={`/product/${product.id}`} className="mt-1.5 mb-0.5 block text-[13.5px] font-semibold">
+      <Link href={`/product/${product.id}`} className={`mt-1.5 mb-0.5 block text-[13.5px] font-semibold ${isClosed ? "text-text-muted" : ""}`}>
         {product.name}
       </Link>
       <div className="flex items-center justify-between">

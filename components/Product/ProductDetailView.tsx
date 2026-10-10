@@ -262,8 +262,14 @@ export function ProductDetailView({ productId }: { productId: string }) {
           <ProductPhoto
             photo={photos[photoIndex]}
             fit="contain"
-            className="flex h-full w-full items-center justify-center rounded-[inherit] text-[76px]"
+            className={`flex h-full w-full items-center justify-center rounded-[inherit] text-[76px] ${closed || listingClosed ? "opacity-45 grayscale" : ""}`}
           />
+          {/* 마감된 상품은 대표 사진 위에 크게 "주문 마감" — 아래 버튼까지 안 내려봐도 바로 알게. */}
+          {(closed || listingClosed) && (
+            <span className="absolute inset-0 flex items-center justify-center">
+              <span className="rounded-full bg-black/70 px-5 py-2.5 text-[17px] font-extrabold text-white">주문 마감</span>
+            </span>
+          )}
           {photos.length > 1 && (
             <span className="absolute right-2.5 bottom-2 rounded-full bg-black/50 px-2 py-0.5 text-[11px] font-semibold text-white">
               {photoIndex + 1}/{photos.length}
