@@ -320,6 +320,13 @@ export function OrderDetailView({
                 <p className="mt-1">사유: {order.cancelRejectReason}</p>
               </div>
             )}
+            {/* 취소된 주문의 사유(미입금 취소, 손님이 남긴 취소 요청 사유 등) — 왜 취소됐는지 보이게. */}
+            {order.status === "cancelled" && order.cancelReason && (
+              <div className="mb-4 rounded-[10px] bg-bg-sunken p-3 text-[12.5px] text-text-muted">
+                <p className="font-semibold text-red-600">주문이 취소됐어요.</p>
+                <p className="mt-1">사유: {order.cancelReason}</p>
+              </div>
+            )}
             {canRequestRefund && !refundFormOpen && (
               <button
                 onClick={() => setRefundFormOpen(true)}

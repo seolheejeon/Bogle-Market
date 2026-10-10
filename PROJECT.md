@@ -111,7 +111,11 @@
   - 운영 관리자 계정: `bogle1` (SQL로 `is_admin=true` 지정)
   - 환경 딱지(`components/EnvBadge.tsx`): 개발 사이트는 화면 상단에 "STG 테스트 서버", 로컬은 "LOCAL" 딱지(탭 제목 표시는 충돌로 제거). 접속 주소로 자동 판단(운영은 표시 없음), `NEXT_PUBLIC_ENV_LABEL`로 직접 지정도 가능
   - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
-  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ⏳ / 운영 ⏳
+  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 확인 필요 / 운영 ✅
+
+**미입금 취소 흐름 (2026-10-11)**
+- 입금기한(1시간) 지나도 자동 취소는 안 함 — 운영 메인 ⏰ 입금기한 지남 딱지/타일로 사장님이 보고, 카드의 취소 버튼이 "미입금 취소"로 바뀜 → 취소 + cancel_reason에 UNPAID_CANCEL_REASON 저장(cancelUnpaidOrder) + 회원이면 알림. 손님 주문 상세엔 "주문이 취소됐어요. 사유: …" 표시. 취소 안 누르면 늦게 입금해도 평소처럼 입금확인→발주확인 진행\n- 기한이 지난 입금대기 주문의 손님 화면 문구: "입금 기한이 지났어요. 곧 취소될 수 있으니 입금했거나 예정이면 문의하기로 알려 주세요"(취소와 늦은 입금이 엇갈리는 것 방지)
+- 확인용 SQL로 원인 확인: 운영 회원 2명/배송지 2개 정상 저장, 관리자 읽기 정책 미적용이었음 → 적용 후 고객관리에 배송지 표시 확인(사장님)
 
 **관리자 고객 배송지 안 보이던 버그 + 입금 기한 안내 (2026-10-11)**
 - 버그: `addresses`에 "본인만 읽기/쓰기" 정책만 있고 관리자 읽기 정책이 없어서, 고객 관리 화면/고객 상세의 기본 배송지가 개발·운영 모두 항상 "등록된 배송지 없음"으로 보였음(회원 데이터는 정상 저장돼 있었음) → `admins read addresses`(select, `is_admin()`) 추가. 마이그레이션 `2026-10-11_admin-read-addresses.sql`

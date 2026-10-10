@@ -52,6 +52,9 @@ export function paymentDueAt(order: Pick<Order, "createdAt">): Date {
   return new Date(new Date(order.createdAt).getTime() + PAYMENT_DUE_MINUTES * 60 * 1000);
 }
 
+// 입금기한이 지난 주문을 관리자가 취소할 때 남기는 사유 — 손님 주문 상세에 그대로 보인다.
+export const UNPAID_CANCEL_REASON = `입금 기한(주문 후 ${PAYMENT_DUE_MINUTES / 60}시간) 내 미입금으로 취소됐어요.`;
+
 export function isPaymentOverdue(order: Pick<Order, "createdAt" | "status" | "paymentMethod">, now: number = Date.now()): boolean {
   return order.paymentMethod === "bank_transfer" && order.status === "wait" && paymentDueAt(order).getTime() < now;
 }
