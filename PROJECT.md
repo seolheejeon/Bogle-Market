@@ -111,7 +111,11 @@
   - 운영 관리자 계정: `bogle1` (SQL로 `is_admin=true` 지정)
   - 환경 딱지(`components/EnvBadge.tsx`): 개발 사이트는 화면 상단에 "STG 테스트 서버", 로컬은 "LOCAL" 딱지(탭 제목 표시는 충돌로 제거). 접속 주소로 자동 판단(운영은 표시 없음), `NEXT_PUBLIC_ENV_LABEL`로 직접 지정도 가능
   - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
-  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음)
+  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ⏳ / 운영 ⏳
+
+**관리자 고객 배송지 안 보이던 버그 + 입금 기한 안내 (2026-10-11)**
+- 버그: `addresses`에 "본인만 읽기/쓰기" 정책만 있고 관리자 읽기 정책이 없어서, 고객 관리 화면/고객 상세의 기본 배송지가 개발·운영 모두 항상 "등록된 배송지 없음"으로 보였음(회원 데이터는 정상 저장돼 있었음) → `admins read addresses`(select, `is_admin()`) 추가. 마이그레이션 `2026-10-11_admin-read-addresses.sql`
+- 입금 기한: `lib/order-policy.ts`의 `PAYMENT_DUE_MINUTES`(60분) — 계좌 안내(`BankAccountInfo`) 바로 아래에 "주문 후 1시간 이내 미입금 시 주문이 자동 취소돼요" 문구, 주문 상세에선 "OO시 OO분까지 입금해 주세요" 구체 시각. 실제 취소는 아직 수동 — 운영 메인에 "입금기한 지남" 타일 + 카드 빨간 딱지(`isPaymentOverdue`)로 찾아서 취소. 나중에 입금 확인 API 붙이면 자동 취소로 바꿀 자리
 
 **"같이 구매하면 좋은 상품" = 같은 회차 상품 자동 + 손님 주문 완료 안내 (2026-10-11)**
 - 관리자가 상품마다 추천을 고르던 방식 → 상품 상세가 **같은 회차(이벤트)의 다른 상품**을 노출 순서대로 자동 표시(`ProductDetailView.tsx`, 추가 조회 없음). 숨김(`visible=false`)·마감(수동 마감 또는 상품별 마감시간 지남, `isListingOrderable`)·품절(`stock=0`) 상품은 자동 제외, 회차 자체가 마감되면 섹션 숨김. 관리자 상품 폼의 추천 선택 칸은 안내 문구로 대체(예전에 골라둔 `product_recommendations` 데이터는 저장 시 유지만 함, 화면에선 안 씀). 같은 날 잠깐 넣었던 "추천 양방향 표시"(`getRecommendedProducts`)는 이걸로 대체돼 고객 화면에선 더 안 쓰임

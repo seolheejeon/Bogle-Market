@@ -43,6 +43,19 @@ export function isEventOrderable(event: Pick<MarketEvent, "type" | "flashSale" |
   return new Date(event.deadlineAt).getTime() > Date.now();
 }
 
+// 무통장입금 기한 — 주문 후 이 시간 안에 입금이 확인되지 않으면 취소한다고
+// 안내한다. 지금은 문구 + 관리자 화면 "입금기한 지남" 표시만 하고 실제 취소는
+// 사장님이 수동으로 한다(나중에 입금 확인 API를 붙이면 자동 취소로 바꿀 자리).
+export const PAYMENT_DUE_MINUTES = 60;
+
+export function paymentDueAt(order: Pick<Order, "createdAt">): Date {
+  return new Date(new Date(order.createdAt).getTime() + PAYMENT_DUE_MINUTES * 60 * 1000);
+}
+
+export function isPaymentOverdue(order: Pick<Order, "createdAt" | "status" | "paymentMethod">, now: number = Date.now()): boolean {
+  return order.paymentMethod === "bank_transfer" && order.status === "wait" && paymentDueAt(order).getTime() < now;
+}
+
 // 손님이 주문 후 배송지/연락처/입금자명을 직접 고칠 수 있는지 — 손님이 중간에
 // 마음대로 바꾸면 안 되므로, 관리자가 그 주문에 한해 열어줬을 때만(손님이
 // 문의로 요청 → 관리자가 "배송지 수정 허용") 배송 시작 전까지 가능하다.

@@ -9,7 +9,7 @@ import { uploadRefundPhoto } from "@/lib/supabase/storage";
 import type { MarketEvent, Order, OrderStatus, RefundReasonCode } from "@/types";
 import { PAYMENT_METHOD_LABEL, ORDER_STATUS_LABEL, COURIER_LABEL, COURIER_TRACKING_URL, REFUND_REASON_LABEL, formatAddress } from "@/types";
 import { formatDateTime, formatPrice, formatEventDateChip } from "@/lib/format";
-import { canEditOrderDelivery, DELIVERY_EDITABLE_STATUSES } from "@/lib/order-policy";
+import { canEditOrderDelivery, DELIVERY_EDITABLE_STATUSES, paymentDueAt } from "@/lib/order-policy";
 import { OrderStatusBadge } from "@/components/Badge";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
 import { SupportLinks } from "@/components/SupportLinks";
@@ -434,7 +434,7 @@ export function OrderDetailView({
 
             {order.paymentMethod === "bank_transfer" && order.status === "wait" && (
               <div className="mb-4">
-                <BankAccountInfo />
+                <BankAccountInfo dueAt={paymentDueAt(order)} />
               </div>
             )}
 
