@@ -18,7 +18,6 @@ import { PhotoUploader } from "@/components/admin/PhotoUploader";
 import { DetailBlockEditor } from "@/components/admin/DetailBlockEditor";
 import { ProductOptionEditor } from "@/components/admin/ProductOptionEditor";
 import { ProductBadgePicker } from "@/components/admin/ProductBadgePicker";
-import { SearchPicker } from "@/components/admin/SearchPicker";
 import { EventBadgeTag } from "@/components/Badge";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
 
@@ -88,7 +87,6 @@ export default function AdminProductsPage() {
       {creating && (
         <div className="mb-4 rounded-xl border border-dashed border-accent bg-accent-soft p-3.5">
           <CatalogProductForm
-            allProducts={products ?? []}
             onSubmit={async (values) => {
               await createCatalogProduct(values);
               setCreating(false);
@@ -131,8 +129,7 @@ export default function AdminProductsPage() {
             <div key={p.id} className="rounded-xl border border-accent bg-accent-soft p-3.5">
               <CatalogProductForm
                 initial={p}
-                allProducts={products ?? []}
-                onSubmit={async (values) => {
+                    onSubmit={async (values) => {
                   await updateCatalogProduct(p.id, values);
                   setEditingId(null);
                   refresh();
@@ -209,13 +206,11 @@ function CollapsibleSection({ title, defaultOpen, children }: { title: string; d
 
 function CatalogProductForm({
   initial,
-  allProducts,
   onSubmit,
   onCancel,
   submitLabel,
 }: {
   initial?: CatalogProduct;
-  allProducts: CatalogProduct[];
   onSubmit: (values: Omit<CatalogProduct, "id">) => Promise<void>;
   onCancel: () => void;
   submitLabel: string;
@@ -255,7 +250,7 @@ function CatalogProductForm({
   const [photos, setPhotos] = useState<string[]>(initial?.photos ?? []);
   const [detailBlocks, setDetailBlocks] = useState<ProductDetailBlock[]>(initial?.detailBlocks ?? []);
   const [optionGroups, setOptionGroups] = useState<ProductOptionGroup[]>(initial?.optionGroups ?? []);
-  const [recommendedIds, setRecommendedIds] = useState<string[]>(initial?.recommendedProductIds ?? []);
+  const [recommendedIds] = useState<string[]>(initial?.recommendedProductIds ?? []);
   // 할인 정책 — 상품당 하나만 설정 가능(중첩 안 됨, lib/discount.ts 참고).
   // 종류별로 필요한 입력이 달라 필드를 전부 미리 만들어두고 discountType에
   // 맞는 것만 화면에 보여준다 — 저장 시(submit)에만 선택된 종류에 맞게 조립한다.
@@ -584,40 +579,12 @@ function CatalogProductForm({
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection title='추천 상품 (상품 상세 하단 "같이 구매하면 좋은 상품"에 표시돼요)' defaultOpen={recommendedIds.length > 0}>
-        <SearchPicker
-          items={allProducts.filter((p) => p.id !== initial?.id && !recommendedIds.includes(p.id))}
-          value={null}
-          onChange={(picked) => {
-            if (picked) setRecommendedIds((prev) => [...prev, picked.id]);
-          }}
-          getId={(p) => p.id}
-          getLabel={(p) => p.name}
-          renderIcon={(p) => <ProductPhoto photo={p.photos?.[0] ?? p.emoji} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent-soft text-lg" />}
-          placeholder="추천할 상품 검색해서 추가"
-          emptyText="추가할 수 있는 상품이 없어요."
-        />
-        {recommendedIds.length > 0 && (
-          <div className="mt-2 flex flex-col gap-1.5">
-            {recommendedIds.map((id) => {
-              const p = allProducts.find((x) => x.id === id);
-              return (
-                <div key={id} className="flex items-center gap-2 rounded-[7px] bg-bg-sunken px-2.5 py-1.5">
-                  <ProductPhoto photo={p?.photos?.[0] ?? p?.emoji ?? "📦"} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent-soft text-base" />
-                  <p className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{p?.name ?? "(삭제된 상품)"}</p>
-                  <button
-                    type="button"
-                    onClick={() => setRecommendedIds((prev) => prev.filter((x) => x !== id))}
-                    className="shrink-0 text-[11.5px] font-semibold text-text-muted underline"
-                  >
-                    제거
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </CollapsibleSection>
+      {/* "같이 구매하면 좋은 상품"은 이제 같은 회차의 다른 상품이 자동으로 나온다
+          (components/Product/ProductDetailView.tsx) — 직접 고르는 칸은 뺐다. 예전에
+          골라둔 값(recommendedIds)은 저장 시 그대로 유지만 한다. */}
+      <p className="rounded-[9px] bg-bg-sunken px-3 py-2 text-[11.5px] text-text-muted">
+        💡 상품 상세의 &ldquo;같이 구매하면 좋은 상품&rdquo;은 같은 회차의 다른 상품이 자동으로 나와요. 숨김·마감·품절 상품은 자동으로 빠져요.
+      </p>
 
       <CollapsibleSection
         title="택배 정보 (택배로 팔 때만 적용돼요)"

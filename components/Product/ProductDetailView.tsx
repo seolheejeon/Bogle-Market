@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { findProductWithEvent, getRecommendedProducts } from "@/lib/data";
+import { findProductWithEvent } from "@/lib/data";
 import { recordRecentlyViewed } from "@/lib/recently-viewed";
 import type { MarketEvent, Product } from "@/types";
 import { EVENT_TYPE_LABEL, COURIER_LABEL, FULFILLMENT_TYPE_LABEL } from "@/types";
@@ -38,9 +38,6 @@ export function ProductDetailView({ productId }: { productId: string }) {
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addButtonRef = useRef<HTMLButtonElement>(null);
-  // "같이 구매하면 좋은 상품" — 관리자가 고른 추천이 지금 담을 수 있는
-  // 리스팅으로 해석된 것만 온다(lib/data.ts의 getRecommendedProducts).
-  const [recommended, setRecommended] = useState<Product[]>([]);
 
   useEffect(() => {
     findProductWithEvent(productId).then(setData);
@@ -48,12 +45,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
     setOptionError(null);
     setQty(1);
     setPendingLines([]);
-    setRecommended([]);
   }, [productId]);
 
   useEffect(() => {
     if (!data) return;
-    getRecommendedProducts(data.product.catalogProductId).then(setRecommended);
     recordRecentlyViewed(data.product.id);
   }, [data]);
 
@@ -71,6 +66,13 @@ export function ProductDetailView({ productId }: { productId: string }) {
   if (data === null) return <p className="p-4 text-sm text-text-muted">상품을 찾을 수 없어요.</p>;
 
   const { product, event } = data;
+  // "같이 구매하면 좋은 상품" — 관리자가 따로 고르지 않고 같은 회차의 다른
+  // 상품을 자동으로 보여준다(같이 담으면 여러 품목 할인도 받으니까). 관리자가
+  // 숨긴 상품, 마감(수동 마감·상품별 마감시간 지남)된 상품, 품절 상품은 빼고,
+  // 회차 자체가 마감됐으면 아예 안 보여준다. 순서는 이벤트에서 정한 노출 순서.
+  const recommended = isEventOrderable(event)
+    ? event.products.filter((p) => p.id !== product.id && p.visible !== false && isListingOrderable(p) && p.stock !== 0)
+    : [];
 
   // 카테고리 화면(문고리/사다드림/택배 탭 + 날짜)에서 들어온 경우, "←"를 누르면
   // 이벤트 상세가 아니라 방금 보던 그 화면(선택했던 탭/날짜/스크롤 위치까지)으로
