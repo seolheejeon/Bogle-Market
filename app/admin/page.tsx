@@ -21,7 +21,7 @@ import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { OrderDetailModal } from "@/components/admin/OrderDetailModal";
 import { getAccessToken, sendPushToProfile } from "@/lib/push";
-import { isEventAdminEnded } from "@/lib/order-policy";
+import { isEventAdminEnded, isPaymentOverdue } from "@/lib/order-policy";
 
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", paid: "confirmed", confirmed: "ship", ship: "done" };
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = { wait: "입금확인", paid: "발주확인", confirmed: "배송시작", ship: "배송완료 처리" };
@@ -93,6 +93,8 @@ export default function AdminHomePage() {
   const [period, setPeriod] = useState<keyof typeof PERIOD_DAYS | "all">("30");
   const [cancelOnly, setCancelOnly] = useState(false);
   const [newOnly, setNewOnly] = useState(false);
+  // 무통장 입금기한(주문 후 1시간)이 지난 입금대기 주문만 — 지금은 사장님이 보고 수동 취소.
+  const [overdueOnly, setOverdueOnly] = useState(false);
   const [todayDeliveryOnly, setTodayDeliveryOnly] = useState(false);
   const [todayDoneOnly, setTodayDoneOnly] = useState(false);
   const [activeTile, setActiveTile] = useState<string | null>(null);
@@ -257,6 +259,7 @@ export default function AdminHomePage() {
       { key: "new", label: "신규 주문", count: orders.filter(isNewOrder).length },
       { key: "all_orders", label: "전체 주문", count: orders.length },
       { key: "wait", label: "입금대기 주문", count: orders.filter((o) => o.status === "wait").length },
+      { key: "overdue", label: "입금기한 지남", count: orders.filter((o) => isPaymentOverdue(o)).length },
       { key: "paid", label: "발주확인 대기", count: orders.filter((o) => o.status === "paid").length },
       {
         key: "deliverytoday",
@@ -305,6 +308,7 @@ export default function AdminHomePage() {
     setPeriod("all");
     setCancelOnly(false);
     setNewOnly(false);
+    setOverdueOnly(false);
     setTodayDeliveryOnly(false);
     setTodayDoneOnly(false);
     if (key === "all_orders") {
@@ -312,6 +316,9 @@ export default function AdminHomePage() {
     } else if (key === "new") {
       setStatusFilter("all");
       setNewOnly(true);
+    } else if (key === "overdue") {
+      setStatusFilter("wait");
+      setOverdueOnly(true);
     } else if (key === "deliverytoday") {
       setStatusFilter("confirmed");
       setTodayDeliveryOnly(true);
@@ -351,6 +358,7 @@ export default function AdminHomePage() {
     if (statusFilter !== "all" && o.status !== statusFilter) return false;
     if (cancelOnly && !o.cancelRequested) return false;
     if (newOnly && !isNewOrder(o)) return false;
+    if (overdueOnly && !isPaymentOverdue(o)) return false;
     if (search) {
       const q = search.toLowerCase();
       // 입금 내역의 이름으로도 찾을 수 있게 입금자명까지 검색한다.
@@ -373,6 +381,7 @@ export default function AdminHomePage() {
     setPeriod("30");
     setCancelOnly(false);
     setNewOnly(false);
+    setOverdueOnly(false);
     setTodayDeliveryOnly(false);
     setTodayDoneOnly(false);
     setActiveTile(null);
@@ -531,6 +540,7 @@ export default function AdminHomePage() {
             setStatusFilter(e.target.value as OrderStatus | "all");
             setCancelOnly(false);
             setNewOnly(false);
+            setOverdueOnly(false);
             setActiveTile(null);
           }}
         >
@@ -578,6 +588,7 @@ export default function AdminHomePage() {
                   <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-700">배송지 수정됨</span>
                 )}
                 {o.deliveryEditOpen && <span className="rounded-md bg-bg-sunken px-1.5 py-0.5 text-[11px] font-bold text-text-muted">🔓 수정 허용 중</span>}
+                {isPaymentOverdue(o) && <span className="rounded-md bg-red-600 px-1.5 py-0.5 text-[11px] font-bold text-white">⏰ 입금기한 지남</span>}
                 {o.cancelRequested && <span className="rounded-md bg-red-100 px-1.5 py-0.5 text-[11px] font-bold text-red-600">취소 요청</span>}
                 <OrderStatusBadge status={o.status} />
               </div>

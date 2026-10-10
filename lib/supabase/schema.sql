@@ -609,6 +609,10 @@ drop policy if exists "user manages own addresses" on addresses;
 create policy "user manages own addresses" on addresses for all
   using (profile_id = auth.uid())
   with check (profile_id = auth.uid());
+-- 관리자 고객 관리 화면에서 회원 기본 배송지를 보려면 필요(2026-10-11 추가 — 이전엔
+-- 빠져 있어 관리자 화면에 항상 "등록된 배송지 없음"으로 보였다). 수정은 본인만.
+drop policy if exists "admins read addresses" on addresses;
+create policy "admins read addresses" on addresses for select using (is_admin());
 
 -- Orders: signed-in users see their own orders; admins see everything.
 -- Guest orders (profile_id is null) are looked up via name + PIN through
