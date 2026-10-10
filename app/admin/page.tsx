@@ -71,6 +71,19 @@ function isToday(iso: string): boolean {
   return new Date(iso).toDateString() === new Date().toDateString();
 }
 
+// 무통장 입금을 기다리는 주문 — 취소 버튼이 "미입금 취소"가 되고 경과 시간을 보여준다.
+function isAwaitingTransfer(o: Order): boolean {
+  return o.paymentMethod === "bank_transfer" && o.status === "wait";
+}
+
+// "35분" / "3시간" / "2일" — 입금대기 주문이 얼마나 지났는지 대략 보여주는 용도.
+function formatElapsed(iso: string): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (minutes < 60) return `${minutes}분`;
+  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}시간째`;
+  return `${Math.floor(minutes / (60 * 24))}일째`;
+}
+
 // 아직 관리자가 확인 안 한 주문 — 운영 메인에서 "NEW"로 강조하고 "신규 주문"
 // 타일로 모아 본다. 주문 상세를 열거나 상태를 바꾸면 확인 처리되고, 손님이
 // 배송지를 고치면 다시 신규로 올라온다. 취소된 주문은 더 볼 일이 없어 제외.
@@ -94,8 +107,6 @@ export default function AdminHomePage() {
   const [period, setPeriod] = useState<keyof typeof PERIOD_DAYS | "all">("30");
   const [cancelOnly, setCancelOnly] = useState(false);
   const [newOnly, setNewOnly] = useState(false);
-  // 무통장 입금기한(주문 후 1시간)이 지난 입금대기 주문만 — 지금은 사장님이 보고 수동 취소.
-  const [overdueOnly, setOverdueOnly] = useState(false);
   const [todayDeliveryOnly, setTodayDeliveryOnly] = useState(false);
   const [todayDoneOnly, setTodayDoneOnly] = useState(false);
   const [activeTile, setActiveTile] = useState<string | null>(null);
@@ -190,10 +201,12 @@ export default function AdminHomePage() {
     refresh();
   }
   async function cancel(order: Order) {
-    // 입금기한이 지난 무통장 주문은 "미입금 취소"로 — 사유가 손님 주문 상세에
-    // 남고, 회원이면 알림도 간다. 그 외 취소는 예전처럼 사유 없이.
-    if (isPaymentOverdue(order)) {
-      if (!confirm("입금 기한이 지난 주문이에요. 미입금 취소로 처리할까요?\n고객 주문 내역에 취소 사유가 표시되고, 회원이면 알림도 가요.")) return;
+    // 무통장 입금대기 주문의 취소는 "미입금 취소"로 — 입금 기한이 지났는지는
+    // 시간으로 자동 판단하지 않고 사장님이 통장을 보고 직접 고른다(통장 확인 API
+    // 붙이기 전까지는 수동). 사유가 손님 주문 상세에 남고, 회원이면 알림도 간다.
+    // 그 외 취소는 예전처럼 사유 없이.
+    if (isAwaitingTransfer(order)) {
+      if (!confirm("입금이 확인되지 않아 미입금 취소로 처리할까요?\n고객 주문 내역에 취소 사유가 표시되고, 회원이면 알림도 가요.")) return;
       await checkOrders([order.id]);
       await cancelUnpaidOrder(order.id, UNPAID_CANCEL_REASON);
       if (order.profileId) {
@@ -279,7 +292,6 @@ export default function AdminHomePage() {
       { key: "new", label: "신규 주문", count: orders.filter(isNewOrder).length },
       { key: "all_orders", label: "전체 주문", count: orders.length },
       { key: "wait", label: "입금대기 주문", count: orders.filter((o) => o.status === "wait").length },
-      { key: "overdue", label: "입금기한 지남", count: orders.filter((o) => isPaymentOverdue(o)).length },
       { key: "paid", label: "발주확인 대기", count: orders.filter((o) => o.status === "paid").length },
       {
         key: "deliverytoday",
@@ -328,7 +340,6 @@ export default function AdminHomePage() {
     setPeriod("all");
     setCancelOnly(false);
     setNewOnly(false);
-    setOverdueOnly(false);
     setTodayDeliveryOnly(false);
     setTodayDoneOnly(false);
     if (key === "all_orders") {
@@ -336,9 +347,6 @@ export default function AdminHomePage() {
     } else if (key === "new") {
       setStatusFilter("all");
       setNewOnly(true);
-    } else if (key === "overdue") {
-      setStatusFilter("wait");
-      setOverdueOnly(true);
     } else if (key === "deliverytoday") {
       setStatusFilter("confirmed");
       setTodayDeliveryOnly(true);
@@ -378,7 +386,6 @@ export default function AdminHomePage() {
     if (statusFilter !== "all" && o.status !== statusFilter) return false;
     if (cancelOnly && !o.cancelRequested) return false;
     if (newOnly && !isNewOrder(o)) return false;
-    if (overdueOnly && !isPaymentOverdue(o)) return false;
     if (search) {
       const q = search.toLowerCase();
       // 입금 내역의 이름으로도 찾을 수 있게 입금자명까지 검색한다.
@@ -401,7 +408,6 @@ export default function AdminHomePage() {
     setPeriod("30");
     setCancelOnly(false);
     setNewOnly(false);
-    setOverdueOnly(false);
     setTodayDeliveryOnly(false);
     setTodayDoneOnly(false);
     setActiveTile(null);
@@ -560,7 +566,6 @@ export default function AdminHomePage() {
             setStatusFilter(e.target.value as OrderStatus | "all");
             setCancelOnly(false);
             setNewOnly(false);
-            setOverdueOnly(false);
             setActiveTile(null);
           }}
         >
@@ -608,7 +613,12 @@ export default function AdminHomePage() {
                   <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-bold text-amber-700">배송지 수정됨</span>
                 )}
                 {o.deliveryEditOpen && <span className="rounded-md bg-bg-sunken px-1.5 py-0.5 text-[11px] font-bold text-text-muted">🔓 수정 허용 중</span>}
-                {isPaymentOverdue(o) && <span className="rounded-md bg-red-600 px-1.5 py-0.5 text-[11px] font-bold text-white">⏰ 입금기한 지남</span>}
+                {/* 입금대기 경과 시간 — 미입금 취소 여부를 사장님이 판단할 때 참고용. */}
+                {isAwaitingTransfer(o) && (
+                  <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-bold ${isPaymentOverdue(o) ? "bg-red-100 text-red-600" : "bg-bg-sunken text-text-muted"}`}>
+                    ⏰ 주문 후 {formatElapsed(o.createdAt)}
+                  </span>
+                )}
                 {o.cancelRequested && <span className="rounded-md bg-red-100 px-1.5 py-0.5 text-[11px] font-bold text-red-600">취소 요청</span>}
                 <OrderStatusBadge status={o.status} />
               </div>
@@ -687,7 +697,7 @@ export default function AdminHomePage() {
                       o.status !== "refunded" &&
                       o.status !== "refund_rejected" && (
                       <button onClick={() => cancel(o)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-semibold text-red-600">
-                        {isPaymentOverdue(o) ? "미입금 취소" : "취소"}
+                        {isAwaitingTransfer(o) ? "미입금 취소" : "취소"}
                       </button>
                     )}
                   </>
