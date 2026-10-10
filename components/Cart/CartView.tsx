@@ -12,7 +12,7 @@ import { ProductPhoto } from "@/components/ProductPhoto";
 import { unitPrice, remainingForCombo, optionSelectionLabel } from "@/lib/product-options";
 import { totalShippingFee } from "@/lib/shipping";
 import { eventDiscountTotal } from "@/lib/discount";
-import { isListingOrderable } from "@/lib/order-policy";
+import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
 
 // 체크아웃 화면과 동일한 순서(components/Checkout/CheckoutView.tsx의
 // DELIVERY_TYPE_ORDER 참고) — 장바구니에서부터 체크아웃에서 나뉠 그룹을
@@ -101,6 +101,12 @@ export function CartView() {
     return DELIVERY_TYPE_ORDER.filter((t) => byType.has(t)).map((t) => ({ type: t, groups: byType.get(t)! }));
   }, [grouped]);
 
+  // 장바구니에 담아둔 사이 회차가 마감(마감 시각 지남·종료)됐거나 그 상품만
+  // 따로 마감된 줄 — 흐리게 표시하고, 남아 있는 동안은 주문하기를 막는다
+  // (예전엔 결제 화면에서 주문하기를 눌러야 그제야 에러가 떴다).
+  const isLineClosed = (event: MarketEvent, product: Product) => !isEventOrderable(event) || !isListingOrderable(product);
+  const closedLines = grouped.flatMap((g) => g.items.filter((i) => isLineClosed(g.event, i.product)));
+
   if (events === null) return <p className="p-4 text-sm text-text-muted">불러오는 중...</p>;
 
   if (totalCount === 0) {
@@ -143,7 +149,11 @@ export function CartView() {
                       {type !== "PARCEL" ? (
                         <div className="mb-2 flex items-center justify-between gap-2 rounded-[8px] bg-bg-sunken px-2.5 py-1.5">
                           <p className="text-xs font-bold text-accent-dark">{formatEventDateChip(event.deliveryAt)} 배송</p>
-                          <span className="text-[11px] font-semibold text-text-muted">{formatDeadlineLabel(event.deadlineAt)}</span>
+                          {isEventOrderable(event) ? (
+                            <span className="text-[11px] font-semibold text-text-muted">{formatDeadlineLabel(event.deadlineAt)}</span>
+                          ) : (
+                            <span className="text-[11px] font-extrabold text-red-600">🔒 주문 마감</span>
+                          )}
                         </div>
                       ) : (
                         typeGroups.length > 1 && <p className="mb-2 text-xs font-bold text-accent-dark">{event.title}</p>
@@ -171,12 +181,17 @@ export function CartView() {
                       )}
                       {items.map(({ product, line }) => (
                         <div key={`${product.id}::${line.optionValueIds.join(",")}`} className="flex items-center gap-3 py-2">
-                          <ProductPhoto
-                            photo={product.photos?.[0] ?? product.emoji}
-                            className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[10px] bg-accent-soft text-2xl"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-[13.5px] font-semibold">{product.name}</p>
+                          <div className={`shrink-0 ${isLineClosed(event, product) ? "opacity-40 grayscale" : ""}`}>
+                            <ProductPhoto
+                              photo={product.photos?.[0] ?? product.emoji}
+                              className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-[10px] bg-accent-soft text-2xl"
+                            />
+                          </div>
+                          <div className={`min-w-0 flex-1 ${isLineClosed(event, product) ? "opacity-50" : ""}`}>
+                            <p className="truncate text-[13.5px] font-semibold">
+                              {isLineClosed(event, product) && <span className="mr-1 rounded bg-red-600 px-1 py-0.5 text-[10px] font-bold text-white">주문 마감</span>}
+                              {product.name}
+                            </p>
                             {line.optionValueIds.length > 0 && (
                               <p className="truncate text-[11.5px] text-text-muted">{optionSelectionLabel(product, line.optionValueIds)}</p>
                             )}
@@ -198,7 +213,7 @@ export function CartView() {
                               // 이벤트 전체는 진행 중이어도 이 상품만 관리자가 따로 마감시켰거나
                               // 예약 마감시간이 지났을 수 있다 — 이 경우 수량을 못 늘리게 "마감"
                               // 표시로 대체한다.
-                              closed={!isListingOrderable(product)}
+                              closed={isLineClosed(event, product)}
                             />
                             {/* 최소 구매 수량은 이 조합 하나가 아니라 이 상품에 담은 모든
                                 조합의 합계로 따진다(체크아웃에서 검증) — 그래서 QtyControl에
@@ -245,9 +260,22 @@ export function CartView() {
             <span className="text-text-muted">총 결제 예정금액</span>
             <strong className="text-[17px]">{formatPrice(totalPrice + totalShipping - totalDiscountAmount)}</strong>
           </div>
-          <Link href="/checkout" className="block w-full rounded-[10px] bg-accent py-3 text-center text-[13.5px] font-bold text-white">
-            주문하기
-          </Link>
+          {closedLines.length > 0 ? (
+            <>
+              <p className="mb-2 text-center text-[12px] font-semibold text-red-600">주문이 마감된 상품 {closedLines.length}개가 있어요. 빼고 주문해 주세요.</p>
+              <button
+                type="button"
+                onClick={() => closedLines.forEach(({ product, line }) => setQty(product.id, 0, line.optionValueIds))}
+                className="block w-full rounded-[10px] border-2 border-accent py-2.5 text-center text-[13.5px] font-bold text-accent-dark"
+              >
+                마감 상품 빼기
+              </button>
+            </>
+          ) : (
+            <Link href="/checkout" className="block w-full rounded-[10px] bg-accent py-3 text-center text-[13.5px] font-bold text-white">
+              주문하기
+            </Link>
+          )}
         </div>
       </div>
       <div className="h-[130px]" />

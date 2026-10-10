@@ -1004,6 +1004,20 @@ begin
     raise exception 'profile_id must match the authenticated user';
   end if;
 
+  -- 회차(이벤트) 마감 서버 검증(2026-10-11) — 화면(장바구니/체크아웃)에서도 막지만
+  -- RPC를 직접 부르는 경우까지 막는 최종 방어선. lib/order-policy.ts의
+  -- isEventOrderable과 같은 기준: 관리자가 종료(status='ended')했으면 항상,
+  -- 사다드림(GROUP_BUY)은 마감 시각이 지나면 주문 불가. 문고리(재고 있으면
+  -- 마감 후에도 허용)/택배(상시 판매)는 마감 시각만으로는 막지 않는다.
+  for v_closed_item in
+    select e.title as name
+    from events e
+    where e.id = p_event_id
+      and (e.status = 'ended' or (e.type = 'GROUP_BUY' and e.deadline_at <= now()))
+  loop
+    raise exception '"%"은(는) 주문이 마감되어 더 이상 주문할 수 없어요.', v_closed_item.name;
+  end loop;
+
   -- 개별 상품 마감(event_products.closed, 즉시 수동 마감) + 리스팅별 예약
   -- 마감시간(order_deadline_at, 지났으면 자동 마감) 서버 검증 — 관리자가
   -- 예약상품처럼 이벤트 전체보다 먼저 마감해야 하는 상품 하나만 처리했을

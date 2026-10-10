@@ -111,7 +111,12 @@
   - 운영 관리자 계정: `bogle1` (SQL로 `is_admin=true` 지정)
   - 환경 딱지(`components/EnvBadge.tsx`): 개발 사이트는 화면 상단에 "STG 테스트 서버", 로컬은 "LOCAL" 딱지(탭 제목 표시는 충돌로 제거). 접속 주소로 자동 판단(운영은 표시 없음), `NEXT_PUBLIC_ENV_LABEL`로 직접 지정도 가능
   - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
-  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅
+  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ⏳ / 운영 ⏳
+
+**주문 마감 표시 강화 + 장바구니 마감 상품 차단 + 회차 마감 서버 검증 (2026-10-11)**
+- 상품 카드(`ProductGridCard`)·상품 상세 대표 사진: 마감(회차 마감·상품별 마감)이면 사진을 흐리게(opacity+grayscale) + 가운데 "주문 마감" 도장. 예전엔 작은 "마감" 글자뿐이라 손님이 잘 몰랐음
+- 장바구니: 담아둔 사이 마감된 줄은 흐리게 + "주문 마감" 표시, 회차 헤더에 "🔒 주문 마감", 마감 줄이 있으면 "주문하기" 대신 "마감 상품 N개가 있어요" + "마감 상품 빼기" 버튼(예전엔 결제 화면에서 주문하기를 눌러야 에러가 떴음)
+- 서버: `create_order`가 상품별 마감만 막고 회차 마감은 화면에서만 막고 있었음 → 종료(`status='ended'`) 또는 사다드림 마감 시각 지남이면 서버에서도 거부(`isEventOrderable`과 같은 기준). 마이그레이션 `2026-10-11_order-event-deadline-check.sql`
 
 **미입금 취소 흐름 (2026-10-11)**
 - 입금기한(1시간)은 손님 안내 문구용이고, 관리자 쪽은 시간으로 자동 판단하지 않음(사장님이 1시간마다 볼 수 없어서) — 통장 확인 API 붙이기 전까지 전부 수동. 무통장 입금대기 주문 카드에 "⏰ 주문 후 N분/N시간째" 경과 표시(1시간 넘으면 연한 빨강)만 하고, 취소 버튼이 항상 "미입금 취소" → 취소 + `cancel_reason`에 `UNPAID_CANCEL_REASON` 저장(`cancelUnpaidOrder`) + 회원이면 알림. 손님 주문 상세엔 "주문이 취소됐어요. 사유: …" 표시. 취소 안 누르면 늦게 입금해도 평소처럼 입금확인→발주확인 진행. (같은 날 잠깐 넣었던 자동 "입금기한 지남" 타일/딱지는 제거)
