@@ -11,6 +11,10 @@ import { PAYMENT_DUE_MINUTES } from "@/lib/order-policy";
 // 계좌 바로 아래에 입금 기한도 같이 안내한다 — 주문 상세에선 dueAt으로
 // "오후 3:25까지"처럼 구체적인 시각을, 체크아웃에선 일반 문구를 보여준다.
 export function BankAccountInfo({ dueAt }: { dueAt?: Date } = {}) {
+  // 기한이 지났어도 사장님이 취소하기 전까진 입금하면 정상 진행된다 — 대신
+  // 입금했으면 꼭 알려달라고 바꿔 말해서, 취소와 입금이 엇갈리는 걸 줄인다.
+  const [now] = useState(() => Date.now());
+  const overdue = dueAt ? dueAt.getTime() < now : false;
   const [settings, setSettings] = useState<StoreSettings | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -47,9 +51,15 @@ export function BankAccountInfo({ dueAt }: { dueAt?: Date } = {}) {
           {copied ? "복사됨" : "계좌 복사"}
         </button>
       </div>
-      <p className="mt-1.5 text-[12px] font-semibold text-red-600">
-        ⏰ {dueAt ? `${formatDateTime(dueAt.toISOString())}까지 입금해 주세요. ` : ""}주문 후 {PAYMENT_DUE_MINUTES / 60}시간 이내 미입금 시 주문이 자동 취소돼요.
-      </p>
+      {overdue ? (
+        <p className="mt-1.5 text-[12px] font-semibold text-red-600">
+          ⏰ 입금 기한({formatDateTime(dueAt!.toISOString())})이 지났어요. 곧 취소될 수 있으니, 입금하셨거나 입금하실 예정이면 &lsquo;문의하기&rsquo;로 꼭 알려 주세요.
+        </p>
+      ) : (
+        <p className="mt-1.5 text-[12px] font-semibold text-red-600">
+          ⏰ {dueAt ? `${formatDateTime(dueAt.toISOString())}까지 입금해 주세요. ` : ""}주문 후 {PAYMENT_DUE_MINUTES / 60}시간 이내 미입금 시 주문이 자동 취소돼요.
+        </p>
+      )}
     </div>
   );
 }

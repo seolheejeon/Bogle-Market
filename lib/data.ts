@@ -1353,6 +1353,19 @@ export async function updateOrderDelivery(
   );
 }
 
+// 입금기한이 지난 주문을 관리자가 "미입금 취소" — 일반 취소(재고 복구 포함)에
+// 사유를 함께 남겨서 손님 주문 상세에 왜 취소됐는지 보이게 한다.
+export async function cancelUnpaidOrder(orderId: string, reason: string): Promise<void> {
+  await updateOrderStatus(orderId, "cancelled");
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { error } = await supabase.from("orders").update({ cancel_reason: reason }).eq("id", orderId);
+    if (error) throw error;
+    return;
+  }
+  saveOrders(loadOrders().map((o) => (o.id === orderId ? { ...o, cancelReason: reason } : o)));
+}
+
 // 관리자가 이 주문에 한해 손님의 배송지/연락처 수정을 열거나 닫는다(손님이
 // 문의로 요청했을 때). 열면 확인한 것으로도 표시한다.
 export async function setOrderDeliveryEditOpen(orderId: string, open: boolean): Promise<void> {

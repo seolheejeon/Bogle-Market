@@ -14,6 +14,7 @@ import {
   rejectRefund,
   markOrdersChecked,
   setOrderDeliveryEditOpen,
+  cancelUnpaidOrder,
 } from "@/lib/data";
 import type { EventType, MarketEvent, Order, OrderStatus, Profile } from "@/types";
 import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL, COURIER_OPTIONS, COURIER_LABEL, REFUND_REASON_LABEL } from "@/types";
@@ -21,7 +22,7 @@ import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { OrderDetailModal } from "@/components/admin/OrderDetailModal";
 import { getAccessToken, sendPushToProfile } from "@/lib/push";
-import { isEventAdminEnded, isPaymentOverdue } from "@/lib/order-policy";
+import { isEventAdminEnded, isPaymentOverdue, UNPAID_CANCEL_REASON } from "@/lib/order-policy";
 
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = { wait: "paid", paid: "confirmed", confirmed: "ship", ship: "done" };
 const NEXT_LABEL: Partial<Record<OrderStatus, string>> = { wait: "입금확인", paid: "발주확인", confirmed: "배송시작", ship: "배송완료 처리" };
@@ -189,6 +190,25 @@ export default function AdminHomePage() {
     refresh();
   }
   async function cancel(order: Order) {
+    // 입금기한이 지난 무통장 주문은 "미입금 취소"로 — 사유가 손님 주문 상세에
+    // 남고, 회원이면 알림도 간다. 그 외 취소는 예전처럼 사유 없이.
+    if (isPaymentOverdue(order)) {
+      if (!confirm("입금 기한이 지난 주문이에요. 미입금 취소로 처리할까요?\n고객 주문 내역에 취소 사유가 표시되고, 회원이면 알림도 가요.")) return;
+      await checkOrders([order.id]);
+      await cancelUnpaidOrder(order.id, UNPAID_CANCEL_REASON);
+      if (order.profileId) {
+        await createNotification({
+          title: "주문이 취소됐어요",
+          message: `주문번호 ${order.orderNumber} ${UNPAID_CANCEL_REASON}`,
+          icon: "🧾",
+          linkType: "ORDER",
+          linkId: order.id,
+          profileId: order.profileId,
+        });
+      }
+      refresh();
+      return;
+    }
     if (!confirm("이 주문을 취소할까요?")) return;
     await checkOrders([order.id]);
     await updateOrderStatus(order.id, "cancelled");
@@ -667,7 +687,7 @@ export default function AdminHomePage() {
                       o.status !== "refunded" &&
                       o.status !== "refund_rejected" && (
                       <button onClick={() => cancel(o)} className="rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-semibold text-red-600">
-                        취소
+                        {isPaymentOverdue(o) ? "미입금 취소" : "취소"}
                       </button>
                     )}
                   </>
