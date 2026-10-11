@@ -146,13 +146,23 @@ export function OrderDetailModal({
           </>
         ) : (
           <>
-            <Row label="이름">{order.guestName ?? "비회원"}</Row>
+            <Row label="이름">{order.guestName ?? "비회원"} (비회원)</Row>
             <Row label="연락처">
               <span className="inline-flex items-center gap-1.5">
                 {order.guestPhone}
                 <CopyButton value={order.guestPhone} />
               </span>
             </Row>
+            {/* 비회원이 확인번호를 잊고 문의하면 이름·연락처로 본인 확인 후 알려준다
+                (손님이 스스로 찾을 방법은 일부러 두지 않음 — 이웃끼리 이름/번호를 알 수 있어서). */}
+            {order.guestPin && (
+              <Row label="조회 확인번호">
+                <span className="inline-flex items-center gap-1.5 tracking-widest">
+                  {order.guestPin}
+                  <CopyButton value={order.guestPin} />
+                </span>
+              </Row>
+            )}
           </>
         )}
       </Section>
