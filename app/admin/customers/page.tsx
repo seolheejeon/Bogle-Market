@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { listAllProfiles, getDefaultAddress, listOrdersForProfile } from "@/lib/data";
+import { listAllProfiles, getDefaultAddress, listOrdersForProfile, listAllOrders } from "@/lib/data";
 import { formatAddress, type Address, type Order, type Profile } from "@/types";
 import { formatDateTime } from "@/lib/format";
 import { CustomerDetailModal } from "@/components/admin/CustomerDetailModal";
@@ -21,6 +21,17 @@ export default function AdminCustomersPage() {
   const [rows, setRows] = useState<CustomerRow[] | null>(null);
   const [apartmentFilter, setApartmentFilter] = useState("all");
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  // 비회원 주문자 수 — 이름+연락처가 같으면 같은 사람으로 본다(취소 주문 포함, 주문한 적 있는 사람 기준).
+  const [guestCount, setGuestCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    listAllOrders().then((orders) => {
+      const keys = new Set(
+        orders.filter((o) => !o.profileId).map((o) => `${(o.guestName ?? o.recipientName).trim()}|${(o.guestPhone ?? o.recipientPhone).replace(/\D/g, "")}`),
+      );
+      setGuestCount(keys.size);
+    });
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -51,11 +62,31 @@ export default function AdminCustomersPage() {
 
   const selectedRow = rows?.find((r) => r.profile.id === selectedProfileId) ?? null;
 
+  // 고객 수 요약 — 관리자 계정은 손님이 아니라 뺀다. 비회원은 계정이 없어 목록엔
+  // 안 나오지만, 주문 기록의 이름+연락처로 몇 명인지는 따로 센다.
+  const customerRows = (rows ?? []).filter((r) => !r.profile.isAdmin);
+  const orderedMembers = customerRows.filter((r) => r.orders.length > 0).length;
+  const filteredCustomerCount = (filteredRows ?? []).filter((r) => !r.profile.isAdmin).length;
+
   if (rows === null) return <p className="text-sm text-text-muted">불러오는 중...</p>;
 
   return (
     <div className="max-w-2xl">
-      <p className="mb-4 text-[15px] font-bold">고객 관리</p>
+      <p className="mb-2 text-[15px] font-bold">고객 관리</p>
+      <div className="mb-4 grid grid-cols-3 gap-2">
+        <div className="rounded-xl border border-border p-3">
+          <p className="text-xl font-extrabold">{customerRows.length}명</p>
+          <p className="mt-0.5 text-[11.5px] font-semibold text-text-muted">전체 회원</p>
+        </div>
+        <div className="rounded-xl border border-border p-3">
+          <p className="text-xl font-extrabold">{orderedMembers}명</p>
+          <p className="mt-0.5 text-[11.5px] font-semibold text-text-muted">주문한 회원</p>
+        </div>
+        <div className="rounded-xl border border-border p-3">
+          <p className="text-xl font-extrabold">{guestCount ?? "-"}명</p>
+          <p className="mt-0.5 text-[11.5px] font-semibold text-text-muted">비회원 주문자</p>
+        </div>
+      </div>
       {apartments.length > 0 && (
         <select
           className="mb-4 rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
@@ -70,6 +101,7 @@ export default function AdminCustomersPage() {
           ))}
         </select>
       )}
+      {apartmentFilter !== "all" && <p className="mb-2 text-[12.5px] font-semibold text-accent-dark">{apartmentFilter} 회원 {filteredCustomerCount}명</p>}
       <div className="flex flex-col gap-2">
         {(filteredRows ?? []).map(({ profile, address, orders }) => {
           const lastOrderAt = orders[0]?.createdAt ?? null;
