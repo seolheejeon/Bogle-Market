@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { listEvents, createOrder, listAddresses, updateAddress, saveAddress, setDefaultAddress } from "@/lib/data";
-import { formatAddress, type Address, type MarketEvent, type Order, type PaymentMethod, type Product } from "@/types";
+import { listEvents, createOrder, listAddresses, updateAddress, saveAddress, setDefaultAddress, validateCoupon } from "@/lib/data";
+import { formatAddress, type Address, type CouponRule, type MarketEvent, type Order, type PaymentMethod, type Product } from "@/types";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
 import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
 import { saveGuestLookup } from "@/lib/guest-session";
@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/auth-context";
 import { unitPrice, findOverStockLines, optionSelectionLabel, buildOptionSnapshot, comboValueIds } from "@/lib/product-options";
 import { totalShippingFee } from "@/lib/shipping";
 import { eventDiscountTotal } from "@/lib/discount";
+import { describeCoupon, planCoupon } from "@/lib/coupon";
 import { getCurrentPushSubscription, sendPushToSelf } from "@/lib/push";
 import { PAYMENT_METHODS, allowedPaymentMethods } from "@/lib/payments";
 import { EVENT_TYPE_LABEL, type EventType } from "@/types";
@@ -40,6 +41,12 @@ export function CheckoutView() {
   const [pin, setPin] = useState("");
   // 입금자명 — 받는 분과 다를 때만 입력(가족 계좌 등). 무통장입금 주문에만 저장한다.
   const [depositorName, setDepositorName] = useState("");
+  // 쿠폰 코드 — "적용"을 누르면 서버에서 사용 조건을 받아오고(validateCoupon),
+  // 실제 할인액은 장바구니 기준으로 화면에서 계산한다(couponPlan).
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<CouponRule | null>(null);
+  const [couponMessage, setCouponMessage] = useState<string | null>(null);
+  const [couponChecking, setCouponChecking] = useState(false);
   // 배송유형(문고리/사다드림/택배)마다 결제 가능 수단이 달라서(사다드림은
   // 무통장입금만) 결제수단을 유형별로 따로 선택받는다 — 장바구니에 없는
   // 유형은 굳이 채워둘 필요 없어 필요한 것만 담는 partial map으로 둔다.
@@ -154,15 +161,56 @@ export function CheckoutView() {
 
   const totalShippingAll = groups.reduce((sum, g) => sum + groupShippingFee(g), 0);
 
-  // 이 이벤트-주문에 적용되는 할인 합계(상품별 수량 할인 + 여러 품목 할인) —
-  // 배송비와 반대로 total에서 차감된다. 배송방식과 무관하게 적용되고
-  // (groupShippingFee와 달리 PARCEL로 거르지 않음), 장바구니(CartView.tsx)와
+  // 쿠폰 없이 받는 할인(상품별 수량 할인 + 여러 품목 할인) — 장바구니(CartView.tsx)와
   // 같은 eventDiscountTotal로 계산한다(lib/discount.ts).
-  function groupDiscountAmount(group: { event: MarketEvent; items: typeof items }): number {
+  function groupBaseDiscount(group: { event: MarketEvent; items: typeof items }): number {
     return eventDiscountTotal(
       group.event.varietyDiscounts,
       group.items.map((i) => ({ product: i.product, lineTotal: unitPrice(i.product, i.line.optionValueIds) * i.line.qty, qty: i.line.qty })),
     ).total;
+  }
+  function groupSubtotalOf(group: { event: MarketEvent; items: typeof items }): number {
+    return group.items.reduce((sum, i) => sum + unitPrice(i.product, i.line.optionValueIds) * i.line.qty, 0);
+  }
+
+  // 쿠폰은 쓸 수 있는 회차 중 상품 금액이 가장 큰 주문 한 건에만 붙는다(lib/coupon.ts).
+  // 장바구니가 바뀌면 다시 계산되고, 조건이 안 맞게 되면 이유를 보여준다.
+  const couponPlan = useMemo(
+    () =>
+      appliedCoupon
+        ? planCoupon(
+            appliedCoupon,
+            groups.map((g) => ({ key: g.event.id, type: g.items.length > 0 ? deliveryTypeOf(g.items[0]) : g.event.type, subtotal: groupSubtotalOf(g), baseDiscount: groupBaseDiscount(g) })),
+          )
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [appliedCoupon, groups],
+  );
+
+  // 이 이벤트-주문에 적용되는 할인 합계(쿠폰 포함) — 배송비와 반대로 total에서 차감된다.
+  function groupDiscountAmount(group: { event: MarketEvent; items: typeof items }): number {
+    if (couponPlan?.ok && couponPlan.key === group.event.id) return couponPlan.groupDiscount;
+    return groupBaseDiscount(group);
+  }
+  function groupCouponDiscount(group: { event: MarketEvent }): number {
+    return couponPlan?.ok && couponPlan.key === group.event.id ? couponPlan.couponDiscount : 0;
+  }
+
+  async function applyCoupon() {
+    const code = couponInput.trim();
+    if (!code) return;
+    setCouponChecking(true);
+    setCouponMessage(null);
+    try {
+      const result = await validateCoupon(code, profile ? undefined : phone);
+      if (result.ok) setAppliedCoupon(result.rule);
+      else {
+        setAppliedCoupon(null);
+        setCouponMessage(result.message);
+      }
+    } finally {
+      setCouponChecking(false);
+    }
   }
 
   const totalDiscountAll = groups.reduce((sum, g) => sum + groupDiscountAmount(g), 0);
@@ -326,6 +374,8 @@ export function CheckoutView() {
           deliveryMemo: address.memo.trim() || undefined,
           apartmentName: address.apartmentName || undefined,
           depositorName: methodFor(groupType) === "bank_transfer" ? depositorName.trim() || undefined : undefined,
+          couponCode: groupCouponDiscount(group) > 0 && appliedCoupon ? appliedCoupon.code : undefined,
+          couponDiscount: groupCouponDiscount(group),
           paymentMethod: methodFor(groupType),
           items: group.items.map((i) => ({
             productId: i.product.id,
@@ -513,7 +563,7 @@ export function CheckoutView() {
                         )}
                         {discountAmount > 0 && (
                           <div className="mt-0.5 flex justify-between text-[11.5px] font-semibold text-accent-dark">
-                            <span>할인</span>
+                            <span>할인{groupCouponDiscount(g) > 0 && ` (쿠폰 -${formatPrice(groupCouponDiscount(g))} 포함)`}</span>
                             <span>-{formatPrice(discountAmount)}</span>
                           </div>
                         )}
@@ -567,6 +617,52 @@ export function CheckoutView() {
             <span className="mt-1 block text-[11px] font-normal">비워두면 받는 분 이름으로 입금하신 걸로 확인해요.</span>
           </label>
         )}
+        {/* 쿠폰 코드 — 오픈톡 공지 등으로 받은 코드를 넣는다(비회원도 가능). */}
+        <div className="mt-3">
+          <p className="mb-1 text-[12px] font-semibold text-text-muted">쿠폰</p>
+          {appliedCoupon && couponPlan?.ok ? (
+            <div className="flex items-center justify-between gap-2 rounded-[9px] border border-accent bg-accent-soft px-3 py-2">
+              <div className="min-w-0 text-[12.5px]">
+                <p className="truncate font-bold text-accent-dark">
+                  🎟️ {appliedCoupon.name || appliedCoupon.code} -{formatPrice(couponPlan.couponDiscount)}
+                </p>
+                <p className="truncate text-[11px] text-text-muted">
+                  {describeCoupon(appliedCoupon)}
+                  {couponPlan.replacesBase && " · 기존 할인 대신 적용됐어요"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAppliedCoupon(null);
+                  setCouponInput("");
+                }}
+                className="shrink-0 text-[11.5px] font-semibold text-text-muted underline"
+              >
+                빼기
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <input
+                className="min-w-0 flex-1 rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px] uppercase"
+                placeholder="쿠폰 코드 입력"
+                value={couponInput}
+                onChange={(e) => setCouponInput(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={applyCoupon}
+                disabled={couponChecking || !couponInput.trim()}
+                className="shrink-0 rounded-[9px] border border-accent px-3 text-[12.5px] font-bold text-accent-dark disabled:opacity-50"
+              >
+                {couponChecking ? "확인 중..." : "적용"}
+              </button>
+            </div>
+          )}
+          {couponMessage && <p className="mt-1 text-[11.5px] font-semibold text-red-600">{couponMessage}</p>}
+          {appliedCoupon && couponPlan && !couponPlan.ok && <p className="mt-1 text-[11.5px] font-semibold text-red-600">{couponPlan.message}</p>}
+        </div>
         {totalShippingAll > 0 && (
           <div className="mt-3.5 flex justify-between border-t border-border pt-3.5 text-[13px] text-text-muted">
             <span>상품 + 배송비</span>

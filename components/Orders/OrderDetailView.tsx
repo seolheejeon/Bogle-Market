@@ -463,6 +463,12 @@ export function OrderDetailView({
                 </div>
               ))}
             </div>
+            {order.discountTotal > 0 && (
+              <div className="mt-3 flex justify-between text-[13px] font-semibold text-accent-dark">
+                <span>할인{order.couponCode && order.couponDiscount > 0 && ` (쿠폰 -${formatPrice(order.couponDiscount)} 포함)`}</span>
+                <span>-{formatPrice(order.discountTotal)}</span>
+              </div>
+            )}
             <div className="mt-4 flex justify-between border-t border-border pt-3.5 text-base font-extrabold">
               <span>총 결제금액</span>
               <span>{formatPrice(order.total)}</span>
