@@ -11,7 +11,7 @@ import {
   updateEventOptionStock,
   removeEventProduct,
   reorderEventProducts,
-  getEffectiveListingCosts,
+  getListingCostsFromCatalog,
   getSoldQuantities,
 } from "@/lib/data";
 import type { CatalogProduct, EventType, EventVarietyTier, MarketEvent, Product } from "@/types";
@@ -90,8 +90,8 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
     getEvent(id).then((e) => {
       setEvent(e);
       if (e) {
-        // 회차별 원가가 없으면 상품 관리의 기본 원가로 대신 보여준다(getEffectiveListingCosts).
-        getEffectiveListingCosts([e]).then(setCostsByListing);
+        // 원가는 항상 상품 관리 값(getListingCostsFromCatalog) — 회차별 원가는 안 쓴다.
+        getListingCostsFromCatalog([e]).then(setCostsByListing);
         getSoldQuantities(e.id).then(setSoldByListing);
         setDraft((prev) => prev ?? toDraft(e));
       }
@@ -436,7 +436,6 @@ function EventProductRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState(String(product.price));
-  const [costPriceInput, setCostPriceInput] = useState(costPrice !== undefined ? String(costPrice) : "");
   const [deliveryType, setDeliveryType] = useState<EventType>(product.deliveryType ?? eventType);
   const [visible, setVisible] = useState(product.visible !== false);
   const [saving, setSaving] = useState(false);
@@ -453,7 +452,6 @@ function EventProductRow({
     try {
       await updateEventProduct(product.id, {
         price: Number(price) || 0,
-        costPrice: costPriceInput.trim() === "" ? 0 : Math.max(0, Number(costPriceInput) || 0),
         deliveryType,
         visible,
       });
@@ -550,7 +548,7 @@ function EventProductRow({
               {isSoldout && <span className="ml-1 font-bold text-red-600">품절</span>}
             </p>
             <p className="text-[11.5px] text-text-muted">
-              원가 {formatPrice(costPrice ?? 0)} · 개당 예상수익 {formatPrice(profitPerItem)} · 판매 {soldQty}개 · 누적 예상수익 {formatPrice(totalProfit)}
+              원가 {formatPrice(costPrice ?? 0)}(상품 관리) · 개당 예상수익 {formatPrice(profitPerItem)} · 판매 {soldQty}개 · 누적 예상수익 {formatPrice(totalProfit)}
             </p>
             {optionStockNote && <p className="truncate text-[11.5px] text-text-muted">{optionStockNote}</p>}
             <OrderDeadlineField product={product} onSaved={onSaved} />
@@ -563,7 +561,7 @@ function EventProductRow({
               {isClosed ? "마감 해제" : "마감"}
             </button>
             <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold">
-              가격/원가 수정
+              가격 수정
             </button>
             <button onClick={remove} className="rounded-[7px] border border-border px-2.5 py-1 text-[12px] font-semibold text-red-600">
               제거
@@ -586,7 +584,7 @@ function EventProductRow({
             <p>
               판매가 {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
             </p>
-            <p>원가 {formatPrice(costPrice ?? 0)}</p>
+            <p>원가 {formatPrice(costPrice ?? 0)}(상품 관리)</p>
             {product.stock !== undefined && (
               <p>
                 재고 {product.stock}개{isSoldout && <span className="ml-1 font-bold text-red-600">품절</span>}
@@ -606,7 +604,7 @@ function EventProductRow({
               {isClosed ? "마감 해제" : "마감"}
             </button>
             <button onClick={() => setEditing(true)} className="rounded-[7px] border border-border py-1.5 text-[12px] font-semibold">
-              가격/원가 수정
+              가격 수정
             </button>
             <button onClick={remove} className="rounded-[7px] border border-border py-1.5 text-[12px] font-semibold text-red-600">
               제거
@@ -648,21 +646,13 @@ function EventProductRow({
           value={price}
           onChange={(e) => setPrice(e.target.value)}
         />
-        <input
-          className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-          placeholder="원가"
-          type="number"
-          min={0}
-          value={costPriceInput}
-          onChange={(e) => setCostPriceInput(e.target.value)}
-        />
       </div>
       <p className="-mt-1.5 text-[11px] text-text-muted">
-        2+1/묶음 판매 등으로 이 회차만 가격·원가가 다르면 여기서 바꾸면 돼요 — 상품 관리의 기준값은 그대로 유지돼요. 재고는{" "}
+        2+1/묶음 판매 등으로 이 회차만 가격이 다르면 여기서 바꾸면 돼요 — 상품 관리의 기준값은 그대로 유지돼요. 원가(옵션별 공급가 포함)와 재고는{" "}
         <Link href="/admin/products" className="font-semibold text-accent-dark underline">
           상품 관리
         </Link>
-        에서 이 상품을 파는 모든 회차가 함께 봐요.
+        에서 한 번만 바꾸면 이 상품을 파는 모든 회차에 바로 반영돼요.
       </p>
       <label className="flex items-center gap-2 text-[12.5px] text-text-muted">
         <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
@@ -851,7 +841,6 @@ function AddExistingProductForm({
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<CatalogProduct | null>(null);
   const [price, setPrice] = useState("");
-  const [costPrice, setCostPrice] = useState("");
   const [visible, setVisible] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -866,12 +855,12 @@ function AddExistingProductForm({
     return catalog.filter((c) => !alreadyAddedIds.includes(c.id) && (q === "" || c.name.toLowerCase().includes(q)));
   }, [catalog, query, alreadyAddedIds]);
 
-  // 상품을 고르면 기준 판매가/원가를 그대로 복사해 기본값으로 채운다 — 이
-  // 회차만 다르게(2+1 묶음 등) 팔고 싶으면 제출 전에 그냥 값을 바꾸면 된다.
+  // 상품을 고르면 기준 판매가를 그대로 복사해 기본값으로 채운다 — 이 회차만
+  // 다르게(2+1 묶음 등) 팔고 싶으면 제출 전에 그냥 값을 바꾸면 된다. 원가는
+  // 회차마다 따로 두지 않고 항상 상품 관리 값을 쓴다(getListingCostsFromCatalog).
   function pick(c: CatalogProduct) {
     setSelected(c);
     setPrice(c.basePrice !== undefined ? String(c.basePrice) : "");
-    setCostPrice(c.costPrice !== undefined ? String(c.costPrice) : "");
     setVisible(true);
   }
 
@@ -883,7 +872,6 @@ function AddExistingProductForm({
       await addEventProduct(eventId, {
         catalogProductId: selected.id,
         price: Number(price) || 0,
-        costPrice: costPrice.trim() === "" ? undefined : Math.max(0, Number(costPrice) || 0),
         deliveryType: eventType,
         visible,
       });
@@ -948,21 +936,13 @@ function AddExistingProductForm({
               value={price}
               onChange={(e) => setPrice(e.target.value)}
             />
-            <input
-              className="w-24 rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
-              placeholder="원가"
-              type="number"
-              min={0}
-              value={costPrice}
-              onChange={(e) => setCostPrice(e.target.value)}
-            />
           </div>
           <p className="-mt-1.5 text-[11px] text-text-muted">
-            가격·원가는 상품의 기준값이 자동으로 채워져요. 2+1/묶음 판매처럼 이 회차만 다르면 바꿔서 추가하세요. 재고는{" "}
+            가격은 상품의 기준값이 자동으로 채워져요. 2+1/묶음 판매처럼 이 회차만 다르면 바꿔서 추가하세요. 원가와 재고는{" "}
             <Link href="/admin/products" className="font-semibold text-accent-dark underline">
               상품 관리
             </Link>
-            의 재고를 그대로 공유해요.
+            값을 그대로 써요.
           </p>
           <label className="flex items-center gap-2 text-[12.5px] text-text-muted">
             <input type="checkbox" checked={visible} onChange={(e) => setVisible(e.target.checked)} />
