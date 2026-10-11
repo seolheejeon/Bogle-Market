@@ -7,12 +7,13 @@ import { useSyncExternalStore } from "react";
 // NEXT_PUBLIC_ENV_LABEL을 넣으면 그 글자를 그대로 쓰고, 없으면 접속 주소로
 // 판단한다(개발 Netlify 사이트·그 배포 미리보기 = STG, 내 컴퓨터 = LOCAL).
 // 운영 사이트는 어느 쪽에도 안 걸려서 아무것도 안 보인다.
-const STG_HOST = "bogle-market.netlify.app";
+// STG 사이트 이름이 bogle-market → bogle-market-stg로 바뀌어서(2026-10-11) 둘 다 본다.
+const STG_HOSTS = ["bogle-market-stg.netlify.app", "bogle-market.netlify.app"];
 
 function labelForHost(host: string): string | null {
   const fromEnv = process.env.NEXT_PUBLIC_ENV_LABEL?.trim();
   if (fromEnv) return fromEnv;
-  if (host === STG_HOST || host.endsWith(`--${STG_HOST}`)) return "STG";
+  if (STG_HOSTS.some((h) => host === h || host.endsWith(`--${h}`))) return "STG";
   if (host === "localhost" || host === "127.0.0.1") return "LOCAL";
   return null;
 }
