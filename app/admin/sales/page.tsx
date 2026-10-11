@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { listAllOrders, listEvents, getListingCostsFromCatalog, getOptionCostDeltas, listDailyVisits, type DailyVisit } from "@/lib/data";
+import { listAllOrders, listEvents, getCatalogCostLookup, getOptionCostDeltas, listDailyVisits, type DailyVisit } from "@/lib/data";
 import type { MarketEvent, Order, OrderStatus } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
@@ -30,6 +30,7 @@ export default function AdminSalesPage() {
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [events, setEvents] = useState<MarketEvent[]>([]);
   const [listingCosts, setListingCosts] = useState<Record<string, number>>({});
+  const [costByName, setCostByName] = useState<Record<string, number>>({});
   const [optionCosts, setOptionCosts] = useState<Record<string, number>>({});
   const [visits, setVisits] = useState<DailyVisit[] | null>(null);
   const [month, setMonth] = useState(() => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 7));
@@ -40,8 +41,10 @@ export default function AdminSalesPage() {
       setOrders(allOrders);
       setEvents(allEvents);
       setOptionCosts(optCosts);
-      // 원가는 항상 상품 관리 값(getListingCostsFromCatalog).
-      setListingCosts(await getListingCostsFromCatalog(allEvents));
+      // 원가는 항상 상품 관리 값 — 리스팅이 끊긴 옛 주문용으로 상품 이름 기준도 같이.
+      const lookup = await getCatalogCostLookup(allEvents);
+      setListingCosts(lookup.byListing);
+      setCostByName(lookup.byName);
     })();
     listDailyVisits(14)
       .then(setVisits)
@@ -65,7 +68,9 @@ export default function AdminSalesPage() {
       const orderSales = o.total - o.shippingFee;
       let orderCost = 0;
       for (const item of o.items) {
-        const base = listingCosts[item.productId] ?? 0;
+        // 회차에서 상품을 뺐다 다시 넣으면 그전 주문은 리스팅 연결이 끊겨 있다
+        // (productId가 비거나 지금 없는 id) — 그땐 주문에 남은 상품 이름으로 원가를 찾는다.
+        const base = listingCosts[item.productId] ?? costByName[item.productName] ?? 0;
         const optionDelta = (item.options ?? []).reduce((s, opt) => s + (optionCosts[opt.optionValueId] ?? 0), 0);
         // 기본 원가 0 + 옵션별 공급가로 원가를 넣는 상품(예: 마카오박)도 있어서,
         // 기본 원가만이 아니라 "이 줄의 실제 원가"가 0일 때만 미입력으로 본다.
@@ -88,7 +93,7 @@ export default function AdminSalesPage() {
       rows.set(key, row);
     }
     return { sales, cost, count, rows: [...rows.values()].sort((a, b) => a.label.localeCompare(b.label)), missingCost: [...missingCost] };
-  }, [orders, eventById, listingCosts, optionCosts, month]);
+  }, [orders, eventById, listingCosts, costByName, optionCosts, month]);
 
   function shiftMonth(delta: number) {
     const [y, m] = month.split("-").map(Number);

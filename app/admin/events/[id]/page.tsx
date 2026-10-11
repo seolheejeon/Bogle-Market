@@ -464,6 +464,13 @@ function EventProductRow({
     }
   }
   async function remove() {
+    // 주문이 들어온 상품을 빼면 그 주문들과 상품의 연결이 끊겨서(order_items의
+    // 리스팅이 비게 됨) 매출 원가·인기상품 집계에서 빠진다 — 다시 넣어도 예전
+    // 주문은 안 붙는다. 그래서 막고, 숨기기/마감으로 안내한다.
+    if (soldQty > 0) {
+      alert(`"${product.name}"은(는) 이미 주문이 ${soldQty}개 들어와서 뺄 수 없어요.\n손님에게 안 보이게 하려면 "숨기기", 주문만 막으려면 "마감"을 눌러 주세요.`);
+      return;
+    }
     if (!confirm(`"${product.name}"을(를) 이 이벤트에서 뺄까요? (상품 자체는 삭제되지 않아요)`)) return;
     try {
       await removeEventProduct(product.id);
