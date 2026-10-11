@@ -271,16 +271,13 @@ export async function duplicateEvent(eventId: string, overrides: { title: string
     // 품목 수 기준이라 리스팅이 새로 생겨도 그대로 들어맞는다.
     varietyDiscounts: source.varietyDiscounts,
   });
-  // 원가도 가격/재고와 마찬가지로 "원본 이벤트의 스냅샷"을 그대로 복사한다 —
-  // 마스터(카탈로그) 기준 원가가 아니라, 이 회차에서 실제로 쓰던 값을 이어받음.
-  const costs = await getEventProductCosts(source.products.map((p) => p.id));
+  // 원가는 회차별로 복사하지 않는다 — 항상 상품 관리 값을 쓴다(getListingCostsFromCatalog).
   for (const p of source.products) {
     // 옵션 조합 재고도 가격/원가와 마찬가지로 "원본 회차에서 실제로 쓰던 값"을
     // 그대로 이어받는다 — 카탈로그의 기본 재고로 새로 초기화하지 않는다.
     await addEventProduct(created.id, {
       catalogProductId: p.catalogProductId,
       price: p.price,
-      costPrice: costs[p.id],
       deliveryType: p.deliveryType,
       visible: p.visible,
       optionStock: p.optionStockByCombo,
@@ -843,20 +840,17 @@ export async function listDailyVisits(days: number): Promise<DailyVisit[]> {
   return [...byDay.values()];
 }
 
-// 리스팅(회차 상품)별 실제로 쓸 원가 — 회차별 원가(event_product_costs)가 있으면
-// 그걸, 없거나 0이면 상품 관리의 기본 원가(product_costs)를 쓴다. 회차에 상품을
-// 먼저 추가하고 원가를 나중에 상품 관리에서 넣으면 회차 원가가 비어 있어서, 예전엔
-// 이런 상품이 원가 0원으로 계산돼 마진이 부풀려 보였다. 매출·방문 화면과 이벤트
-// 관리의 예상 수익이 같은 기준을 쓰도록 여기 한 곳에 둔다.
-export async function getEffectiveListingCosts(events: MarketEvent[]): Promise<Record<string, number>> {
-  const listings = events.flatMap((e) => e.products);
-  const [listingCosts, catalog] = await Promise.all([getEventProductCosts(listings.map((p) => p.id)), listCatalogProducts()]);
+// 리스팅(회차 상품)별 원가 — 항상 상품 관리의 원가(product_costs)를 쓴다.
+// (2026-10-11 사장님 요청) 예전엔 회차에 상품을 넣을 때 원가를 회차별로 복사해
+// 뒀는데(event_product_costs), 그러면 상품 관리에서 원가를 고쳐도 이미 걸린 회차엔
+// 반영이 안 되고 옵션 공급가는 회차에서 못 고쳐서 헷갈렸다 — 이제 원가는 상품
+// 관리 한 곳에서만 관리하고, 매출·방문 화면과 이벤트 관리의 예상 수익이 모두
+// 여기 값을 쓴다. (옵션별 공급가 추가분은 getOptionCostDeltas)
+export async function getListingCostsFromCatalog(events: MarketEvent[]): Promise<Record<string, number>> {
+  const catalog = await listCatalogProducts();
   const catalogCost = new Map(catalog.map((c) => [c.id, c.costPrice ?? 0]));
   const result: Record<string, number> = {};
-  for (const p of listings) {
-    const own = listingCosts[p.id];
-    result[p.id] = own !== undefined && own > 0 ? own : (catalogCost.get(p.catalogProductId) ?? 0);
-  }
+  for (const p of events.flatMap((e) => e.products)) result[p.id] = catalogCost.get(p.catalogProductId) ?? 0;
   return result;
 }
 

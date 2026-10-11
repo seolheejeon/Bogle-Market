@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { listAllOrders, listEvents, getEffectiveListingCosts, getOptionCostDeltas, listDailyVisits, type DailyVisit } from "@/lib/data";
+import { listAllOrders, listEvents, getListingCostsFromCatalog, getOptionCostDeltas, listDailyVisits, type DailyVisit } from "@/lib/data";
 import type { MarketEvent, Order, OrderStatus } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
@@ -40,8 +40,8 @@ export default function AdminSalesPage() {
       setOrders(allOrders);
       setEvents(allEvents);
       setOptionCosts(optCosts);
-      // 회차별 원가가 없으면 상품 관리의 기본 원가로 대신한다(getEffectiveListingCosts).
-      setListingCosts(await getEffectiveListingCosts(allEvents));
+      // 원가는 항상 상품 관리 값(getListingCostsFromCatalog).
+      setListingCosts(await getListingCostsFromCatalog(allEvents));
     })();
     listDailyVisits(14)
       .then(setVisits)
