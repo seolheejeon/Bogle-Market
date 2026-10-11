@@ -111,7 +111,7 @@
   - 운영 관리자 계정: `bogle1` (SQL로 `is_admin=true` 지정)
   - 환경 딱지(`components/EnvBadge.tsx`): 개발 사이트는 화면 상단에 "STG 테스트 서버", 로컬은 "LOCAL" 딱지(탭 제목 표시는 충돌로 제거). 접속 주소로 자동 판단(운영은 표시 없음), `NEXT_PUBLIC_ENV_LABEL`로 직접 지정도 가능
   - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
-  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ✅(종료된 7/31 회차 주문 거부 확인) / 운영 ✅(사장님 실행), `2026-10-11_site-visits.sql` — 개발 ✅(기록 성공·손님 조회 차단 확인) / 운영 ✅
+  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ✅(종료된 7/31 회차 주문 거부 확인) / 운영 ✅(사장님 실행), `2026-10-11_site-visits.sql` — 개발 ✅(기록 성공·손님 조회 차단 확인) / 운영 ✅, `2026-10-11_coupons.sql` — 개발 ✅ / 운영 ⏳(코드보다 먼저)
 
 **쿠폰(코드 입력형) (2026-10-11)**
 - 결정: 쿠폰 먼저(포인트·자동 쿠폰은 다음 단계), 다른 할인과의 중복은 쿠폰마다 선택(`stackable`)
