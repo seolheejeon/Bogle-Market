@@ -113,7 +113,7 @@ export function OrderDetailModal({
           )}
           {order.discountTotal > 0 && (
             <div className="flex justify-between text-accent-dark">
-              <span>할인</span>
+              <span>할인{order.couponCode && order.couponDiscount > 0 && ` (쿠폰 ${order.couponCode} -${formatPrice(order.couponDiscount)} 포함)`}</span>
               <span>-{formatPrice(order.discountTotal)}</span>
             </div>
           )}

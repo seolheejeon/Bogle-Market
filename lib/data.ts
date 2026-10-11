@@ -26,6 +26,8 @@ import type {
   Address,
   Banner,
   CatalogProduct,
+  Coupon,
+  CouponRule,
   EventProductSeed,
   EventType,
   MarketEvent,
@@ -800,6 +802,107 @@ export async function getPopularListingIds(): Promise<string[]> {
   return [...sold.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
 }
 
+// ---------- 쿠폰 ----------
+// 쿠폰 표는 관리자만 읽고 쓴다(코드 목록이 손님에게 노출되지 않게). 손님은
+// validateCoupon(RPC)으로 코드 하나의 사용 조건만 받는다. mock 모드에선 쿠폰을 쓰지 않는다.
+
+function mapCoupon(row: Record<string, unknown>): Coupon {
+  return {
+    id: row.id as string,
+    code: row.code as string,
+    name: (row.name as string) ?? "",
+    discountType: row.discount_type as Coupon["discountType"],
+    amount: row.amount as number,
+    maxDiscount: (row.max_discount as number | null) ?? null,
+    minOrderAmount: (row.min_order_amount as number) ?? 0,
+    startsAt: (row.starts_at as string | null) ?? null,
+    endsAt: (row.ends_at as string | null) ?? null,
+    usageLimit: (row.usage_limit as number | null) ?? null,
+    perCustomerLimit: (row.per_customer_limit as number | null) ?? null,
+    deliveryTypes: (row.delivery_types as EventType[] | null) ?? null,
+    stackable: (row.stackable as boolean) ?? true,
+    active: (row.active as boolean) ?? true,
+    createdAt: row.created_at as string,
+  };
+}
+
+export async function listCoupons(): Promise<Coupon[]> {
+  if (!isSupabaseConfigured) return [];
+  const supabase = getSupabaseBrowserClient()!;
+  const { data, error } = await supabase.from("coupons").select("*").order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(mapCoupon);
+}
+
+export async function saveCoupon(input: Omit<Coupon, "id" | "createdAt"> & { id?: string }): Promise<void> {
+  if (!isSupabaseConfigured) throw new Error("쿠폰은 실제 DB에 연결된 사이트에서만 만들 수 있어요.");
+  const supabase = getSupabaseBrowserClient()!;
+  const row = {
+    code: input.code.trim().toUpperCase(),
+    name: input.name.trim(),
+    discount_type: input.discountType,
+    amount: input.amount,
+    max_discount: input.maxDiscount,
+    min_order_amount: input.minOrderAmount,
+    starts_at: input.startsAt,
+    ends_at: input.endsAt,
+    usage_limit: input.usageLimit,
+    per_customer_limit: input.perCustomerLimit,
+    delivery_types: input.deliveryTypes && input.deliveryTypes.length > 0 ? input.deliveryTypes : null,
+    stackable: input.stackable,
+    active: input.active,
+  };
+  const { error } = input.id ? await supabase.from("coupons").update(row).eq("id", input.id) : await supabase.from("coupons").insert(row);
+  if (error) {
+    if (error.code === "23505") throw new Error("이미 있는 쿠폰 코드예요. 다른 코드를 써 주세요.");
+    throw error;
+  }
+}
+
+export async function deleteCoupon(id: string): Promise<void> {
+  const supabase = getSupabaseBrowserClient()!;
+  const { error } = await supabase.from("coupons").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// 쿠폰별 사용 횟수(취소·환불된 주문 제외) — 관리자 쿠폰 목록에 "N명 사용"으로 보여준다.
+export async function getCouponUsageCounts(): Promise<Record<string, number>> {
+  if (!isSupabaseConfigured) return {};
+  const supabase = getSupabaseBrowserClient()!;
+  const { data, error } = await supabase.from("coupon_redemptions").select("coupon_id, orders!inner(status)");
+  if (error) throw error;
+  const counts: Record<string, number> = {};
+  for (const row of (data ?? []) as unknown as { coupon_id: string; orders: { status: string } }[]) {
+    if (row.orders.status === "cancelled" || row.orders.status === "refunded") continue;
+    counts[row.coupon_id] = (counts[row.coupon_id] ?? 0) + 1;
+  }
+  return counts;
+}
+
+// 결제 화면에서 쿠폰 코드 확인 — 기간/소진/1인 횟수/배송방식은 서버가 보고, 최소 금액과
+// 실제 할인액은 화면이 lib/coupon.ts로 계산한다. phone은 비회원 1인 횟수 확인용.
+export async function validateCoupon(code: string, phone?: string): Promise<{ ok: true; rule: CouponRule } | { ok: false; message: string }> {
+  if (!isSupabaseConfigured) return { ok: false, message: "이 환경에서는 쿠폰을 쓸 수 없어요." };
+  const supabase = getSupabaseBrowserClient()!;
+  const { data, error } = await supabase.rpc("validate_coupon", { p_code: code, p_phone: phone || null });
+  if (error) return { ok: false, message: "쿠폰을 확인하지 못했어요. 잠시 후 다시 시도해 주세요." };
+  const r = data as Record<string, unknown>;
+  if (!r?.ok) return { ok: false, message: (r?.message as string) ?? "쓸 수 없는 쿠폰이에요." };
+  return {
+    ok: true,
+    rule: {
+      code: r.code as string,
+      name: (r.name as string) ?? "",
+      discountType: r.discountType as CouponRule["discountType"],
+      amount: r.amount as number,
+      maxDiscount: (r.maxDiscount as number | null) ?? null,
+      minOrderAmount: (r.minOrderAmount as number) ?? 0,
+      deliveryTypes: (r.deliveryTypes as EventType[] | null) ?? null,
+      stackable: (r.stackable as boolean) ?? true,
+    },
+  };
+}
+
 // ---------- 방문자 수 / 매출 관리 (관리자) ----------
 
 // 손님 화면 방문 1회 기록(lib/visit-tracker 참고) — 실패해도 화면엔 영향 없게 조용히 무시.
@@ -951,6 +1054,9 @@ export interface NewOrderInput {
   deliveryMemo?: string;
   apartmentName?: string;
   depositorName?: string;
+  // 쿠폰을 이 주문에 썼으면 그 코드와 쿠폰 할인액(discountTotal에 이미 포함).
+  couponCode?: string;
+  couponDiscount?: number;
   paymentMethod: PaymentMethod;
   items: OrderItem[];
   total: number;
@@ -1045,6 +1151,8 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       p_entrance_method: input.entranceMethod || null,
       p_delivery_memo: input.deliveryMemo || null,
       p_depositor_name: input.depositorName?.trim() || null,
+      p_coupon_code: input.couponCode || null,
+      p_coupon_discount: input.couponCode ? (input.couponDiscount ?? 0) : 0,
     });
     if (error) throw error;
     const orderRow = {
@@ -1065,6 +1173,8 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
       delivery_memo: input.deliveryMemo || null,
       apartment_name: input.apartmentName || null,
       depositor_name: input.depositorName?.trim() || null,
+      coupon_code: input.couponCode || null,
+      coupon_discount: input.couponCode ? (input.couponDiscount ?? 0) : 0,
       payment_method: input.paymentMethod,
       status: "wait",
       cancel_requested: false,
@@ -1112,6 +1222,8 @@ export async function createOrder(input: NewOrderInput): Promise<Order> {
     deliveryEditedAt: null,
     adminCheckedAt: null,
     cancelRejectReason: null,
+    couponCode: input.couponCode ?? null,
+    couponDiscount: input.couponDiscount ?? 0,
     paymentMethod: input.paymentMethod,
     status: "wait",
     cancelRequested: false,
@@ -2115,6 +2227,8 @@ function mapSupabaseOrder(row: Record<string, any>, items: OrderItem[]): Order {
     deliveryEditedAt: row.delivery_edited_at ?? null,
     adminCheckedAt: row.admin_checked_at ?? null,
     cancelRejectReason: row.cancel_reject_reason ?? null,
+    couponCode: row.coupon_code ?? null,
+    couponDiscount: row.coupon_discount ?? 0,
     paymentMethod: row.payment_method,
     status: row.status,
     cancelRequested: row.cancel_requested ?? false,

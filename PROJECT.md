@@ -111,7 +111,16 @@
   - 운영 관리자 계정: `bogle1` (SQL로 `is_admin=true` 지정)
   - 환경 딱지(`components/EnvBadge.tsx`): 개발 사이트는 화면 상단에 "STG 테스트 서버", 로컬은 "LOCAL" 딱지(탭 제목 표시는 충돌로 제거). 접속 주소로 자동 판단(운영은 표시 없음), `NEXT_PUBLIC_ENV_LABEL`로 직접 지정도 가능
   - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
-  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ✅(종료된 7/31 회차 주문 거부 확인) / 운영 ✅(사장님 실행), `2026-10-11_site-visits.sql` — 개발 ✅(기록 성공·손님 조회 차단 확인) / 운영 ✅
+  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ✅(종료된 7/31 회차 주문 거부 확인) / 운영 ✅(사장님 실행), `2026-10-11_site-visits.sql` — 개발 ✅(기록 성공·손님 조회 차단 확인) / 운영 ✅, `2026-10-11_coupons.sql` — 개발 ✅ / 운영 ✅
+
+**쿠폰(코드 입력형) (2026-10-11)**
+- 결정: 쿠폰 먼저(포인트·자동 쿠폰은 다음 단계), 다른 할인과의 중복은 쿠폰마다 선택(`stackable`)
+- DB: `coupons`(코드 대소문자 무시 유니크, 정액/정률+최대할인, 최소주문금액, 기간, 선착순 `usage_limit`, 1인 `per_customer_limit`, 배송방식 제한, `stackable`, `active`) / `coupon_redemptions`(주문별 사용 기록, customer_key = 회원 id 또는 숫자만 남긴 연락처) / `orders.coupon_code`·`coupon_discount`. 쿠폰 표는 관리자만 읽음(코드 목록 노출 방지), 손님은 `validate_coupon` RPC로 코드 하나의 조건만 받음
+- 서버 검사: `create_order`에 `p_coupon_code`/`p_coupon_discount` 추가(시그니처 변경 → 23개짜리 drop). 쿠폰 행을 `for update`로 잠그고 기간·배송방식·최소금액·최대 할인액·중복 불가(`p_discount_total = p_coupon_discount`)·선착순·1인 횟수를 검사 후 사용 기록. 취소·환불된 주문의 사용분은 수량에서 빠짐. Supabase Studio가 최상위 `select ... into`를 오인하는 문제 때문에 `v := (select ...)` 형태로 씀
+- 계산(`lib/coupon.ts`): 쿠폰은 쓸 수 있는 회차 중 상품 금액이 가장 큰 주문 한 건에만. 중복 가능이면 기존 할인 + 쿠폰(상품 금액 상한), 중복 불가면 쿠폰이 더 클 때만 기존 할인 대신 적용(작으면 적용 안 하고 안내). 계산 시나리오 9개 통과
+- 화면: 결제 화면 쿠폰 코드 입력/적용/빼기, 할인 줄에 "쿠폰 -N원 포함", 주문 상세·관리자 주문 모달에 쿠폰 표시, 관리자 "🎟️ 쿠폰" 메뉴(만들기·수정·중지·삭제, N명 사용). mock 모드에선 쿠폰 없음
+- STG 검증(사장님이 만든 TEST1000: 문고리 전용·최소 1만원·1인 1회): 사다드림 주문엔 배송방식 제한으로 거부, 소문자 코드도 인식, 문고리 19,900원 주문에 1,000원 할인 저장, 같은 연락처 재사용 "이미 사용한 쿠폰" 거부, 할인액 부풀림(5,000원) 거부, 주문 취소 후 같은 연락처 재사용 허용, 쿠폰 없는 일반 주문 정상. 테스트 주문 전부 취소함
+- 마이그레이션 `2026-10-11_coupons.sql` — **코드 배포 전에 SQL 먼저**(새 create_order 인자가 없으면 주문 생성 자체가 실패)
 
 **STG 사이트 이름 변경(bogle-market → bogle-market-stg) 대응 (2026-10-11)**
 - 사장님이 Netlify에서 STG 사이트 이름을 `bogle-market-stg`로 바꿈 → 옛 주소 `bogle-market.netlify.app`는 Netlify "Site not found". 카톡에서 링크가 안 열린 원인: 상품 미리보기(og:url)가 고정 기본값(옛 주소)으로 나가서 카톡이 그 주소로 열었음

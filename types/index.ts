@@ -304,6 +304,31 @@ export interface MarketEvent {
 
 // 예: [{ minKinds: 2, amountOff: 1000 }, { minKinds: 3, amountOff: 2000 }] →
 // 2가지 사면 1,000원, 3가지 이상이면 2,000원.
+// 쿠폰(코드 입력형) — 관리자 쿠폰 관리에서 만들고 손님이 결제 화면에서 코드로 쓴다.
+// 할인 계산은 lib/coupon.ts, 최종 검사는 create_order(서버)가 같은 규칙으로 한다.
+export type CouponDiscountType = "fixed" | "percent";
+
+export interface Coupon {
+  id: string;
+  code: string;
+  name: string;
+  discountType: CouponDiscountType;
+  amount: number; // 정액이면 원, 정률이면 %
+  maxDiscount: number | null; // 정률일 때 최대 할인액
+  minOrderAmount: number;
+  startsAt: string | null;
+  endsAt: string | null;
+  usageLimit: number | null; // 전체 선착순(null = 무제한)
+  perCustomerLimit: number | null; // 1인 사용 횟수(null = 무제한)
+  deliveryTypes: EventType[] | null; // 사용 가능 배송방식(null = 전부)
+  stackable: boolean; // 상품 구간 할인·여러 품목 할인과 같이 쓰기
+  active: boolean;
+  createdAt: string;
+}
+
+// 결제 화면에서 코드를 확인하면 서버(validate_coupon)가 돌려주는 사용 조건.
+export type CouponRule = Pick<Coupon, "code" | "name" | "discountType" | "amount" | "maxDiscount" | "minOrderAmount" | "deliveryTypes" | "stackable">;
+
 export interface EventVarietyTier {
   minKinds: number;
   amountOff: number;
@@ -469,6 +494,9 @@ export interface Order {
   adminCheckedAt: string | null;
   // 취소 요청을 거절할 때 관리자가 남긴 사유 — 손님 주문 상세에도 보인다.
   cancelRejectReason: string | null;
+  // 이 주문에 쓴 쿠폰 코드와 쿠폰 할인액(discountTotal에 이미 포함된 값). 없으면 null/0.
+  couponCode: string | null;
+  couponDiscount: number;
   paymentMethod: PaymentMethod;
   status: OrderStatus;
   // 발주확인(confirmed) 이후 고객이 취소를 "요청"하면 true — 상태 자체는 그대로
