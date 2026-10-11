@@ -111,7 +111,7 @@
   - 운영 관리자 계정: `bogle1` (SQL로 `is_admin=true` 지정)
   - 환경 딱지(`components/EnvBadge.tsx`): 개발 사이트는 화면 상단에 "STG 테스트 서버", 로컬은 "LOCAL" 딱지(탭 제목 표시는 충돌로 제거). 접속 주소로 자동 판단(운영은 표시 없음), `NEXT_PUBLIC_ENV_LABEL`로 직접 지정도 가능
   - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
-  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ✅(종료된 7/31 회차 주문 거부 확인) / 운영 ✅(사장님 실행), `2026-10-11_site-visits.sql` — 개발 ⏳ / 운영 ⏳
+  - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ✅(종료된 7/31 회차 주문 거부 확인) / 운영 ✅(사장님 실행), `2026-10-11_site-visits.sql` — 개발 ✅(기록 성공·손님 조회 차단 확인) / 운영 ⏳(밤 배포 때)
 
 **매출·마진 관리 + 하루 방문자 수 (2026-10-11)**
 - 매출 기준 결정: 문고리/사다드림은 **배송일(회차) 기준**으로 그 달 매출(원가가 나가는 발주 회차와 같이 묶여야 마진이 맞음), 택배는 회차 개념이 없어 주문일 기준. 입금 확인된 주문만(paid~done, 반품 신청·반려 포함 / 입금대기·취소·환불 제외), 매출 = 결제금액 − 택배 배송비. 운영 메인 "오늘 매출"은 그대로 주문일 기준
