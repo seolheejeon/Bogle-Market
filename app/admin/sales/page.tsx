@@ -65,10 +65,12 @@ export default function AdminSalesPage() {
       const orderSales = o.total - o.shippingFee;
       let orderCost = 0;
       for (const item of o.items) {
-        const base = listingCosts[item.productId];
-        if (base === undefined || base === 0) missingCost.add(item.productName);
+        const base = listingCosts[item.productId] ?? 0;
         const optionDelta = (item.options ?? []).reduce((s, opt) => s + (optionCosts[opt.optionValueId] ?? 0), 0);
-        orderCost += ((base ?? 0) + optionDelta) * item.quantity;
+        // 기본 원가 0 + 옵션별 공급가로 원가를 넣는 상품(예: 마카오박)도 있어서,
+        // 기본 원가만이 아니라 "이 줄의 실제 원가"가 0일 때만 미입력으로 본다.
+        if (base + optionDelta <= 0) missingCost.add(item.productName);
+        orderCost += (base + optionDelta) * item.quantity;
       }
       sales += orderSales;
       cost += orderCost;
@@ -137,7 +139,7 @@ export default function AdminSalesPage() {
 
           {report.missingCost.length > 0 && (
             <p className="mb-3 rounded-[9px] bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-              ⚠️ 원가가 입력 안 된 상품이 있어 원가 0원으로 계산했어요(마진이 실제보다 크게 보여요): {report.missingCost.join(", ")}. 상품 관리에서 원가를 넣어 주세요(회차마다 원가가 다르면 이벤트 관리에서 따로 넣어도 돼요).
+              ⚠️ 원가가 입력 안 된 상품이 있어 원가 0원으로 계산했어요(마진이 실제보다 크게 보여요): {report.missingCost.join(", ")}. 상품 관리에서 원가(또는 옵션별 공급가)를 넣어 주세요.
             </p>
           )}
 
