@@ -15,6 +15,7 @@ import {
   markOrdersChecked,
   setOrderDeliveryEditOpen,
   cancelUnpaidOrder,
+  listDailyVisits,
 } from "@/lib/data";
 import type { EventType, MarketEvent, Order, OrderStatus, Profile } from "@/types";
 import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL, COURIER_OPTIONS, COURIER_LABEL, REFUND_REASON_LABEL } from "@/types";
@@ -129,6 +130,13 @@ export default function AdminHomePage() {
   }, []);
   useEffect(() => {
     listAllProfiles().then(setProfiles);
+  }, []);
+  // 오늘 방문자 수(관리자 접속 제외) — 자세한 건 매출·방문 화면에서.
+  const [todayVisitors, setTodayVisitors] = useState<number | null>(null);
+  useEffect(() => {
+    listDailyVisits(1)
+      .then((v) => setTodayVisitors(v[0]?.visitors ?? 0))
+      .catch(() => setTodayVisitors(null));
   }, []);
 
   const eventById = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
@@ -461,6 +469,12 @@ export default function AdminHomePage() {
         <p className="text-[11.5px] font-semibold text-text-muted">오늘 매출</p>
         <p className="mt-0.5 text-xl font-extrabold">{formatPrice(todayRevenue)}</p>
         <p className="mt-0.5 text-[11px] text-text-muted">입금대기·취소·환불 주문은 제외한 금액이에요.</p>
+        <Link href="/admin/sales" className="mt-2 flex items-center justify-between rounded-[8px] bg-bg-sunken px-2.5 py-1.5 text-[12px]">
+          <span>
+            오늘 방문자 <strong>{todayVisitors ?? "-"}명</strong>
+          </span>
+          <span className="font-semibold text-accent-dark">이번 달 매출·마진 보기 ›</span>
+        </Link>
       </div>
 
       <div className="mb-6 grid grid-cols-3 gap-2 sm:grid-cols-5">

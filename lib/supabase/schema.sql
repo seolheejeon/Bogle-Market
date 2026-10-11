@@ -864,6 +864,32 @@ begin
 end;
 $$;
 
+-- 하루 방문자 수(2026-10-11) — 브라우저마다 임의로 만든 방문자 id(개인정보 아님)로
+-- 하루 한 줄씩 남기고, 같은 날 다시 들어오면 페이지뷰만 늘린다. 날짜는 한국 시간.
+-- 손님은 record_visit RPC로 쓰기만, 조회는 관리자만.
+create table if not exists site_visits (
+  day date not null,
+  visitor_id uuid not null,
+  page_views integer not null default 1,
+  first_seen_at timestamptz not null default now(),
+  primary key (day, visitor_id)
+);
+alter table site_visits enable row level security;
+
+drop policy if exists "admins read site visits" on site_visits;
+create policy "admins read site visits" on site_visits for select using (is_admin());
+
+create or replace function record_visit(p_visitor_id uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  insert into site_visits (day, visitor_id)
+  values ((now() at time zone 'Asia/Seoul')::date, p_visitor_id)
+  on conflict (day, visitor_id) do update set page_views = site_visits.page_views + 1;
+$$;
+
 -- 홈 "인기상품" 순위용 — 취소 안 된 주문 수량 합계가 많은 리스팅 순서대로
 -- id만 돌려준다(판매 수량 자체는 노출하지 않음). order_items는 RLS로 본인
 -- 주문만 보이므로 집계는 SECURITY DEFINER로 한다.

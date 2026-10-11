@@ -803,6 +803,62 @@ export async function getPopularListingIds(): Promise<string[]> {
   return [...sold.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
 }
 
+// ---------- 방문자 수 / 매출 관리 (관리자) ----------
+
+// 손님 화면 방문 1회 기록(lib/visit-tracker 참고) — 실패해도 화면엔 영향 없게 조용히 무시.
+export async function recordVisit(visitorId: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  try {
+    await getSupabaseBrowserClient()!.rpc("record_visit", { p_visitor_id: visitorId });
+  } catch {
+    // 방문 기록은 부가 기능이라 실패해도 그냥 넘어간다.
+  }
+}
+
+export interface DailyVisit {
+  day: string; // YYYY-MM-DD (한국 날짜)
+  visitors: number;
+  pageViews: number;
+}
+
+// 최근 N일 날짜별 방문자 수(관리자만 — RLS). 방문 기록이 없는 날은 0으로 채운다.
+export async function listDailyVisits(days: number): Promise<DailyVisit[]> {
+  const kstToday = new Date(Date.now() + 9 * 3600 * 1000);
+  const dayKeys: string[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    dayKeys.push(new Date(kstToday.getTime() - i * 86400000).toISOString().slice(0, 10));
+  }
+  const byDay = new Map(dayKeys.map((d) => [d, { day: d, visitors: 0, pageViews: 0 }]));
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.from("site_visits").select("day, page_views").gte("day", dayKeys[0]);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const d = byDay.get(row.day);
+      if (!d) continue;
+      d.visitors += 1;
+      d.pageViews += row.page_views;
+    }
+  }
+  return [...byDay.values()];
+}
+
+// 옵션값별 공급가 추가분(관리자만) — 매출 관리의 원가 계산에 쓴다.
+export async function getOptionCostDeltas(): Promise<Record<string, number>> {
+  const result: Record<string, number> = {};
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.from("product_option_costs").select("option_value_id, cost_delta");
+    if (error) throw error;
+    for (const row of data ?? []) result[row.option_value_id] = row.cost_delta;
+    return result;
+  }
+  for (const c of loadCatalogProducts()) {
+    for (const g of c.optionGroups ?? []) for (const v of g.values) if (v.costDelta) result[v.id] = v.costDelta;
+  }
+  return result;
+}
+
 // ---------- Notifications ----------
 // profileId null (viewer not logged in) only ever returns broadcasts;
 // logged-in viewers get broadcasts plus whatever's personally addressed to them.
