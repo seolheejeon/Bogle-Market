@@ -843,6 +843,23 @@ export async function listDailyVisits(days: number): Promise<DailyVisit[]> {
   return [...byDay.values()];
 }
 
+// 리스팅(회차 상품)별 실제로 쓸 원가 — 회차별 원가(event_product_costs)가 있으면
+// 그걸, 없거나 0이면 상품 관리의 기본 원가(product_costs)를 쓴다. 회차에 상품을
+// 먼저 추가하고 원가를 나중에 상품 관리에서 넣으면 회차 원가가 비어 있어서, 예전엔
+// 이런 상품이 원가 0원으로 계산돼 마진이 부풀려 보였다. 매출·방문 화면과 이벤트
+// 관리의 예상 수익이 같은 기준을 쓰도록 여기 한 곳에 둔다.
+export async function getEffectiveListingCosts(events: MarketEvent[]): Promise<Record<string, number>> {
+  const listings = events.flatMap((e) => e.products);
+  const [listingCosts, catalog] = await Promise.all([getEventProductCosts(listings.map((p) => p.id)), listCatalogProducts()]);
+  const catalogCost = new Map(catalog.map((c) => [c.id, c.costPrice ?? 0]));
+  const result: Record<string, number> = {};
+  for (const p of listings) {
+    const own = listingCosts[p.id];
+    result[p.id] = own !== undefined && own > 0 ? own : (catalogCost.get(p.catalogProductId) ?? 0);
+  }
+  return result;
+}
+
 // 옵션값별 공급가 추가분(관리자만) — 매출 관리의 원가 계산에 쓴다.
 export async function getOptionCostDeltas(): Promise<Record<string, number>> {
   const result: Record<string, number> = {};

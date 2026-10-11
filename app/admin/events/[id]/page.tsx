@@ -11,7 +11,7 @@ import {
   updateEventOptionStock,
   removeEventProduct,
   reorderEventProducts,
-  getEventProductCosts,
+  getEffectiveListingCosts,
   getSoldQuantities,
 } from "@/lib/data";
 import type { CatalogProduct, EventType, EventVarietyTier, MarketEvent, Product } from "@/types";
@@ -90,7 +90,8 @@ export default function AdminEventEditPage({ params }: { params: Promise<{ id: s
     getEvent(id).then((e) => {
       setEvent(e);
       if (e) {
-        getEventProductCosts(e.products.map((p) => p.id)).then(setCostsByListing);
+        // 회차별 원가가 없으면 상품 관리의 기본 원가로 대신 보여준다(getEffectiveListingCosts).
+        getEffectiveListingCosts([e]).then(setCostsByListing);
         getSoldQuantities(e.id).then(setSoldByListing);
         setDraft((prev) => prev ?? toDraft(e));
       }

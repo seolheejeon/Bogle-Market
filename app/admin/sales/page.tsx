@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { listAllOrders, listEvents, getEventProductCosts, getOptionCostDeltas, listDailyVisits, type DailyVisit } from "@/lib/data";
+import { listAllOrders, listEvents, getEffectiveListingCosts, getOptionCostDeltas, listDailyVisits, type DailyVisit } from "@/lib/data";
 import type { MarketEvent, Order, OrderStatus } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice, formatEventDateChip } from "@/lib/format";
@@ -40,7 +40,8 @@ export default function AdminSalesPage() {
       setOrders(allOrders);
       setEvents(allEvents);
       setOptionCosts(optCosts);
-      setListingCosts(await getEventProductCosts(allEvents.flatMap((e) => e.products.map((p) => p.id))));
+      // 회차별 원가가 없으면 상품 관리의 기본 원가로 대신한다(getEffectiveListingCosts).
+      setListingCosts(await getEffectiveListingCosts(allEvents));
     })();
     listDailyVisits(14)
       .then(setVisits)
@@ -136,7 +137,7 @@ export default function AdminSalesPage() {
 
           {report.missingCost.length > 0 && (
             <p className="mb-3 rounded-[9px] bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-              ⚠️ 원가가 입력 안 된 상품이 있어 원가 0원으로 계산했어요(마진이 실제보다 크게 보여요): {report.missingCost.join(", ")}. 이벤트 관리 화면에서 상품별 원가를 넣어 주세요.
+              ⚠️ 원가가 입력 안 된 상품이 있어 원가 0원으로 계산했어요(마진이 실제보다 크게 보여요): {report.missingCost.join(", ")}. 상품 관리에서 원가를 넣어 주세요(회차마다 원가가 다르면 이벤트 관리에서 따로 넣어도 돼요).
             </p>
           )}
 
