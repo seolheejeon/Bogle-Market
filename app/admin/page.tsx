@@ -21,6 +21,7 @@ import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL, COURIER_OPT
 import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { OrderDetailModal } from "@/components/admin/OrderDetailModal";
+import { OrderTallyPanel } from "@/components/admin/OrderTallyPanel";
 import { getAccessToken, sendPushToProfile } from "@/lib/push";
 import { isEventAdminEnded, isPaymentOverdue, UNPAID_CANCEL_REASON } from "@/lib/order-policy";
 
@@ -480,6 +481,8 @@ export default function AdminHomePage() {
           ),
         )}
       </div>
+
+      <OrderTallyPanel orders={orders} events={events} />
 
       {deliveryGroups.size > 0 && (
         <div className="mb-6 rounded-xl border border-border p-3.5">
