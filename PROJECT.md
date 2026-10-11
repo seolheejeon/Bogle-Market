@@ -113,6 +113,11 @@
   - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
   - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ✅(종료된 7/31 회차 주문 거부 확인) / 운영 ✅(사장님 실행), `2026-10-11_site-visits.sql` — 개발 ✅(기록 성공·손님 조회 차단 확인) / 운영 ✅
 
+**STG 사이트 이름 변경(bogle-market → bogle-market-stg) 대응 (2026-10-11)**
+- 사장님이 Netlify에서 STG 사이트 이름을 `bogle-market-stg`로 바꿈 → 옛 주소 `bogle-market.netlify.app`는 Netlify "Site not found". 카톡에서 링크가 안 열린 원인: 상품 미리보기(og:url)가 고정 기본값(옛 주소)으로 나가서 카톡이 그 주소로 열었음
+- 수정: 상품 페이지 og:url은 요청 host 헤더(x-forwarded-host) 기준(`lib/share.ts`의 `requestOrigin`), 그 외 기본값은 NEXT_PUBLIC_SITE_URL → Netlify `URL` → 운영 주소. STG 딱지 판별에 새 주소 추가(`EnvBadge`)
+- 이미 카톡에 올라간 옛 주소 링크는 살릴 수 없음(Netlify 사이트 이름이 없어져서) → 새 주소로 다시 공유. 운영 주소는 변경 없음
+
 **회차에서 상품을 뺐다 다시 넣으면 옛 주문 연결이 끊기는 문제 (2026-10-11)**
 - 발견: 운영 10/16 회차에서 마카오박을 뺐다 다시 넣어서(리스팅 새로 생성) 그전 주문의 `order_items.event_product_id`가 on delete set null로 비어 있었음 → 매출·방문에서 원가 0(마진 부풀림) + 원가 미입력 경고, 인기상품 집계에서도 빠짐(발주 집계는 상품 이름 기준이라 영향 없음)
 - 대응: ① 매출 원가를 리스팅으로 못 찾으면 주문에 남은 상품 이름으로 상품 관리 원가를 찾음(`getCatalogCostLookup`) ② 주문이 들어온 상품은 이벤트에서 "제거" 못 하게 막고 숨기기/마감 안내 ③ 끊긴 줄 복구 SQL `2026-10-11_relink-orphan-order-items.sql`(같은 회차에 같은 이름 상품이 하나일 때만 다시 이음, 1회성). 운영에서 복구 SQL 실행 완료(이름 같은 3줄 + 이름이 "마카오박 에그타르트"→"속초 마카오박"으로 바뀐 옛 줄 1개는 같은 회차 마카오박으로 직접 연결). 옵션은 상품 관리 저장 시 upsert로 id가 유지돼서 옵션 공급가는 영향 없음
@@ -501,7 +506,7 @@
 
 **상품 공유 (Web Share API + OG 메타태그)**
 - 배경: 카카오톡/오픈채팅/블로그 등으로 상품을 쉽게 퍼뜨릴 수 있게 해서 마케팅 효과를 노리는 요청. 나중에 추천인 시스템(`?ref=`)을 붙일 걸 감안해 URL 생성 로직을 분리해달라는 요구도 포함
-- **공유 URL 유틸**(`lib/share.ts`): `buildProductShareUrl(id, { ref })` 하나로 상품 공유 링크를 만듦 — `ref` 옵션은 지금 아무도 안 넘기지만, 추천인 기능이 생기면 이 자리에 코드만 채우면 됨. 서버(OG 메타태그 생성)에서는 `NEXT_PUBLIC_SITE_URL`(없으면 `https://bogle-market.netlify.app`)을 기준으로, 클라이언트(공유 버튼)에서는 실제 접속 도메인(`window.location.origin`)을 기준으로 절대 URL을 만듦
+- **공유 URL 유틸**(`lib/share.ts`): `buildProductShareUrl(id, { ref })` 하나로 상품 공유 링크를 만듦 — `ref` 옵션은 지금 아무도 안 넘기지만, 추천인 기능이 생기면 이 자리에 코드만 채우면 됨. 서버(OG 메타태그 생성)에서는 요청 host 기준(2026-10-11 변경, 아래 STG 이름 변경 참고)으로, 클라이언트(공유 버튼)에서는 실제 접속 도메인(`window.location.origin`)을 기준으로 절대 URL을 만듦
 - **공유 버튼**(`components/ShareButton.tsx`): 상품 상세 sticky 헤더의 뒤로가기 반대편(🔗)에 배치. `navigator.share` 지원 브라우저(대부분 모바일)는 네이티브 공유 시트를 띄우고(제목/가격/소개/링크 포함), 미지원(대부분 데스크톱)은 링크를 클립보드에 복사한 뒤 "상품 링크가 복사되었습니다." 토스트를 보여줌(복사 자체가 막힌 극단적인 경우엔 `window.prompt`로 최후 폴백)
 - **OG/Twitter 메타태그**(`app/(shop)/product/[id]/page.tsx`의 `generateMetadata`): 상품 상세는 이미 클라이언트 컴포넌트(`ProductDetailView`)라 서버에서 별도로 최소 데이터만 조회하는 `lib/og.ts`(anon key로 `event_products`+`products` 조인, 공개 데이터라 인증 불필요)를 새로 둠 — 페이지 컴포넌트 자체는 그대로 두고 같은 라우트 파일에 `generateMetadata`만 얹어서 카카오톡/트위터 크롤러가 og:title(상품명)/og:description(가격+한줄설명)/og:image(대표사진, Storage 공개 URL)/og:url/twitter:card를 받아가게 함
 - `tsc`/`build` 통과 확인. 프로덕션 빌드에서 실제 상품 페이지의 og:*/twitter:* 메타태그가 정확한 값(가격 포함 설명, Storage 이미지 URL, 배포 도메인 기준 og:url)으로 렌더링되는 것과, 공유 버튼 클릭 시 클립보드 복사 성공 → 토스트 노출까지 브라우저에서 직접 확인함(이 자동화 브라우저 자체는 클립보드 쓰기 권한이 막혀 있어 API를 임시로 성공하도록 바꿔치기해서 토스트 UI 자체의 동작을 검증 — 실제 배포 환경의 HTTPS+사용자 제스처 클릭에서는 이 문제가 없음). 실제 카카오톡 미리보기(진짜 카카오 크롤러가 og 태그를 어떻게 렌더링하는지)는 배포 후 실제로 카카오톡에 링크를 붙여넣어 확인 필요 — og 태그 자체는 표준 스펙대로 채워짐
