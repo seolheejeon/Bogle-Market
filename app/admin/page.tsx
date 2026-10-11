@@ -22,6 +22,7 @@ import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { OrderDetailModal } from "@/components/admin/OrderDetailModal";
 import { OrderTallyPanel } from "@/components/admin/OrderTallyPanel";
+import { buildOrdersCsv, downloadCsv } from "@/lib/order-export";
 import { getAccessToken, sendPushToProfile } from "@/lib/push";
 import { isEventAdminEnded, isPaymentOverdue, UNPAID_CANCEL_REASON } from "@/lib/order-policy";
 
@@ -524,6 +525,21 @@ export default function AdminHomePage() {
             className="rounded-[8px] border border-accent px-3 py-1.5 text-[12px] font-bold text-accent-dark"
           >
             신규 {filtered.length}건 모두 확인
+          </button>
+        )}
+        {/* 지금 필터로 보고 있는 주문 그대로 엑셀(CSV)로 — 발주·배송 정리용. */}
+        {filtered.length > 0 && (
+          <button
+            onClick={() => {
+              const stamp = new Date();
+              const pad = (n: number) => String(n).padStart(2, "0");
+              const name = `보글마켓_주문_${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}_${pad(stamp.getHours())}${pad(stamp.getMinutes())}.csv`;
+              const ordererName = (o: Order) => (o.profileId ? (profileById.get(o.profileId)?.name ?? o.recipientName) : (o.guestName ?? o.recipientName));
+              downloadCsv(name, buildOrdersCsv(filtered, eventById, ordererName));
+            }}
+            className="ml-auto rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-bold"
+          >
+            📥 엑셀 다운로드 ({filtered.length}건)
           </button>
         )}
       </div>
