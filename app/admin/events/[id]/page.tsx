@@ -525,6 +525,16 @@ function EventProductRow({
   const isEffectivelyClosed = !isListingOrderable(product);
 
   if (!editing) {
+    // 옵션별 가격 — 옵션 가격은 회차가 아니라 상품 관리에서 정하고 모든 회차에
+    // 바로 반영된다. 예전엔 여기 안 보여서 "회차에 반영이 안 됐다"고 오해해 상품을
+    // 뺐다 다시 넣는 일이 있었다(그러면 옛 주문 연결이 끊김).
+    const optionPriceNote = (() => {
+      const groups = (product.optionGroups ?? []).filter((g) => g.values.length > 0);
+      if (groups.length === 0) return null;
+      return groups
+        .map((g) => g.values.map((v) => `${v.name} ${formatPrice(product.price + v.priceDelta)}`).join(" / "))
+        .join(" · ");
+    })();
     const optionStockNote = (() => {
       const combos = generateStockCombos(product.optionGroups ?? []);
       if (combos.length === 0) return null;
@@ -557,6 +567,14 @@ function EventProductRow({
             <p className="text-[11.5px] text-text-muted">
               원가 {formatPrice(costPrice ?? 0)}(상품 관리) · 개당 예상수익 {formatPrice(profitPerItem)} · 판매 {soldQty}개 · 누적 예상수익 {formatPrice(totalProfit)}
             </p>
+            {optionPriceNote && (
+              <p className="text-[11.5px] text-text-muted">
+                옵션 판매가 {optionPriceNote}{" "}
+                <Link href="/admin/products" className="font-semibold text-accent-dark underline">
+                  (상품 관리에서 수정)
+                </Link>
+              </p>
+            )}
             {optionStockNote && <p className="truncate text-[11.5px] text-text-muted">{optionStockNote}</p>}
             <OrderDeadlineField product={product} onSaved={onSaved} />
           </div>
@@ -600,6 +618,14 @@ function EventProductRow({
             <p>
               판매 {soldQty}개 · 예상수익 {formatPrice(totalProfit)}
             </p>
+            {optionPriceNote && (
+              <p>
+                옵션 판매가 {optionPriceNote}{" "}
+                <Link href="/admin/products" className="font-semibold text-accent-dark underline">
+                  (상품 관리에서 수정)
+                </Link>
+              </p>
+            )}
             {optionStockNote && <p className="truncate">{optionStockNote}</p>}
             <OrderDeadlineField product={product} onSaved={onSaved} />
           </div>
