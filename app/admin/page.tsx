@@ -15,6 +15,7 @@ import {
   markOrdersChecked,
   setOrderDeliveryEditOpen,
   cancelUnpaidOrder,
+  listDailyVisits,
 } from "@/lib/data";
 import type { EventType, MarketEvent, Order, OrderStatus, Profile } from "@/types";
 import { ORDER_STATUS_LABEL, PAYMENT_METHOD_LABEL, EVENT_TYPE_LABEL, COURIER_OPTIONS, COURIER_LABEL, REFUND_REASON_LABEL } from "@/types";
@@ -22,6 +23,7 @@ import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { OrderDetailModal } from "@/components/admin/OrderDetailModal";
 import { OrderTallyPanel } from "@/components/admin/OrderTallyPanel";
+import { buildOrdersCsv, downloadCsv } from "@/lib/order-export";
 import { getAccessToken, sendPushToProfile } from "@/lib/push";
 import { isEventAdminEnded, isPaymentOverdue, UNPAID_CANCEL_REASON } from "@/lib/order-policy";
 
@@ -128,6 +130,13 @@ export default function AdminHomePage() {
   }, []);
   useEffect(() => {
     listAllProfiles().then(setProfiles);
+  }, []);
+  // 오늘 방문자 수(관리자 접속 제외) — 자세한 건 매출·방문 화면에서.
+  const [todayVisitors, setTodayVisitors] = useState<number | null>(null);
+  useEffect(() => {
+    listDailyVisits(1)
+      .then((v) => setTodayVisitors(v[0]?.visitors ?? 0))
+      .catch(() => setTodayVisitors(null));
   }, []);
 
   const eventById = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
@@ -460,6 +469,12 @@ export default function AdminHomePage() {
         <p className="text-[11.5px] font-semibold text-text-muted">오늘 매출</p>
         <p className="mt-0.5 text-xl font-extrabold">{formatPrice(todayRevenue)}</p>
         <p className="mt-0.5 text-[11px] text-text-muted">입금대기·취소·환불 주문은 제외한 금액이에요.</p>
+        <Link href="/admin/sales" className="mt-2 flex items-center justify-between rounded-[8px] bg-bg-sunken px-2.5 py-1.5 text-[12px]">
+          <span>
+            오늘 방문자 <strong>{todayVisitors ?? "-"}명</strong>
+          </span>
+          <span className="font-semibold text-accent-dark">이번 달 매출·마진 보기 ›</span>
+        </Link>
       </div>
 
       <div className="mb-6 grid grid-cols-3 gap-2 sm:grid-cols-5">
@@ -524,6 +539,21 @@ export default function AdminHomePage() {
             className="rounded-[8px] border border-accent px-3 py-1.5 text-[12px] font-bold text-accent-dark"
           >
             신규 {filtered.length}건 모두 확인
+          </button>
+        )}
+        {/* 지금 필터로 보고 있는 주문 그대로 엑셀(CSV)로 — 발주·배송 정리용. */}
+        {filtered.length > 0 && (
+          <button
+            onClick={() => {
+              const stamp = new Date();
+              const pad = (n: number) => String(n).padStart(2, "0");
+              const name = `보글마켓_주문_${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}_${pad(stamp.getHours())}${pad(stamp.getMinutes())}.csv`;
+              const ordererName = (o: Order) => (o.profileId ? (profileById.get(o.profileId)?.name ?? o.recipientName) : (o.guestName ?? o.recipientName));
+              downloadCsv(name, buildOrdersCsv(filtered, eventById, ordererName));
+            }}
+            className="ml-auto rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-bold"
+          >
+            📥 엑셀 다운로드 ({filtered.length}건)
           </button>
         )}
       </div>

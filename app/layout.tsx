@@ -4,6 +4,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { CartProvider } from "@/lib/cart-context";
 import { PwaRegister } from "@/components/PwaRegister";
 import { EnvBadge } from "@/components/EnvBadge";
+import { VisitTracker } from "@/components/VisitTracker";
 
 export const metadata: Metadata = {
   title: "보글마켓",
@@ -33,6 +34,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <PwaRegister />
         <EnvBadge />
         <AuthProvider>
+          <VisitTracker />
           <CartProvider>{children}</CartProvider>
         </AuthProvider>
       </body>

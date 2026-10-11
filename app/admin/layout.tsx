@@ -13,6 +13,7 @@ const NAV = [
   { href: "/admin", label: "운영 메인", icon: "🏠" },
   { href: "/admin/events", label: "이벤트 관리", icon: "🎪" },
   { href: "/admin/products", label: "상품 관리", icon: "📦" },
+  { href: "/admin/sales", label: "매출·방문", icon: "📈" },
   { href: "/admin/customers", label: "고객 관리", icon: "👥", groupBreak: true },
   { href: "/admin/banners", label: "배너 관리", icon: "🖼️" },
   { href: "/admin/notifications", label: "알림 발송", icon: "🔔" },
