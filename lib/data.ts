@@ -847,11 +847,20 @@ export async function listDailyVisits(days: number): Promise<DailyVisit[]> {
 // 관리 한 곳에서만 관리하고, 매출·방문 화면과 이벤트 관리의 예상 수익이 모두
 // 여기 값을 쓴다. (옵션별 공급가 추가분은 getOptionCostDeltas)
 export async function getListingCostsFromCatalog(events: MarketEvent[]): Promise<Record<string, number>> {
+  return (await getCatalogCostLookup(events)).byListing;
+}
+
+// 위와 같은 원가를 상품 이름으로도 찾을 수 있게 같이 돌려준다 — 회차에서 상품을
+// 뺐다 다시 넣으면 그전 주문의 order_items.event_product_id가 끊겨(null) 리스팅으로
+// 못 찾기 때문에, 매출 계산은 주문에 남은 상품 이름으로 한 번 더 찾는다.
+export async function getCatalogCostLookup(events: MarketEvent[]): Promise<{ byListing: Record<string, number>; byName: Record<string, number> }> {
   const catalog = await listCatalogProducts();
   const catalogCost = new Map(catalog.map((c) => [c.id, c.costPrice ?? 0]));
-  const result: Record<string, number> = {};
-  for (const p of events.flatMap((e) => e.products)) result[p.id] = catalogCost.get(p.catalogProductId) ?? 0;
-  return result;
+  const byListing: Record<string, number> = {};
+  for (const p of events.flatMap((e) => e.products)) byListing[p.id] = catalogCost.get(p.catalogProductId) ?? 0;
+  const byName: Record<string, number> = {};
+  for (const c of catalog) byName[c.name] = c.costPrice ?? 0;
+  return { byListing, byName };
 }
 
 // 옵션값별 공급가 추가분(관리자만) — 매출 관리의 원가 계산에 쓴다.
