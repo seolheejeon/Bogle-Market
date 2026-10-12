@@ -113,6 +113,10 @@
   - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
   - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ✅(종료된 7/31 회차 주문 거부 확인) / 운영 ✅(사장님 실행), `2026-10-11_site-visits.sql` — 개발 ✅(기록 성공·손님 조회 차단 확인) / 운영 ✅, `2026-10-11_coupons.sql` — 개발 ✅ / 운영 ✅
 
+**새로고침: 당겨서 새로고침 + 관리자 새로고침 버튼 (2026-10-12)**
+- `components/PullToRefresh.tsx`: 맨 위에서 아래로 당겼다 놓으면(70px 이상) `location.reload()`. 일반 크롬/사파리는 브라우저 기본 기능과 겹쳐 두 번 새로고침되지 않게 **홈 화면 설치 앱(display-mode standalone / iOS navigator.standalone)과 카카오톡 안 브라우저(UA KAKAOTALK)에서만** 켬. 가로 스와이프·이미 스크롤된 내부 영역(모달 등)에선 안 걸림
+- 관리자 헤더에 "⟳ 새로고침" 버튼(컴퓨터용)
+
 **쿠폰(코드 입력형) (2026-10-11)**
 - 결정: 쿠폰 먼저(포인트·자동 쿠폰은 다음 단계), 다른 할인과의 중복은 쿠폰마다 선택(`stackable`)
 - DB: `coupons`(코드 대소문자 무시 유니크, 정액/정률+최대할인, 최소주문금액, 기간, 선착순 `usage_limit`, 1인 `per_customer_limit`, 배송방식 제한, `stackable`, `active`) / `coupon_redemptions`(주문별 사용 기록, customer_key = 회원 id 또는 숫자만 남긴 연락처) / `orders.coupon_code`·`coupon_discount`. 쿠폰 표는 관리자만 읽음(코드 목록 노출 방지), 손님은 `validate_coupon` RPC로 코드 하나의 조건만 받음
