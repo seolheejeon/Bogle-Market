@@ -113,7 +113,12 @@
   - ⚠️ 앞으로 DB 스키마를 바꾸는 기능은 마이그레이션 SQL을 **개발/운영 Supabase 양쪽에** 실행해야 함(운영은 `prod` 병합 전에 먼저). 마이그레이션 파일은 `lib/supabase/migrations/`에 날짜순으로 두고, `schema.sql`에도 같은 내용을 반영
   - 마이그레이션 적용 현황: `2026-10-07_order-edit-depositor.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_event-combo-discounts.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_admin-order-flags.sql` — 개발 ✅ / 운영 ✅, `2026-10-07_drop-old-create-order.sql` — 개발 ✅ / 운영 해당 없음(원래 없음), `2026-10-11_admin-read-addresses.sql` — 개발 ✅ / 운영 ✅, `2026-10-11_order-event-deadline-check.sql` — 개발 ✅(종료된 7/31 회차 주문 거부 확인) / 운영 ✅(사장님 실행), `2026-10-11_site-visits.sql` — 개발 ✅(기록 성공·손님 조회 차단 확인) / 운영 ✅, `2026-10-11_coupons.sql` — 개발 ✅ / 운영 ✅
 
-**새로고침: 당겨서 새로고침 + 관리자 새로고침 버튼 (2026-10-12)**
+**⚠️ Netlify 크레딧 소진 (2026-10-12)**
+- 기능마다 STG·운영 두 사이트에 계속 배포해서 이번 달 Netlify 크레딧을 다 씀 → 팀 전체 production deploy 일시정지(사이트는 정상 동작, 새 코드 반영만 안 됨). 사장님 결정: 추가 결제 없이 다음 결제 주기까지 대기. 별도로 "17일 뒤 Free로 다운그레이드" 예정 안내가 있음(무료 요금제 한도 확인 필요)
+- 앞으로: 기능 확인은 로컬 빌드/개발 DB 직접 테스트로, main push·운영 반영은 모아서 하루 한 번(밤). 크레딧 복구 시 main의 미배포 커밋(당겨서 새로고침)이 STG에 자동 반영되고, 운영은 따로 merge 필요
+- 대안 검토 메모: Cloudflare(무료 한도 넉넉·상업 이용 가능, 이전 작업 하루 정도·주소 변경), Vercel Hobby는 상업 이용 불가
+
+**새로고침: 당겨서 새로고침 + 관리자 새로고침 버튼 (2026-10-12)** — 크레딧 소진으로 아직 미배포
 - `components/PullToRefresh.tsx`: 맨 위에서 아래로 당겼다 놓으면(70px 이상) `location.reload()`. 일반 크롬/사파리는 브라우저 기본 기능과 겹쳐 두 번 새로고침되지 않게 **홈 화면 설치 앱(display-mode standalone / iOS navigator.standalone)과 카카오톡 안 브라우저(UA KAKAOTALK)에서만** 켬. 가로 스와이프·이미 스크롤된 내부 영역(모달 등)에선 안 걸림
 - 관리자 헤더에 "⟳ 새로고침" 버튼(컴퓨터용)
 
