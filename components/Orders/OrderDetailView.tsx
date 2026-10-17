@@ -14,6 +14,7 @@ import { OrderStatusBadge } from "@/components/Badge";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
 import { SupportLinks } from "@/components/SupportLinks";
 import { AddressFields, type AddressFieldsValue } from "@/components/AddressFields";
+import { formatPhone } from "@/lib/phone";
 import { saveGuestLookup, useGuestLookup, useIsClient } from "@/lib/guest-session";
 
 const STEPS: { value: OrderStatus; label: string }[] = [
@@ -246,7 +247,7 @@ export function OrderDetailView({
               )}
               {event?.notice && <p className="mb-1 rounded-[8px] bg-bg-sunken px-2.5 py-1.5 text-[12px] whitespace-pre-line">📢 {event.notice}</p>}
               <p className="mb-1">
-                <span className="text-text-muted">받는 분</span> {order.recipientName} ({order.recipientPhone})
+                <span className="text-text-muted">받는 분</span> {order.recipientName} ({formatPhone(order.recipientPhone)})
               </p>
               <p className="mb-1">
                 <span className="text-text-muted">배송지</span> {order.addressSnapshot}
@@ -494,7 +495,7 @@ function EditDeliveryForm({
   onSave: (patch: Parameters<typeof updateOrderDelivery>[1]) => Promise<void>;
 }) {
   const [name, setName] = useState(order.recipientName);
-  const [phone, setPhone] = useState(order.recipientPhone);
+  const [phone, setPhone] = useState(formatPhone(order.recipientPhone));
   const [address, setAddress] = useState<AddressFieldsValue>({
     zonecode: "",
     roadAddress: order.roadAddress ?? "",
@@ -544,7 +545,7 @@ function EditDeliveryForm({
     <div className="mb-4 flex flex-col gap-2 rounded-[10px] border border-accent p-3">
       <p className="text-[12.5px] font-bold">배송지 · 연락처 수정</p>
       <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="받는 분 이름" value={name} onChange={(e) => setName(e.target.value)} />
-      <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 (010-0000-0000)" value={phone} onChange={(e) => setPhone(e.target.value)} />
+      <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 (010-0000-0000)" value={phone} inputMode="tel" onChange={(e) => setPhone(formatPhone(e.target.value))} />
       <AddressFields value={address} onChange={(patch) => setAddress((v) => ({ ...v, ...patch }))} showEntranceMethod={needsEntranceMethod} />
       {order.paymentMethod === "bank_transfer" && (
         <input

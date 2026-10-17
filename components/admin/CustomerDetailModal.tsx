@@ -5,6 +5,7 @@ import { formatDateTime, formatPrice } from "@/lib/format";
 import { OrderStatusBadge } from "@/components/Badge";
 import { Modal } from "@/components/admin/Modal";
 import { CopyButton } from "@/components/admin/CopyButton";
+import { formatPhone } from "@/lib/phone";
 import { naverMapSearchUrl, kakaoMapSearchUrl } from "@/lib/maps";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -73,8 +74,8 @@ export function CustomerDetailModal({
         </Row>
         <Row label="연락처">
           <span className="inline-flex items-center gap-1.5">
-            {profile.phone}
-            <CopyButton value={profile.phone} />
+            {formatPhone(profile.phone)}
+            <CopyButton value={formatPhone(profile.phone)} />
           </span>
         </Row>
         <Row label="가입일">{formatDateTime(profile.createdAt)}</Row>
