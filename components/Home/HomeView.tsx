@@ -110,6 +110,9 @@ export function HomeView() {
       const products = events
         .filter((e) => e.type === type && isEventOrderable(e))
         .flatMap((e) => e.products)
+        // 품절(재고 0)·상품별 마감은 순위에서 뺀다 — 많이 팔려서 품절된 상품이
+        // BEST 1·2·3을 다 차지해 지금 살 수 있는 상품이 안 보이는 문제.
+        .filter((p) => p.stock !== 0 && isListingOrderable(p))
         .map((p, order) => ({ p, order, rank: rankOf.get(p.id) }))
         .sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || a.order - b.order)
         .slice(0, 4);
