@@ -33,13 +33,15 @@ export default function AdminProductsPage() {
   // 운영 메인의 "품절 상품" 타일이 ?soldout=1로 들어온다 — 재고는 이벤트관리가
   // 아니라 여기(카탈로그)에서 관리되는 값이라, 여기서 걸러서 보여줘야
   // 실제로 뭐가 품절인지 알 수 있다.
-  const [soldoutOnly, setSoldoutOnly] = useState(false);
+  // 전체 / 판매중(품절 제외) / 품절만 — 전체로 볼 때도 품절은 맨 아래로 모아서
+  // 중간중간 섞여 헷갈리지 않게 한다.
+  const [stockFilter, setStockFilter] = useState<"all" | "available" | "soldout">("all");
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (searchParams.get("soldout") === "1") setSoldoutOnly(true);
+    if (searchParams.get("soldout") === "1") setStockFilter("soldout");
   }, [searchParams]);
 
   // listCatalogProducts()가 실패하면(예: 마이그레이션 미적용으로 존재하지
@@ -58,9 +60,11 @@ export default function AdminProductsPage() {
     if (!products) return [];
     const q = query.trim().toLowerCase();
     let result = q === "" ? products : products.filter((p) => p.name.toLowerCase().includes(q));
-    if (soldoutOnly) result = result.filter((p) => p.stock === 0);
-    return result;
-  }, [products, query, soldoutOnly]);
+    if (stockFilter === "soldout") result = result.filter((p) => p.stock === 0);
+    else if (stockFilter === "available") result = result.filter((p) => p.stock !== 0);
+    // 품절은 맨 아래로(같은 그룹 안에선 원래 순서 유지).
+    return [...result].sort((a, b) => Number(a.stock === 0) - Number(b.stock === 0));
+  }, [products, query, stockFilter]);
 
   async function onDelete(p: CatalogProduct) {
     if (!confirm(`"${p.name}" 상품을 삭제할까요?`)) return;
@@ -104,15 +108,26 @@ export default function AdminProductsPage() {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
-      <button
-        type="button"
-        onClick={() => setSoldoutOnly((v) => !v)}
-        className={`mb-3 rounded-full border px-3 py-1.5 text-[12px] font-semibold ${
-          soldoutOnly ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"
-        }`}
-      >
-        품절만 보기
-      </button>
+      <div className="mb-3 flex gap-1.5">
+        {(
+          [
+            ["all", `전체 ${products?.length ?? ""}`],
+            ["available", `판매중 ${products?.filter((p) => p.stock !== 0).length ?? ""}`],
+            ["soldout", `품절 ${products?.filter((p) => p.stock === 0).length ?? ""}`],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setStockFilter(key)}
+            className={`rounded-full border px-3 py-1.5 text-[12px] font-semibold ${
+              stockFilter === key ? "border-accent bg-accent-soft text-accent-dark" : "border-border text-text-muted"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {loadError && (
         <p className="mb-3 rounded-[9px] bg-bg-sunken px-3 py-2.5 text-[12px] font-semibold text-red-600">
@@ -121,7 +136,7 @@ export default function AdminProductsPage() {
       )}
       {products === null && !loadError && <p className="text-sm text-text-muted">불러오는 중...</p>}
       {products !== null && filtered.length === 0 && (
-        <p className="text-sm text-text-muted">{soldoutOnly ? "품절된 상품이 없어요." : "상품이 없어요."}</p>
+        <p className="text-sm text-text-muted">{stockFilter === "soldout" ? "품절된 상품이 없어요." : stockFilter === "available" ? "판매중인 상품이 없어요." : "상품이 없어요."}</p>
       )}
       <div className="flex flex-col gap-2">
         {filtered.map((p) =>

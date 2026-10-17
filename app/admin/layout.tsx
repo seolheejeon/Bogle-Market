@@ -46,9 +46,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <Image src="/images/bogle.png" alt="보글마켓 마스코트" width={28} height={28} className="object-contain" />
           보글마켓 관리자
         </Link>
-        <Link href="/mypage" className="text-[12.5px] text-text-muted">
-          {profile.nickname || profile.username}
-        </Link>
+        <div className="flex items-center gap-2.5">
+          {/* 새 주문 등을 바로 다시 불러오기 — 컴퓨터에서도 한 번에(휴대폰은 당겨서 새로고침도 됨). */}
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-[8px] border border-border px-2.5 py-1 text-[12px] font-semibold text-text-muted"
+          >
+            ⟳ 새로고침
+          </button>
+          <Link href="/mypage" className="text-[12.5px] text-text-muted">
+            {profile.nickname || profile.username}
+          </Link>
+        </div>
       </header>
       <nav className="flex flex-wrap items-center gap-0.5 overflow-x-auto border-b border-border px-5">
         {NAV.map((item) => {

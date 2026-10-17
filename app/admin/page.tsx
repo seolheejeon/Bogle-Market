@@ -193,6 +193,43 @@ export default function AdminHomePage() {
     refresh();
   }
 
+  // ---------- 여러 주문 한꺼번에 처리 ----------
+  // 사다드림처럼 30~40건을 한 번에 "배송시작"해야 할 때 카드마다 누르지 않도록,
+  // 체크한 주문들(지금 목록에 보이는 것만)을 같은 다음 단계로 한 번에 넘긴다.
+  // 상태가 서로 다르면 다음 단계도 달라서 막고, 택배는 송장번호가 필요해 배송시작
+  // 일괄 처리에서 뺀다. 회원에게 가는 알림은 하나씩 처리할 때와 똑같이 보낸다.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<string | null>(null);
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function runBulk(targets: Order[], next: OrderStatus) {
+    const label = NEXT_LABEL[targets[0].status] ?? "다음 단계";
+    if (!confirm(`선택한 ${targets.length}건을 "${label}" 처리할까요?\n회원 주문에는 알림도 같이 가요.`)) return;
+    const failed: string[] = [];
+    for (const [i, o] of targets.entries()) {
+      setBulkProgress(`${i + 1}/${targets.length}건 처리 중...`);
+      try {
+        await checkOrders([o.id]);
+        await updateOrderStatus(o.id, next);
+        await notifyStatusChange(o, next, eventById.get(o.eventId)?.title);
+      } catch {
+        failed.push(o.orderNumber);
+      }
+    }
+    setBulkProgress(null);
+    setSelectedIds(new Set());
+    refresh();
+    if (failed.length > 0) alert(`${targets.length - failed.length}건 완료, ${failed.length}건 실패했어요: ${failed.join(", ")}\n실패한 주문은 다시 시도해 주세요.`);
+  }
+
   async function advance(order: Order) {
     const next = NEXT_STATUS[order.status];
     if (!next) return;
@@ -628,6 +665,18 @@ export default function AdminHomePage() {
 
       {loading && <p className="text-sm text-text-muted">불러오는 중...</p>}
       {!loading && filtered.length === 0 && <p className="text-sm text-text-muted">해당하는 주문이 없어요.</p>}
+      {filtered.length > 0 && (
+        <label className="mb-2 flex w-fit cursor-pointer items-center gap-1.5 text-[12.5px] font-semibold text-text-muted">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-[var(--accent)]"
+            checked={filtered.every((o) => selectedIds.has(o.id))}
+            onChange={(e) => setSelectedIds(e.target.checked ? new Set(filtered.map((o) => o.id)) : new Set())}
+          />
+          지금 목록 전체 선택 ({filtered.length}건)
+          <span className="font-normal">— 예: 회차·발주확인으로 걸러서 전체 선택 → 배송시작</span>
+        </label>
+      )}
       <div className="flex flex-col gap-2">
         {filtered.map((o) => (
           <div
@@ -638,6 +687,15 @@ export default function AdminHomePage() {
           >
             <div className="mb-1.5 flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-[12px] text-text-muted">
+                {/* 여러 건 한꺼번에 처리용 선택 — 카드를 눌러 상세가 열리지 않게 막는다. */}
+                <input
+                  type="checkbox"
+                  aria-label="이 주문 선택"
+                  className="h-4 w-4 accent-[var(--accent)]"
+                  checked={selectedIds.has(o.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={() => toggleSelect(o.id)}
+                />
                 {isNewOrder(o) && <span className="rounded-md bg-red-600 px-1.5 py-0.5 text-[10.5px] font-extrabold text-white">NEW</span>}
                 {o.orderNumber} · {formatDateTime(o.createdAt)}
               </span>
@@ -749,6 +807,49 @@ export default function AdminHomePage() {
           </div>
         ))}
       </div>
+
+      {/* 아래 고정 바가 마지막 주문 카드를 가리지 않게 여백 */}
+      {selectedIds.size > 0 && <div className="h-20" />}
+      {/* 선택한 주문 일괄 처리 바 — 화면 아래에 고정. 지금 목록에 보이는 것만 대상. */}
+      {(() => {
+        const targets = filtered.filter((o) => selectedIds.has(o.id));
+        if (targets.length === 0) return null;
+        const statuses = new Set(targets.map((o) => o.status));
+        const common = statuses.size === 1 ? targets[0].status : null;
+        const next = common ? NEXT_STATUS[common] : undefined;
+        const hasParcel = targets.some((o) => eventById.get(o.eventId)?.type === "PARCEL");
+        const hasCancelRequest = targets.some((o) => o.cancelRequested);
+        const blocked = !next
+          ? common
+            ? "이 상태는 한꺼번에 넘길 다음 단계가 없어요."
+            : "상태가 같은 주문끼리만 한꺼번에 처리할 수 있어요. 상태 필터로 걸러서 선택해 주세요."
+          : next === "ship" && hasParcel
+            ? "택배 주문은 송장번호가 필요해서 하나씩 배송시작해 주세요."
+            : hasCancelRequest
+              ? "취소 요청이 있는 주문이 섞여 있어요. 그 주문은 먼저 승인/거절해 주세요."
+              : null;
+        return (
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-bg-card px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]">
+            <div className="mx-auto flex max-w-4xl flex-wrap items-center gap-2">
+              <span className="text-[13px] font-bold">{targets.length}건 선택</span>
+              {bulkProgress ? (
+                <span className="text-[12.5px] font-semibold text-accent-dark">{bulkProgress}</span>
+              ) : blocked ? (
+                <span className="text-[12px] text-red-600">{blocked}</span>
+              ) : (
+                <button onClick={() => void runBulk(targets, next!)} className="rounded-[9px] bg-accent px-4 py-2 text-[13px] font-bold text-white">
+                  선택한 {targets.length}건 {NEXT_LABEL[common!]}
+                </button>
+              )}
+              {!bulkProgress && (
+                <button onClick={() => setSelectedIds(new Set())} className="ml-auto text-[12px] font-semibold text-text-muted underline">
+                  선택 해제
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {selectedOrderId &&
         (() => {
