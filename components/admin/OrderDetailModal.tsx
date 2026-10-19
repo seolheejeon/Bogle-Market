@@ -7,6 +7,7 @@ import { OrderStatusBadge } from "@/components/Badge";
 import { Modal } from "@/components/admin/Modal";
 import { CopyButton } from "@/components/admin/CopyButton";
 import { naverMapSearchUrl, kakaoMapSearchUrl } from "@/lib/maps";
+import { formatPhone } from "@/lib/phone";
 import { DELIVERY_EDITABLE_STATUSES } from "@/lib/order-policy";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -139,8 +140,8 @@ export function OrderDetailModal({
             </Row>
             <Row label="연락처">
               <span className="inline-flex items-center gap-1.5">
-                {ordererProfile.phone}
-                <CopyButton value={ordererProfile.phone} />
+                {formatPhone(ordererProfile.phone)}
+                <CopyButton value={formatPhone(ordererProfile.phone)} />
               </span>
             </Row>
           </>
@@ -149,8 +150,8 @@ export function OrderDetailModal({
             <Row label="이름">{order.guestName ?? "비회원"} (비회원)</Row>
             <Row label="연락처">
               <span className="inline-flex items-center gap-1.5">
-                {order.guestPhone}
-                <CopyButton value={order.guestPhone} />
+                {formatPhone(order.guestPhone)}
+                <CopyButton value={formatPhone(order.guestPhone)} />
               </span>
             </Row>
             {/* 비회원이 확인번호를 잊고 문의하면 이름·연락처로 본인 확인 후 알려준다
@@ -171,38 +172,40 @@ export function OrderDetailModal({
         <Row label="이름">{order.recipientName}</Row>
         <Row label="연락처">
           <span className="inline-flex items-center gap-1.5">
-            {order.recipientPhone}
-            <CopyButton value={order.recipientPhone} />
+            {formatPhone(order.recipientPhone)}
+            <CopyButton value={formatPhone(order.recipientPhone)} />
           </span>
         </Row>
       </Section>
 
       <Section title="배송지">
-        {order.apartmentName && <Row label="건물명">🏢 {order.apartmentName}</Row>}
+        {order.apartmentName && (
+          <Row label="건물명">
+            <span className="inline-flex items-center gap-1.5">
+              🏢 {order.apartmentName}
+              <CopyButton value={order.apartmentName} />
+            </span>
+          </Row>
+        )}
         {hasStructuredAddress ? (
           <>
-            <Row label="주소">
-              <span className="inline-flex items-center gap-1.5">
-                {order.roadAddress}
-                <CopyButton value={order.roadAddress} />
-              </span>
-            </Row>
+            <Row label="주소">{order.roadAddress}</Row>
             <Row label="상세주소">
               <span className="inline-flex items-center gap-1.5">
                 {order.detailAddress || "-"}
                 <CopyButton value={order.detailAddress} />
               </span>
             </Row>
-            <Row label="출입방법">{order.entranceMethod || "-"}</Row>
+            <Row label="출입방법">
+              <span className="inline-flex items-center gap-1.5">
+                {order.entranceMethod || "-"}
+                <CopyButton value={order.entranceMethod} />
+              </span>
+            </Row>
             <Row label="배송메모">{order.deliveryMemo || "-"}</Row>
           </>
         ) : (
-          <Row label="주소">
-            <span className="inline-flex items-center gap-1.5">
-              {order.addressSnapshot}
-              <CopyButton value={order.addressSnapshot} />
-            </span>
-          </Row>
+          <Row label="주소">{order.addressSnapshot}</Row>
         )}
         <div className="mt-2 flex gap-1.5">
           <a href={naverMapSearchUrl(mapQuery)} target="_blank" rel="noreferrer" className="rounded-[7px] border border-border px-2.5 py-1 text-[11.5px] font-semibold">

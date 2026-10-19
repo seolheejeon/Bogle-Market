@@ -18,6 +18,7 @@ import { getCurrentPushSubscription, sendPushToSelf } from "@/lib/push";
 import { PAYMENT_METHODS, allowedPaymentMethods } from "@/lib/payments";
 import { EVENT_TYPE_LABEL, type EventType } from "@/types";
 import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/components/AddressFields";
+import { formatPhone } from "@/lib/phone";
 import { BankAccountInfo } from "@/components/BankAccountInfo";
 
 // 화면 곳곳에서 쓰는 순서(문고리 → 사다드림 → 택배)를 결제 방식 섹션에도
@@ -85,7 +86,7 @@ export function CheckoutView() {
   useEffect(() => {
     if (profile) {
       setName(profile.name);
-      setPhone(profile.phone);
+      setPhone(formatPhone(profile.phone));
       listAddresses(profile.id).then((list) => {
         setSavedAddresses(list);
         const def = list.find((a) => a.isDefault) ?? list[0];
@@ -445,7 +446,7 @@ export function CheckoutView() {
         <p className="mt-0 mb-2 text-[12.5px] font-bold text-text-muted">배송 정보</p>
         <div className="mb-2 flex flex-col gap-2">
           <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="받는 분 이름" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 (010-0000-0000)" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <input className="w-full rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="전화번호 (010-0000-0000)" value={phone} inputMode="tel" onChange={(e) => setPhone(formatPhone(e.target.value))} />
           {profile && savedAddresses.length > 0 && (
             <div className="flex flex-col gap-1.5">
               {savedAddresses.map((a) => (

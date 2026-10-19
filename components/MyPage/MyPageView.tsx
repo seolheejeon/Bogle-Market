@@ -8,6 +8,7 @@ import { AddressFields, EMPTY_ADDRESS_FIELDS, type AddressFieldsValue } from "@/
 import { SupportLinks } from "@/components/SupportLinks";
 import { ProductGridCard } from "@/components/ProductGridCard";
 import { getRecentlyViewedIds } from "@/lib/recently-viewed";
+import { formatPhone } from "@/lib/phone";
 import { getWishlistIds, wishlistKey } from "@/lib/wishlist";
 
 type UsernameStatus = "unchecked" | "checking" | "available" | "taken";
@@ -220,7 +221,7 @@ export function MyPageView() {
           />
           <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="이름" value={name} onChange={(e) => setName(e.target.value)} />
           <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="오픈채팅 닉네임" value={nickname} onChange={(e) => setNickname(e.target.value)} />
-          <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="휴대폰번호" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="휴대폰번호" value={phone} inputMode="tel" onChange={(e) => setPhone(formatPhone(e.target.value))} />
 
           <p className="mt-2 text-[12.5px] font-bold text-text-muted">기본 배송지</p>
           <AddressFields value={address} onChange={(patch) => setAddress((v) => ({ ...v, ...patch }))} />
@@ -266,7 +267,7 @@ function ProfilePanel({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(profile.name);
   const [nickname, setNickname] = useState(profile.nickname);
-  const [phone, setPhone] = useState(profile.phone);
+  const [phone, setPhone] = useState(formatPhone(profile.phone));
   const [newPassword, setNewPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -296,7 +297,7 @@ function ProfilePanel({
   function startEditing() {
     setName(profile.name);
     setNickname(profile.nickname);
-    setPhone(profile.phone);
+    setPhone(formatPhone(profile.phone));
     setNewPassword("");
     setError(null);
     cancelAddressEdit();
@@ -311,7 +312,7 @@ function ProfilePanel({
     }
     setSaving(true);
     try {
-      const result = await updateProfile({ name: name.trim(), nickname, phone });
+      const result = await updateProfile({ name: name.trim(), nickname, phone: phone.replace(/D/g, "") });
       if (result.error) {
         setError(result.error);
         return;
@@ -434,7 +435,7 @@ function ProfilePanel({
         {!editing ? (
           <>
             <div className="mt-1 text-[12.5px] text-text-muted">이름 {profile.name}</div>
-            <div className="mt-1 text-[12.5px] text-text-muted">{profile.phone}</div>
+            <div className="mt-1 text-[12.5px] text-text-muted">{formatPhone(profile.phone)}</div>
             {saved && <p className="mt-2 text-[11.5px] font-semibold text-accent-dark">저장했어요.</p>}
             <button className="mt-3 rounded-[8px] border border-border px-3 py-1.5 text-[12px] font-semibold" onClick={startEditing}>
               정보 수정
@@ -446,7 +447,7 @@ function ProfilePanel({
               <p className="text-[11.5px] font-bold text-text-muted">기본 정보</p>
               <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="이름" value={name} onChange={(e) => setName(e.target.value)} />
               <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="오픈채팅 닉네임" value={nickname} onChange={(e) => setNickname(e.target.value)} />
-              <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="휴대폰번호" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <input className="rounded-[9px] border border-border bg-bg-card px-3 py-2.5 text-[13px]" placeholder="휴대폰번호" value={phone} inputMode="tel" onChange={(e) => setPhone(formatPhone(e.target.value))} />
             </div>
 
             <div className="flex flex-col gap-2">
