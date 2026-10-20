@@ -69,7 +69,7 @@ export function CheckoutView() {
   const [batchId] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
-    listEvents().then(setEvents);
+    listEvents({ lite: true }).then(setEvents);
   }, []);
 
   function fieldsFromAddress(addr: Address): AddressFieldsValue {

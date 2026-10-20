@@ -36,7 +36,7 @@ export function CategoryView({ initialType }: { initialType?: EventType }) {
     // 노출 꺼둔 상품은 카테고리 그리드에 안 보이게 걸러두고, 종료된 지 하루
     // 지난 이벤트도 함께 걸러낸다(isEventVisibleToCustomers) — 종료 당일까지는
     // 계속 보이되 QtyControl이 "마감"으로 표시하고 담기를 막는다.
-    listEvents().then((all) =>
+    listEvents({ lite: true }).then((all) =>
       setEvents(
         all.filter(isEventVisibleToCustomers).map((e) => ({ ...e, products: e.products.filter((p) => p.visible !== false) })),
       ),

@@ -31,7 +31,7 @@ export function CartView() {
   const [collapsedTypes, setCollapsedTypes] = useState<Set<EventType>>(new Set());
 
   useEffect(() => {
-    listEvents().then(setEvents);
+    listEvents({ lite: true }).then(setEvents);
   }, []);
 
   function toggleType(type: EventType) {

@@ -29,7 +29,7 @@ export function HomeView() {
     // 노출 꺼둔 상품은 홈 화면 어디에도(히어로/마감임박/인기상품) 나오지 않게
     // 이벤트를 불러온 시점에 한 번만 걸러두고, 종료된 지 하루 지난 이벤트도
     // 함께 걸러낸다(isEventVisibleToCustomers).
-    listEvents().then((all) =>
+    listEvents({ lite: true }).then((all) =>
       setEvents(
         all.filter(isEventVisibleToCustomers).map((e) => ({ ...e, products: e.products.filter((p) => p.visible !== false) })),
       ),

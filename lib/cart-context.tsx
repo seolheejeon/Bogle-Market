@@ -158,7 +158,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   // 두는 다른 화면이 없는 것과 동일한 수준의 신선도로 충분).
   useEffect(() => {
     if (!hydrated) return;
-    listEvents()
+    listEvents({ lite: true })
       .then((events) => {
         const validIds = new Set<string>();
         for (const e of events) for (const p of e.products) if (p.visible !== false) validIds.add(p.id);
