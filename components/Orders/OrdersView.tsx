@@ -38,7 +38,7 @@ export function OrdersView() {
     if (profile) listOrdersForProfile(profile.id).then(setOrders);
   }, [profile]);
   useEffect(() => {
-    listEvents().then(setEvents);
+    listEvents({ lite: true }).then(setEvents);
   }, []);
 
   const eventById = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);

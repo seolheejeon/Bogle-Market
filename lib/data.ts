@@ -120,12 +120,22 @@ function orderNumber(): string {
 
 // ---------- Events / Products ----------
 
-export async function listEvents(): Promise<MarketEvent[]> {
+// 목록 화면(홈/카테고리/장바구니/체크아웃)은 상품의 상세설명(detail_blocks)과
+// 소개글(description)을 안 쓰는데, 이 둘이 상품마다 길어서(블록 안의 이미지 주소
+// 등) 전체 응답의 대부분을 차지한다 — 오픈런처럼 사람이 한꺼번에 몰리면 이
+// 용량이 그대로 응답 시간이 된다(테스트에서 152KB → 39KB, 응답 4분의 1).
+// lite=true면 이 두 컬럼만 빼고 가져온다(그 외 화면이 쓰는 필드는 그대로).
+// 상품 상세/관리자 화면은 상세설명이 필요하니 기본값(전체)을 그대로 쓴다.
+const LITE_PRODUCT_COLUMNS =
+  "id,name,emoji,photos,origin,weight,storage,eat,expiry_label,expiry_value,base_price,stock,min_qty,badge,shipping_fee,shipping_fee_type,free_shipping_threshold,shipping_fee_qty_unit,courier_code,fulfillment_type,ships_at,discount";
+
+export async function listEvents(options?: { lite?: boolean }): Promise<MarketEvent[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
+    const productColumns = options?.lite ? LITE_PRODUCT_COLUMNS : "*";
     const { data, error } = await supabase
       .from("events")
-      .select("*, event_products(*, products(*, product_option_groups(*, product_option_values(*))), event_option_stock(*))")
+      .select(`*, event_products(*, products(${productColumns}, product_option_groups(*, product_option_values(*))), event_option_stock(*))`)
       .order("deadline_at", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(mapSupabaseEvent);
