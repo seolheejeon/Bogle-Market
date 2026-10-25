@@ -941,9 +941,11 @@ export async function listDailyVisits(days: number): Promise<DailyVisit[]> {
   const byDay = new Map(dayKeys.map((d) => [d, { day: d, visitors: 0, pageViews: 0 }]));
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { data, error } = await supabase.from("site_visits").select("day, page_views").gte("day", dayKeys[0]);
-    if (error) throw error;
-    for (const row of data ?? []) {
+    // 방문자 1명이 하루 1줄이라 2주면 1000줄을 금방 넘는다(fetchAllRows 참고).
+    const rows = await fetchAllRows((from, to) =>
+      supabase.from("site_visits").select("day, page_views").gte("day", dayKeys[0]).order("day").order("visitor_id").range(from, to),
+    );
+    for (const row of rows) {
       const d = byDay.get(row.day);
       if (!d) continue;
       d.visitors += 1;
@@ -1388,12 +1390,27 @@ export async function listOrdersForProfile(profileId: string): Promise<Order[]> 
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+// Supabase는 한 번에 최대 1000줄만 돌려준다 — 넘으면 조용히 잘리므로(방문자 통계가
+// 그렇게 0명으로 보였음, 2026-10-25) 전체가 필요한 관리자 목록은 1000줄씩 끝까지 받는다.
+// range로 나눠 받으므로 build 안에서 순서가 고정되게 정렬해야 한다(중복·누락 방지).
+async function fetchAllRows<T>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>): Promise<T[]> {
+  const PAGE = 1000;
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE) return rows;
+  }
+}
+
 export async function listAllOrders(): Promise<Order[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { data, error } = await supabase.from("orders").select("*, order_items(*)").order("created_at", { ascending: false });
-    if (error) throw error;
-    return (data ?? []).map((row) => mapSupabaseOrder(row, (row.order_items ?? []).map(mapSupabaseOrderItem)));
+    const data = await fetchAllRows((from, to) =>
+      supabase.from("orders").select("*, order_items(*)").order("created_at", { ascending: false }).order("id").range(from, to),
+    );
+    return data.map((row) => mapSupabaseOrder(row, (row.order_items ?? []).map(mapSupabaseOrderItem)));
   }
   return loadOrders().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
@@ -1725,9 +1742,10 @@ export async function rejectRefund(orderId: string, reason?: string): Promise<vo
 export async function listAllProfiles(): Promise<Profile[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const { data, error } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
-    if (error) throw error;
-    return (data ?? []).map((row) => ({
+    const data = await fetchAllRows((from, to) =>
+      supabase.from("profiles").select("*").order("created_at", { ascending: false }).order("id").range(from, to),
+    );
+    return data.map((row) => ({
       id: row.id,
       username: row.username,
       name: row.name ?? "",
