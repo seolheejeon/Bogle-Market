@@ -102,12 +102,18 @@ export function comboKey(product: Pick<Product, "optionGroups">, optionValueIds:
 }
 
 // 이 옵션 조합의 남은 재고 — 재고관리 대상 값을 하나도 안 골랐으면 undefined
-// (무제한). 골랐는데 아직 이 조합에 대한 재고 행이 없으면 0(안전하게 품절
-// 취급 — 있어야 할 조합이 없다는 건 대개 아직 채워지지 않은 상태라서).
+// (무제한). 아직 이 조합의 재고 행이 없으면 카탈로그 기본 재고(조합을 이루는
+// 값들의 defaultStock 중 최솟값)로 본다. 상품을 회차에 넣은 "뒤에" 재고관리를
+// 켜면 행이 안 생기는데, 예전엔 여기서 0(품절)으로 봐서 관리자 화면·옵션 버튼은
+// "3개 남음"인데 담기지는 않았다(2026-10-25). 관리자 화면과 DB의
+// decrement_option_stock도 행이 없으면 같은 기본값을 쓴다.
 function comboStockFor(product: Pick<Product, "optionGroups" | "optionStockByCombo">, optionValueIds: string[]): number | undefined {
-  const key = comboKey(product, optionValueIds);
-  if (key === "") return undefined;
-  return product.optionStockByCombo?.[key] ?? 0;
+  const ids = comboValueIds(product, optionValueIds);
+  if (ids.length === 0) return undefined;
+  const stored = product.optionStockByCombo?.[ids.join(",")];
+  if (stored !== undefined) return stored;
+  const values = (product.optionGroups ?? []).flatMap((g) => g.values).filter((v) => ids.includes(v.id));
+  return values.length > 0 ? Math.min(...values.map((v) => v.defaultStock ?? 0)) : 0;
 }
 
 // 이 옵션 조합으로 담을 수 있는 최대 수량 — 리스팅 자체 재고(stock)와 선택된
