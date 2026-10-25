@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { listAllProfiles, getDefaultAddress, listOrdersForProfile, listAllOrders } from "@/lib/data";
 import { formatAddress, type Address, type Order, type Profile } from "@/types";
 import { formatDateTime } from "@/lib/format";
+import { formatPhone } from "@/lib/phone";
 import { CustomerDetailModal } from "@/components/admin/CustomerDetailModal";
 
 interface CustomerRow {
@@ -20,6 +21,7 @@ export default function AdminCustomersPage() {
   const searchParams = useSearchParams();
   const [rows, setRows] = useState<CustomerRow[] | null>(null);
   const [apartmentFilter, setApartmentFilter] = useState("all");
+  const [query, setQuery] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   // 비회원 주문자 수 — 이름+연락처가 같으면 같은 사람으로 본다(취소 주문 포함, 주문한 적 있는 사람 기준).
   const [guestCount, setGuestCount] = useState<number | null>(null);
@@ -55,10 +57,21 @@ export default function AdminCustomersPage() {
   // 검색 결과가 공동주택이 아닌 회원(아파트명이 빈 값)은 필터 목록에서 제외.
   const apartments = useMemo(() => Array.from(new Set((rows ?? []).map((r) => r.address?.apartmentName).filter((v): v is string => !!v))).sort(), [rows]);
 
-  const filteredRows = useMemo(
-    () => (apartmentFilter === "all" ? rows : (rows ?? []).filter((r) => r.address?.apartmentName === apartmentFilter)),
-    [rows, apartmentFilter],
-  );
+  // 이름·닉네임·아이디·전화번호·아파트·주소 어디든 들어 있으면 찾는다. 전화번호는
+  // 하이픈 유무와 상관없이 숫자로도 맞춰 본다(예: "1111" → 010-1111-2222).
+  const filteredRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const qDigits = q.replace(/\D/g, "");
+    return (rows ?? []).filter((r) => {
+      if (apartmentFilter !== "all" && r.address?.apartmentName !== apartmentFilter) return false;
+      if (!q) return true;
+      const p = r.profile;
+      const text = [p.name, p.nickname, p.username, p.phone, r.address?.apartmentName, r.address ? formatAddress(r.address) : ""].join(" ").toLowerCase();
+      if (text.includes(q)) return true;
+      // 숫자(와 하이픈·공백)만 친 경우에만 전화번호 숫자 비교 — "a1b2c3" 같은 건 제외.
+      return qDigits.length >= 3 && qDigits === q.replace(/[\s-]/g, "") && (p.phone ?? "").replace(/\D/g, "").includes(qDigits);
+    });
+  }, [rows, apartmentFilter, query]);
 
   const selectedRow = rows?.find((r) => r.profile.id === selectedProfileId) ?? null;
 
@@ -87,6 +100,13 @@ export default function AdminCustomersPage() {
           <p className="mt-0.5 text-[11.5px] font-semibold text-text-muted">비회원 주문자</p>
         </div>
       </div>
+      <input
+        type="search"
+        className="mb-2 w-full rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
+        placeholder="이름·닉네임·아이디·전화번호·아파트로 검색"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
       {apartments.length > 0 && (
         <select
           className="mb-4 rounded-[9px] border border-border bg-bg-card px-3 py-2 text-[13px]"
@@ -101,7 +121,13 @@ export default function AdminCustomersPage() {
           ))}
         </select>
       )}
-      {apartmentFilter !== "all" && <p className="mb-2 text-[12.5px] font-semibold text-accent-dark">{apartmentFilter} 회원 {filteredCustomerCount}명</p>}
+      {(apartmentFilter !== "all" || query.trim()) && (
+        <p className="mb-2 text-[12.5px] font-semibold text-accent-dark">
+          {apartmentFilter !== "all" && `${apartmentFilter} `}
+          {query.trim() && `"${query.trim()}" 검색 `}
+          회원 {filteredCustomerCount}명
+        </p>
+      )}
       <div className="flex flex-col gap-2">
         {(filteredRows ?? []).map(({ profile, address, orders }) => {
           const lastOrderAt = orders[0]?.createdAt ?? null;
@@ -115,7 +141,7 @@ export default function AdminCustomersPage() {
                 <span className="shrink-0 text-[11.5px] text-text-muted">아이디 {profile.username}</span>
               </div>
               <p className="mt-1 text-[12.5px] text-text-muted">오픈채팅 닉네임 {profile.nickname}</p>
-              <p className="mt-1 text-[12.5px] text-text-muted">{profile.phone}</p>
+              <p className="mt-1 text-[12.5px] text-text-muted">{formatPhone(profile.phone)}</p>
               {address?.apartmentName && <p className="mt-1 text-[12.5px] font-semibold text-text-muted">🏢 {address.apartmentName}</p>}
               <p className="mt-1 text-[12.5px] text-text-muted">{address ? formatAddress(address) : "등록된 배송지 없음"}</p>
               <p className="mt-1.5 text-[12px] font-semibold text-accent-dark">
@@ -125,7 +151,7 @@ export default function AdminCustomersPage() {
           );
         })}
         {rows.length === 0 && <p className="text-[12.5px] text-text-muted">가입한 회원이 없어요.</p>}
-        {rows.length > 0 && (filteredRows ?? []).length === 0 && <p className="text-[12.5px] text-text-muted">해당 아파트에 가입한 회원이 없어요.</p>}
+        {rows.length > 0 && (filteredRows ?? []).length === 0 && <p className="text-[12.5px] text-text-muted">조건에 맞는 회원이 없어요.</p>}
       </div>
 
       {selectedRow && (
