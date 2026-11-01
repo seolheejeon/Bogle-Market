@@ -45,7 +45,7 @@ import type {
   StoreSettings,
 } from "@/types";
 import { EMPTY_STORE_SETTINGS } from "@/types";
-import { canEditOrderDelivery, isEventOrderable, isListingOrderable } from "@/lib/order-policy";
+import { canEditOrderDelivery, isEventOrderable, isListingBeforeOpen, isListingOrderable } from "@/lib/order-policy";
 import { generateStockCombos, comboValueIds } from "@/lib/product-options";
 import { resolveListingId } from "@/lib/banner-link";
 
@@ -86,6 +86,7 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     visible: listing.visible,
     closed: listing.closed ?? false,
     orderDeadlineAt: listing.orderDeadlineAt,
+    orderOpenAt: listing.orderOpenAt,
     discount: catalog?.discount,
     optionGroups: mergeOptionStock(catalog?.optionGroups, listing.optionStock),
     // listing.optionStock은 이미 comboKey -> stock 맵이라 그대로 내려주면 된다.
@@ -675,6 +676,7 @@ export interface EventProductPatch {
   // null이면 명시적으로 지운다(예약 마감 해제) — undefined(patch에 아예 없음)와
   // 구분해야 해서 "stock"과 같은 `"orderDeadlineAt" in patch` 패턴을 쓴다.
   orderDeadlineAt?: string | null;
+  orderOpenAt?: string | null;
 }
 
 export async function updateEventProduct(eventProductId: string, patch: EventProductPatch): Promise<void> {
@@ -686,6 +688,7 @@ export async function updateEventProduct(eventProductId: string, patch: EventPro
     if (patch.visible !== undefined) row.visible = patch.visible;
     if (patch.closed !== undefined) row.closed = patch.closed;
     if ("orderDeadlineAt" in patch) row.order_deadline_at = patch.orderDeadlineAt ?? null;
+    if ("orderOpenAt" in patch) row.order_open_at = patch.orderOpenAt ?? null;
     if (Object.keys(row).length > 0) {
       const { error } = await supabase.from("event_products").update(row).eq("id", eventProductId);
       if (error) throw error;
@@ -702,7 +705,12 @@ export async function updateEventProduct(eventProductId: string, patch: EventPro
       ...e,
       products: e.products.map((p) =>
         p.id === eventProductId
-          ? { ...p, ...patch, orderDeadlineAt: "orderDeadlineAt" in patch ? (patch.orderDeadlineAt ?? undefined) : p.orderDeadlineAt }
+          ? {
+              ...p,
+              ...patch,
+              orderDeadlineAt: "orderDeadlineAt" in patch ? (patch.orderDeadlineAt ?? undefined) : p.orderDeadlineAt,
+              orderOpenAt: "orderOpenAt" in patch ? (patch.orderOpenAt ?? undefined) : p.orderOpenAt,
+            }
           : p,
       ),
     })),
@@ -1307,7 +1315,7 @@ function assertStockAvailable(events: MarketEventSeed[], items: OrderItem[]): vo
     if (!listing || isListingOrderable(listing)) continue;
     const catalogId = catalogIdByListing.get(i.productId);
     const name = catalogId ? catalogById.get(catalogId)?.name : undefined;
-    throw new Error(`${name ?? "이 상품"}은(는) 마감되어 더 이상 주문할 수 없어요.`);
+    throw new Error(`${name ?? "이 상품"}은(는) ${isListingBeforeOpen(listing) ? "아직 주문 오픈 전이에요." : "마감되어 더 이상 주문할 수 없어요."}`);
   }
 
   const requestedByCatalog = new Map<string, number>();
@@ -2219,6 +2227,7 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     visible: row.visible ?? true,
     closed: row.closed ?? false,
     orderDeadlineAt: row.order_deadline_at ?? undefined,
+    orderOpenAt: row.order_open_at ?? undefined,
     discount: catalog.discount ?? undefined,
     optionGroups: mergeSupabaseOptionStock(mapSupabaseOptionGroups(catalog.product_option_groups), row.event_option_stock),
     optionStockByCombo: optionStockByComboFromRows(row.event_option_stock),

@@ -6,7 +6,10 @@ import { useRouter } from "next/navigation";
 import { getEvent } from "@/lib/data";
 import type { MarketEvent } from "@/types";
 import { formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
-import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
+import { isEventOrderable, isListingBeforeOpen, isListingClosed } from "@/lib/order-policy";
+import { formatOpenCountdown } from "@/lib/format";
+import { useRerenderAt } from "@/lib/use-rerender-at";
+import { Countdown } from "@/components/Countdown";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
@@ -20,6 +23,9 @@ export function EventDetailView({ eventId }: { eventId: string }) {
     // 노출 꺼둔 상품은 이벤트 상세의 상품 목록에서도 숨긴다.
     getEvent(eventId).then((e) => setEvent(e ? { ...e, products: e.products.filter((p) => p.visible !== false) } : e));
   }, [eventId]);
+
+  // 예약 오픈 상품이 있으면 정각에 새로고침 없이 "담기"로 바뀌게 다시 그린다.
+  useRerenderAt((event?.products ?? []).map((p) => p.orderOpenAt));
 
   if (event === undefined) return <p className="p-4 text-sm text-text-muted">불러오는 중...</p>;
   if (event === null) return <p className="p-4 text-sm text-text-muted">이벤트를 찾을 수 없어요.</p>;
@@ -59,7 +65,8 @@ export function EventDetailView({ eventId }: { eventId: string }) {
             // 이벤트는 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰거나
             // (수동 product.closed) 예약 마감시간(orderDeadlineAt)이 지났을
             // 수 있다 — 셋 중 하나만 참이어도 이 줄은 마감 취급한다.
-            const itemClosed = closed || !isListingOrderable(product);
+            const itemClosed = closed || isListingClosed(product);
+            const beforeOpen = !itemClosed && isListingBeforeOpen(product);
             return (
             <div key={product.id} className="flex items-center gap-3 border-b border-border py-3 last:border-none">
               <Link href={`/product/${product.id}`} className="block h-[52px] w-[52px] shrink-0">
@@ -77,7 +84,9 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                 </div>
                 <p className="text-[13.5px] font-bold">{priceLabel(product)}</p>
               </div>
-              {!itemClosed && product.stock !== 0 && hasRequiredOptions(product) ? (
+              {beforeOpen && product.orderOpenAt ? (
+                <Countdown targetIso={product.orderOpenAt} format={formatOpenCountdown} className="shrink-0 rounded-full bg-accent-soft px-2.5 py-1.5 text-[11px] font-bold text-accent-dark" />
+              ) : !itemClosed && product.stock !== 0 && hasRequiredOptions(product) ? (
                 <Link
                   href={`/product/${product.id}`}
                   className="shrink-0 rounded-full border border-accent px-3 py-1.5 text-[11.5px] font-bold text-accent"

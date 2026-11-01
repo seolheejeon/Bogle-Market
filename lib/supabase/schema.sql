@@ -183,6 +183,9 @@ create table if not exists event_products (
   -- 주문을 막지만(create_order RPC), closed와 달리 관리자가 이 값을 지우거나
   -- 미래로 늦추면 그 즉시 다시 열린다("재고 추가 확보되면 다시 열기" 용도).
   order_deadline_at timestamptz,
+  -- 이 리스팅의 주문 오픈 시각(예약 오픈) — 이 시각 전에는 상품은 보이지만 주문은
+  -- 막힌다(손님 화면엔 카운트다운). null이면 바로 주문 가능. 2026-11-01 추가.
+  order_open_at timestamptz,
   -- 이 이벤트 안에서 상품이 노출되는 순서(오름차순) — 이벤트마다 독립적으로
   -- 관리자가 ▲▼로 바꿀 수 있다. 새로 추가되는 리스팅은 맨 뒤로 붙도록 그
   -- 시점의 최댓값+1로 채워진다. 관리자가 "마감"을 누르면 이 값을 맨 뒤로
@@ -1165,6 +1168,19 @@ begin
     limit 1
   loop
     raise exception '%은(는) 마감되어 더 이상 주문할 수 없어요.', v_closed_item.name;
+  end loop;
+
+  -- 예약 오픈(order_open_at) 서버 검증 — 손님 화면은 오픈 전에 담기 버튼을 막지만,
+  -- 휴대폰 시계가 틀렸거나 RPC를 직접 부르는 경우까지 여기서 막는다(서버 시각 기준).
+  for v_closed_item in
+    select p.name
+    from jsonb_array_elements(p_items) as i
+    join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
+    join products p on p.id = ep.product_id
+    where ep.order_open_at is not null and ep.order_open_at > now()
+    limit 1
+  loop
+    raise exception '%은(는) 아직 주문 오픈 전이에요.', v_closed_item.name;
   end loop;
 
   -- 최소 구매 수량 서버 검증 — 상품상세/장바구니에서 이미 막지만, RPC를 직접

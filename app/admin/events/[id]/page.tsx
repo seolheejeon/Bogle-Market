@@ -19,7 +19,7 @@ import { describeVarietyTiers, sortedVarietyTiers } from "@/lib/discount";
 import { EVENT_TYPE_LABEL } from "@/types";
 import { formatPrice, toDateInputValue, dateInputValueToIso } from "@/lib/format";
 import { generateStockCombos } from "@/lib/product-options";
-import { isListingOrderable } from "@/lib/order-policy";
+import { isListingBeforeOpen, isListingClosed } from "@/lib/order-policy";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { useUnsavedChangesGuard } from "@/lib/useUnsavedChangesGuard";
 
@@ -522,7 +522,8 @@ function EventProductRow({
   // 막혀있는지 여부 — 뱃지 표시는 이 값을 써야 예약 마감으로 자동 막힌
   // 경우도 놓치지 않는다.
   const isClosed = product.closed === true;
-  const isEffectivelyClosed = !isListingOrderable(product);
+  const isEffectivelyClosed = isListingClosed(product);
+  const isBeforeOpen = !isEffectivelyClosed && isListingBeforeOpen(product);
 
   if (!editing) {
     // 옵션별 가격 — 옵션 가격은 회차가 아니라 상품 관리에서 정하고 모든 회차에
@@ -558,6 +559,7 @@ function EventProductRow({
               {product.name}
               {!isVisible && <span className="ml-1.5 rounded-md bg-bg-sunken px-1.5 py-0.5 text-[10.5px] font-bold text-text-muted">숨김</span>}
               {isEffectivelyClosed && <span className="ml-1.5 rounded-md bg-red-50 px-1.5 py-0.5 text-[10.5px] font-bold text-red-600">마감</span>}
+              {isBeforeOpen && <span className="ml-1.5 rounded-md bg-accent-soft px-1.5 py-0.5 text-[10.5px] font-bold text-accent-dark">오픈 예정</span>}
             </p>
             <p className="text-[12px] text-text-muted">
               {formatPrice(product.price)} · {EVENT_TYPE_LABEL[product.deliveryType ?? eventType]}
@@ -576,6 +578,7 @@ function EventProductRow({
               </p>
             )}
             {optionStockNote && <p className="truncate text-[11.5px] text-text-muted">{optionStockNote}</p>}
+            <OrderDeadlineField product={product} onSaved={onSaved} kind="open" />
             <OrderDeadlineField product={product} onSaved={onSaved} />
           </div>
           <div className="flex flex-wrap justify-end gap-1.5">
@@ -603,6 +606,7 @@ function EventProductRow({
               {product.name}
               {!isVisible && <span className="ml-1.5 rounded-md bg-bg-sunken px-1.5 py-0.5 text-[10.5px] font-bold text-text-muted">숨김</span>}
               {isEffectivelyClosed && <span className="ml-1.5 rounded-md bg-red-50 px-1.5 py-0.5 text-[10.5px] font-bold text-red-600">마감</span>}
+              {isBeforeOpen && <span className="ml-1.5 rounded-md bg-accent-soft px-1.5 py-0.5 text-[10.5px] font-bold text-accent-dark">오픈 예정</span>}
             </p>
           </div>
           <div className="flex flex-col gap-0.5 text-[12px] text-text-muted">
@@ -627,6 +631,7 @@ function EventProductRow({
               </p>
             )}
             {optionStockNote && <p className="truncate">{optionStockNote}</p>}
+            <OrderDeadlineField product={product} onSaved={onSaved} kind="open" />
             <OrderDeadlineField product={product} onSaved={onSaved} />
           </div>
           <div className="grid grid-cols-2 gap-1.5">
@@ -737,8 +742,12 @@ function EventProductRow({
 // 다시 열고 싶으면 이 값을 지우거나(예약 자체를 없앰) 미래로 늦추면 된다 —
 // blur 즉시 저장하는 방식이라(OptionStockField와 동일한 패턴) 별도 저장
 // 버튼이 없다.
-function OrderDeadlineField({ product, onSaved }: { product: Product; onSaved: () => void }) {
-  const initial = product.orderDeadlineAt ? toLocalInputValue(product.orderDeadlineAt) : "";
+// kind="open"이면 같은 입력칸으로 예약 오픈(orderOpenAt) 시각을 정한다 — 그 전엔 손님
+// 화면에 카운트다운만 뜨고 주문이 막히며, 정각이 되면 새로고침 없이 열린다.
+function OrderDeadlineField({ product, onSaved, kind = "deadline" }: { product: Product; onSaved: () => void; kind?: "deadline" | "open" }) {
+  const field = kind === "open" ? "orderOpenAt" : "orderDeadlineAt";
+  const current = product[field];
+  const initial = current ? toLocalInputValue(current) : "";
   const [value, setValue] = useState(initial);
   const [saving, setSaving] = useState(false);
 
@@ -752,7 +761,7 @@ function OrderDeadlineField({ product, onSaved }: { product: Product; onSaved: (
   async function save(next: string) {
     setSaving(true);
     try {
-      await updateEventProduct(product.id, { orderDeadlineAt: next ? new Date(next).toISOString() : null });
+      await updateEventProduct(product.id, { [field]: next ? new Date(next).toISOString() : null });
       onSaved();
     } catch (e) {
       alert(e instanceof Error ? e.message : "저장 중 오류가 발생했어요.");
@@ -761,12 +770,16 @@ function OrderDeadlineField({ product, onSaved }: { product: Product; onSaved: (
     }
   }
 
-  const passed = product.orderDeadlineAt ? new Date(product.orderDeadlineAt).getTime() <= Date.now() : false;
+  const passed = current ? new Date(current).getTime() <= Date.now() : false;
 
   return (
     <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-text-muted">
       <span className="shrink-0">
-        발주 마감 예약{passed && !product.closed && <span className="ml-1 font-bold text-red-600">(지남 — 자동 마감됨)</span>}
+        {kind === "open" ? (
+          <>주문 오픈 예약{current && (passed ? <span className="ml-1 font-bold text-accent-dark">(오픈됨)</span> : <span className="ml-1 font-bold text-accent-dark">(오픈 전 — 주문 막힘)</span>)}</>
+        ) : (
+          <>발주 마감 예약{passed && !product.closed && <span className="ml-1 font-bold text-red-600">(지남 — 자동 마감됨)</span>}</>
+        )}
       </span>
       <input
         type="datetime-local"
@@ -776,7 +789,7 @@ function OrderDeadlineField({ product, onSaved }: { product: Product; onSaved: (
         onChange={(e) => setValue(e.target.value)}
         onBlur={() => value !== initial && save(value)}
       />
-      {product.orderDeadlineAt && (
+      {current && (
         <button
           type="button"
           disabled={saving}

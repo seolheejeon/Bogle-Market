@@ -111,8 +111,19 @@ export function isEventAdminEnded(event: Pick<MarketEvent, "type" | "status" | "
 // 이른 경우)은 orderDeadlineAt만 지나 있어도 closed 없이 자동으로 막히고,
 // 관리자가 그 값을 지우거나 미래로 늦추면 다시 열린다 — closed는 "지금
 // 당장" 끄는 수동 스위치라 시간이 지나도 저절로 안 풀린다는 점이 다르다.
-export function isListingOrderable(product: Pick<Product, "closed" | "orderDeadlineAt">): boolean {
-  if (product.closed) return false;
-  if (product.orderDeadlineAt && new Date(product.orderDeadlineAt).getTime() <= Date.now()) return false;
-  return true;
+export function isListingOrderable(product: Pick<Product, "closed" | "orderDeadlineAt" | "orderOpenAt">): boolean {
+  return !isListingClosed(product) && !isListingBeforeOpen(product);
+}
+
+// 마감(수동 마감 또는 예약 마감시간 지남)만 따진다 — 오픈 전 상품은 마감이 아니라
+// 홈 인기상품·추천에는 그대로 보여주고("곧 오픈"), 주문만 막는다(isListingOrderable).
+export function isListingClosed(product: Pick<Product, "closed" | "orderDeadlineAt">): boolean {
+  if (product.closed) return true;
+  return !!product.orderDeadlineAt && new Date(product.orderDeadlineAt).getTime() <= Date.now();
+}
+
+// 예약 오픈 전인지 — 오픈 시각(orderOpenAt)이 아직 안 됐으면 true. 실제 차단은 서버
+// (create_order)가 서버 시각으로 한 번 더 한다(휴대폰 시계가 틀려도 막힘).
+export function isListingBeforeOpen(product: Pick<Product, "orderOpenAt">): boolean {
+  return !!product.orderOpenAt && new Date(product.orderOpenAt).getTime() > Date.now();
 }
