@@ -130,14 +130,15 @@ function orderNumber(): string {
 const LITE_PRODUCT_COLUMNS =
   "id,name,emoji,photos,origin,weight,storage,eat,expiry_label,expiry_value,base_price,stock,min_qty,max_qty,badge,shipping_fee,shipping_fee_type,free_shipping_threshold,shipping_fee_qty_unit,courier_code,fulfillment_type,ships_at,discount";
 
+function eventSelect(lite?: boolean): string {
+  const productColumns = lite ? LITE_PRODUCT_COLUMNS : "*";
+  return `*, event_products(*, products(${productColumns}, product_option_groups(*, product_option_values(*))), event_option_stock(*))`;
+}
+
 export async function listEvents(options?: { lite?: boolean }): Promise<MarketEvent[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const productColumns = options?.lite ? LITE_PRODUCT_COLUMNS : "*";
-    const { data, error } = await supabase
-      .from("events")
-      .select(`*, event_products(*, products(${productColumns}, product_option_groups(*, product_option_values(*))), event_option_stock(*))`)
-      .order("deadline_at", { ascending: true });
+    const { data, error } = await supabase.from("events").select(eventSelect(options?.lite)).order("deadline_at", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(mapSupabaseEvent);
   }
@@ -151,12 +152,30 @@ export async function listEvents(options?: { lite?: boolean }): Promise<MarketEv
   }));
 }
 
+// 회차 하나만 조회 — 예전엔 모든 회차의 모든 상품(상세설명 포함)을 받아서 그중 하나를
+// 골랐다. 인기 상품 오픈 때 손님들이 상품 상세를 계속 새로고침하자 그 큰 조회가 몰려
+// DB가 느려지고 화면이 깜빡였다(2026-11-01) — 필요한 회차만 받는다.
 export async function getEvent(id: string): Promise<MarketEvent | null> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.from("events").select(eventSelect()).eq("id", id).maybeSingle();
+    if (error) throw error;
+    return data ? mapSupabaseEvent(data) : null;
+  }
   const events = await listEvents();
   return events.find((e) => e.id === id) ?? null;
 }
 
 export async function findProductWithEvent(productId: string): Promise<{ product: Product; event: MarketEvent } | null> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data: listing, error } = await supabase.from("event_products").select("event_id").eq("id", productId).maybeSingle();
+    if (error) throw error;
+    if (!listing) return null;
+    const event = await getEvent(listing.event_id);
+    const product = event?.products.find((p) => p.id === productId);
+    return event && product ? { product, event } : null;
+  }
   const events = await listEvents();
   for (const event of events) {
     const product = event.products.find((p) => p.id === productId);
@@ -196,7 +215,7 @@ export async function getRecommendedProducts(catalogProductId: string): Promise<
     ids = [...new Set([...forward, ...reverse])].filter((id) => id !== catalogProductId);
   }
   if (ids.length === 0) return [];
-  const events = await listEvents();
+  const events = await listEvents({ lite: true });
   const allListings = events.flatMap((e) => e.products);
   return ids
     .map((id) => resolveListingId(id, events))
@@ -212,7 +231,7 @@ export async function getRecommendedProducts(catalogProductId: string): Promise<
 // 넘긴 id 순서를 그대로 유지한다(최근 본 순서 등 호출부가 이미 정렬해서 줌).
 export async function getProductsByListingIds(listingIds: string[]): Promise<Product[]> {
   if (listingIds.length === 0) return [];
-  const events = await listEvents();
+  const events = await listEvents({ lite: true });
   const byId = new Map(events.flatMap((e) => e.products).map((p) => [p.id, p]));
   return listingIds.map((id) => byId.get(id)).filter((p): p is Product => p !== undefined);
 }
@@ -1103,7 +1122,7 @@ async function assertEventOrderable(eventId: string): Promise<void> {
 // 모든 조합의 합계로 따진다(1번 옵션 1개 + 2번 옵션 2개도 합쳐서 3개면
 // 충족) — 그래서 order_item 라인별로 보지 않고 productId로 합산한 뒤 비교한다.
 async function assertMinQuantities(items: OrderItem[]): Promise<void> {
-  const events = await listEvents();
+  const events = await listEvents({ lite: true });
   const qtyByProduct = new Map<string, number>();
   for (const item of items) {
     qtyByProduct.set(item.productId, (qtyByProduct.get(item.productId) ?? 0) + item.quantity);
