@@ -74,6 +74,7 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     // 카탈로그 상품의 공유 재고를 그대로 내려준다 — 리스팅 자체엔 재고가 없다.
     stock: catalog?.stock,
     minQty: catalog?.minQty,
+    maxQty: catalog?.maxQty,
     badge: catalog?.badge ?? "NONE",
     shippingFee: catalog?.shippingFee,
     shippingFeeType: catalog?.shippingFeeType,
@@ -127,7 +128,7 @@ function orderNumber(): string {
 // lite=true면 이 두 컬럼만 빼고 가져온다(그 외 화면이 쓰는 필드는 그대로).
 // 상품 상세/관리자 화면은 상세설명이 필요하니 기본값(전체)을 그대로 쓴다.
 const LITE_PRODUCT_COLUMNS =
-  "id,name,emoji,photos,origin,weight,storage,eat,expiry_label,expiry_value,base_price,stock,min_qty,badge,shipping_fee,shipping_fee_type,free_shipping_threshold,shipping_fee_qty_unit,courier_code,fulfillment_type,ships_at,discount";
+  "id,name,emoji,photos,origin,weight,storage,eat,expiry_label,expiry_value,base_price,stock,min_qty,max_qty,badge,shipping_fee,shipping_fee_type,free_shipping_threshold,shipping_fee_qty_unit,courier_code,fulfillment_type,ships_at,discount";
 
 export async function listEvents(options?: { lite?: boolean }): Promise<MarketEvent[]> {
   if (isSupabaseConfigured) {
@@ -360,6 +361,7 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
         base_price: input.basePrice ?? 0,
         stock: input.stock ?? null,
         min_qty: input.minQty ?? 1,
+        max_qty: input.maxQty ?? null,
         badge: input.badge ?? "NONE",
         shipping_fee: input.shippingFee ?? 0,
         shipping_fee_type: input.shippingFeeType ?? "fixed",
@@ -422,6 +424,8 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     // 채로 명시적으로 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
     if ("stock" in patch) row.stock = patch.stock ?? null;
     if (patch.minQty !== undefined) row.min_qty = patch.minQty;
+    // stock처럼 "제한 없음"으로 비우는 것도 유효한 변경이라 in으로 확인한다.
+    if ("maxQty" in patch) row.max_qty = patch.maxQty ?? null;
     if (patch.badge !== undefined) row.badge = patch.badge;
     if (patch.shippingFee !== undefined) row.shipping_fee = patch.shippingFee;
     if (patch.shippingFeeType !== undefined) row.shipping_fee_type = patch.shippingFeeType;
@@ -1111,6 +1115,9 @@ async function assertMinQuantities(items: OrderItem[]): Promise<void> {
       const minQty = product.minQty ?? 1;
       if (qty < minQty) {
         throw new Error(`${product.name}은(는) 최소 ${minQty}개부터 주문할 수 있어요.`);
+      }
+      if (product.maxQty !== undefined && qty > product.maxQty) {
+        throw new Error(`${product.name}은(는) 한 번에 최대 ${product.maxQty}개까지 주문할 수 있어요.`);
       }
       break;
     }
@@ -2134,6 +2141,7 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     basePrice: row.base_price ?? 0,
     stock: row.stock ?? undefined,
     minQty: row.min_qty ?? 1,
+    maxQty: row.max_qty ?? undefined,
     badge: row.badge ?? "NONE",
     shippingFee: row.shipping_fee ?? 0,
     shippingFeeType: row.shipping_fee_type ?? "fixed",
@@ -2180,6 +2188,7 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     // 카탈로그 상품(products.stock)의 공유 재고를 그대로 내려준다.
     stock: catalog.stock ?? undefined,
     minQty: catalog.min_qty ?? 1,
+    maxQty: catalog.max_qty ?? undefined,
     badge: catalog.badge ?? "NONE",
     shippingFee: catalog.shipping_fee ?? 0,
     shippingFeeType: catalog.shipping_fee_type ?? "fixed",

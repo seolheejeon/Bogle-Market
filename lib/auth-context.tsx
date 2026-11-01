@@ -56,27 +56,39 @@ function mapProfileRow(row: Record<string, any>): Profile {
   };
 }
 
+// 내용이 같은 프로필이면 기존 객체를 그대로 둔다 — Supabase는 토큰 갱신·탭 복귀 때마다
+// 인증 이벤트를 다시 보내는데, 그때마다 새 객체로 바꾸면 profile에 걸린 화면들(장바구니,
+// 주문서, 주문내역, 방문 기록 등)이 전부 다시 불러와 깜빡이고 방문 수도 부풀었다(2026-11-01).
+function sameProfile(a: Profile | null, b: Profile | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.id === b.id && a.username === b.username && a.name === b.name && a.nickname === b.nickname && a.phone === b.phone && a.isAdmin === b.isAdmin && a.createdAt === b.createdAt;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const setProfileIfChanged = (next: Profile | null) => setProfile((prev) => (sameProfile(prev, next) ? prev : next));
     if (isSupabaseConfigured) {
       const supabase = getSupabaseBrowserClient()!;
       supabase.auth.getSession().then(async ({ data }) => {
         if (data.session?.user) {
           const { data: row } = await supabase.from("profiles").select("*").eq("id", data.session.user.id).single();
-          if (row) setProfile(mapProfileRow(row));
+          if (row) setProfileIfChanged(mapProfileRow(row));
         }
         setLoading(false);
       });
-      const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (!session?.user) {
-          setProfile(null);
+          setProfileIfChanged(null);
           return;
         }
+        // 토큰만 새로 받은 경우엔 프로필이 바뀔 일이 없어 다시 조회하지 않는다.
+        if (event === "TOKEN_REFRESHED") return;
         const { data: row } = await supabase.from("profiles").select("*").eq("id", session.user.id).single();
-        if (row) setProfile(mapProfileRow(row));
+        if (row) setProfileIfChanged(mapProfileRow(row));
       });
       return () => sub.subscription.unsubscribe();
     } else {

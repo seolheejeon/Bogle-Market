@@ -107,6 +107,8 @@ create table if not exists products (
   -- 최소 구매 수량 — 상품 상세/빠른 담기는 항상 이 수량으로 시작하고, 장바구니
   -- 등에서 수량을 줄여도 이 밑으로는 못 내려간다(완전히 빼려면 삭제해야 함).
   min_qty integer not null default 1 check (min_qty >= 1),
+  -- 최대 구매 수량(주문 1건당, 옵션 합계) — null이면 제한 없음. 2026-11-01 추가.
+  max_qty integer check (max_qty is null or max_qty >= 1),
   -- 상품 카드/상세에 붙는 표시용 뱃지 — 예전엔 이벤트(events.badge) 단위로
   -- 관리했지만, 같은 이벤트 안에서도 상품마다 다르게 붙이고 싶다는 요청으로
   -- 상품(카탈로그) 단위로 옮겼다. 순수 노출용이라 주문/마감 정책과는 무관하다
@@ -1183,6 +1185,22 @@ begin
     limit 1
   loop
     raise exception '%은(는) 최소 %개부터 주문할 수 있어요. (현재 %개)', v_bad_item.name, v_bad_item.min_qty, v_bad_item.qty;
+  end loop;
+
+  -- 최대 구매 수량(주문 1건당) 서버 검증 — 최소 수량과 같은 방식(상품별 합계).
+  for v_bad_item in
+    select p.name as name, s.qty as qty, p.max_qty as max_qty
+    from (
+      select ep.product_id, sum((i->>'quantity')::integer) as qty
+      from jsonb_array_elements(p_items) as i
+      join event_products ep on ep.id = nullif(i->>'event_product_id', '')::uuid
+      group by ep.product_id
+    ) s
+    join products p on p.id = s.product_id
+    where p.max_qty is not null and s.qty > p.max_qty
+    limit 1
+  loop
+    raise exception '%은(는) 한 번에 최대 %개까지 주문할 수 있어요. (현재 %개)', v_bad_item.name, v_bad_item.max_qty, v_bad_item.qty;
   end loop;
 
   -- 재고 차감을 주문 생성과 같은 트랜잭션 안에서 수행한다 — decrement_stock/

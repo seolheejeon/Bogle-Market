@@ -113,6 +113,8 @@ export function ProductDetailView({ productId }: { productId: string }) {
   // 옵션이 있는 상품은 조합을 여러 개 골라 쌓은 뒤 한 번에 담는 목록형 UX를
   // 쓰고(hasOptions), 없는 상품은 예전처럼 수량 스텝퍼 + 바로 담기를 그대로 쓴다.
   const hasOptions = (product.optionGroups ?? []).length > 0;
+  // 더 못 담을 때 안내 — 최대 구매 수량이 정해진 상품은 그 한도를 알려준다.
+  const noMoreMessage = product.maxQty !== undefined ? `한 번에 최대 ${product.maxQty}개까지 구매할 수 있어요.` : "더 담을 수 있는 재고가 없어요.";
 
   // 이 조합이 지금부터 몇 개까지 더 늘어날 수 있는지 — 장바구니에 이미 담긴
   // 것 + 대기 목록의 다른 줄(자기 자신은 excludeIndex로 빼고)까지 전부
@@ -203,7 +205,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
         // 한도를 미리 보여주지 않고, 실제로 넘기려는 시도가 있을 때만 그
         // 자리에서 안내한다(사용자 요청 — 재고가 얼마 안 남았다는 인상을
         // 계속 노출하지 않기 위함).
-        showAddedToast(cap <= 0 ? "더 담을 수 있는 재고가 없어요." : `최대 ${cap}개까지만 구매할 수 있어요.`);
+        showAddedToast(cap <= 0 ? noMoreMessage : `최대 ${cap}개까지만 구매할 수 있어요.`);
         return prev;
       }
       return prev.map((p, i) => (i === index ? { ...p, qty: newQty } : p));
@@ -433,6 +435,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
             ["원산지", product.origin],
             ["중량", product.weight],
             ["최소주문수량", (product.minQty ?? 1) > 1 ? `${product.minQty}개부터 주문 가능` : undefined],
+            ["최대주문수량", product.maxQty !== undefined ? `한 번에 ${product.maxQty}개까지 주문 가능` : undefined],
             ["보관법", product.storage],
             ["조리법", product.eat],
             [product.expiryLabel ?? "유통기한", product.expiryValue],
@@ -539,7 +542,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
                     // 남은 수량을 미리 보여주지 않고, 한도를 넘기려는 시도가
                     // 있을 때만 그 자리에서 안내한다(사용자 요청).
                     if (remaining !== undefined && qty >= remaining) {
-                      showAddedToast(remaining <= 0 ? "더 담을 수 있는 재고가 없어요." : `최대 ${remaining}개까지만 구매할 수 있어요.`);
+                      showAddedToast(remaining <= 0 ? noMoreMessage : `최대 ${remaining}개까지만 구매할 수 있어요.`);
                       return;
                     }
                     setQty((q) => q + 1);

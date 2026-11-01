@@ -130,6 +130,8 @@ export interface CatalogProduct {
   // 최소 구매 수량 — 없으면 1(제한 없음과 동일). 상품 상세/빠른 담기가 항상
   // 이 수량으로 시작하고, 장바구니 등에서 이 밑으로는 못 내려간다.
   minQty?: number;
+  // 최대 구매 수량(주문 1건당, 옵션 합계) — 없으면 제한 없음.
+  maxQty?: number;
   // 상품 카드/상세에 붙는 표시용 뱃지(HOT/NEW/특가 등) — 예전엔 이벤트
   // 단위로 관리했지만, 같은 이벤트 안에서도 상품마다 다르게 붙이고 싶다는
   // 요청으로 상품(카탈로그) 단위로 옮겼다. 순수 노출용이라 주문/마감 정책과는
@@ -218,6 +220,7 @@ export interface Product {
   // 카탈로그(CatalogProduct)에서 그대로 내려오는 값들 — 리스팅별로 달라지지
   // 않는다(origin/weight와 동일한 성격).
   minQty?: number;
+  maxQty?: number;
   // 카탈로그의 표시용 뱃지(CatalogProduct.badge) — 리스팅마다 달라지지 않고
   // 이 상품을 파는 모든 이벤트에서 항상 같게 보인다.
   badge?: EventBadge;

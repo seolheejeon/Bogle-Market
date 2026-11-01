@@ -264,7 +264,7 @@ export function CheckoutView() {
     const overStock = findOverStockLines(items.map((i) => ({ product: i.product, optionValueIds: i.line.optionValueIds, qty: i.line.qty, item: i })));
     if (overStock.length > 0) {
       setError(
-        `재고가 부족한 상품이 있어요: ${overStock.map((o) => o.item.product.name).join(", ")}. 장바구니에서 수량을 줄여주세요.`,
+        `재고가 부족하거나 최대 구매 수량을 넘은 상품이 있어요: ${overStock.map((o) => o.item.product.name + (o.item.product.maxQty !== undefined ? `(최대 ${o.item.product.maxQty}개)` : "")).join(", ")}. 장바구니에서 수량을 줄여주세요.`,
       );
       return;
     }

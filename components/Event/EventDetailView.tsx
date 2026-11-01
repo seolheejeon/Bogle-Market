@@ -10,7 +10,7 @@ import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
-import { hasRequiredOptions } from "@/lib/product-options";
+import { hasRequiredOptions, productQtyCap } from "@/lib/product-options";
 
 export function EventDetailView({ eventId }: { eventId: string }) {
   const router = useRouter();
@@ -85,7 +85,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                   옵션선택
                 </Link>
               ) : (
-                <QtyControl productId={product.id} max={product.stock} minQty={product.minQty} closed={itemClosed} photo={product.photos?.[0] ?? product.emoji} />
+                <QtyControl productId={product.id} max={productQtyCap(product)} minQty={product.minQty} closed={itemClosed} photo={product.photos?.[0] ?? product.emoji} />
               )}
             </div>
             );

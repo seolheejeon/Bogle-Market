@@ -170,6 +170,7 @@ export default function AdminProductsPage() {
                     {" · "}
                     재고 {p.stock !== undefined ? `${p.stock}개` : "무제한"}
                     {(p.minQty ?? 1) > 1 && ` · 최소 ${p.minQty}개`}
+                    {p.maxQty !== undefined && ` · 최대 ${p.maxQty}개`}
                     {(p.shippingFee ?? 0) > 0 && ` · 배송비 ${formatPrice(p.shippingFee ?? 0)}`}
                     {p.discount && ` · ${describeDiscount(p.discount)}`}
                   </p>
@@ -236,6 +237,7 @@ function CatalogProductForm({
   const [costPrice, setCostPrice] = useState(initial?.costPrice !== undefined ? String(initial.costPrice) : "");
   const [stock, setStock] = useState(initial?.stock !== undefined ? String(initial.stock) : "");
   const [minQty, setMinQty] = useState(initial?.minQty !== undefined ? String(initial.minQty) : "1");
+  const [maxQty, setMaxQty] = useState(initial?.maxQty !== undefined ? String(initial.maxQty) : "");
   const [badge, setBadge] = useState<EventBadge>(initial?.badge ?? "NONE");
   const [shippingFeeType, setShippingFeeType] = useState<ShippingFeeType>(initial?.shippingFeeType ?? "fixed");
   const [shippingFee, setShippingFee] = useState(initial?.shippingFee !== undefined ? String(initial.shippingFee) : "");
@@ -305,6 +307,7 @@ function CatalogProductForm({
         costPrice: costPrice.trim() === "" ? 0 : Math.max(0, Number(costPrice) || 0),
         stock: stock.trim() === "" ? undefined : Math.max(0, Number(stock) || 0),
         minQty: minQty.trim() === "" ? 1 : Math.max(1, Number(minQty) || 1),
+        maxQty: maxQty.trim() === "" ? undefined : Math.max(1, Number(maxQty) || 1),
         badge,
         shippingFee: shippingFee.trim() === "" ? 0 : Math.max(0, Number(shippingFee) || 0),
         shippingFeeType,
@@ -457,9 +460,20 @@ function CatalogProductForm({
               onChange={(e) => setMinQty(e.target.value)}
             />
           </label>
+          <label className="min-w-[110px] flex-1 text-[11.5px] font-semibold text-text-muted">
+            최대 구매 수량
+            <input
+              className="mt-1 w-full rounded-[7px] border border-border bg-bg-card px-2 py-1.5 text-[13px]"
+              placeholder="비우면 무제한"
+              type="number"
+              min={1}
+              value={maxQty}
+              onChange={(e) => setMaxQty(e.target.value)}
+            />
+          </label>
         </div>
         <p className="mt-1.5 text-[11px] text-text-muted">
-          새 이벤트에 이 상품을 추가하면 기준 판매가·원가가 기본값으로 채워지고, 그 회차에서만 다르게(2+1 묶음 등) 바꿀 수 있어요. 재고는 이 상품을 쓰는 모든 이벤트가 실시간으로 함께 봐요 — 한 회차에서 주문이 들어가면 다른 회차 재고도 즉시 줄어들어요. 최소 구매 수량은 상품 상세/빠른 담기가 항상 이 수량으로 시작하고, 이 밑으로는 수량을 줄일 수 없어요.
+          새 이벤트에 이 상품을 추가하면 기준 판매가·원가가 기본값으로 채워지고, 그 회차에서만 다르게(2+1 묶음 등) 바꿀 수 있어요. 재고는 이 상품을 쓰는 모든 이벤트가 실시간으로 함께 봐요 — 한 회차에서 주문이 들어가면 다른 회차 재고도 즉시 줄어들어요. 최소 구매 수량은 상품 상세/빠른 담기가 항상 이 수량으로 시작하고, 이 밑으로는 수량을 줄일 수 없어요. 최대 구매 수량은 주문 1건에 옵션을 합쳐 담을 수 있는 개수예요.
         </p>
       </section>
 
