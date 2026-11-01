@@ -272,7 +272,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
           <ProductPhoto
             photo={photos[photoIndex]}
             fit="contain"
-            className={`flex h-full w-full items-center justify-center rounded-[inherit] text-[76px] ${closed || listingClosed ? "opacity-45 grayscale" : ""}`}
+            className={`flex h-full w-full items-center justify-center rounded-[inherit] text-[76px] ${closed || listingClosed ? "opacity-45 grayscale" : beforeOpen ? "opacity-50" : ""}`}
           />
           {/* 마감된 상품은 대표 사진 위에 크게 "주문 마감" — 아래 버튼까지 안 내려봐도 바로 알게. */}
           {(closed || listingClosed) && (

@@ -32,7 +32,7 @@ export function ProductGridCard({ product, rankBadge, closed }: { product: Produ
         <Link href={`/product/${product.id}`} className="block">
           {/* 마감된 상품은 사진을 흐리게 + 가운데 "주문 마감" 도장 — 작은 글자만으론
               손님이 잘 못 알아봐서 사진 자체로 한눈에 보이게 한다. */}
-          <div className={isClosed ? "opacity-45 grayscale" : ""}>
+          <div className={isClosed ? "opacity-45 grayscale" : beforeOpen ? "opacity-50" : ""}>
             <ProductPhoto
               photo={product.photos?.[0] ?? product.emoji}
               className="flex aspect-square w-full items-center justify-center rounded-xl bg-accent-soft text-[58px] leading-none"
