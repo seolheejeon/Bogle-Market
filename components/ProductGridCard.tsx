@@ -1,10 +1,9 @@
 import Link from "next/link";
 import type { Product } from "@/types";
-import { formatPrice } from "@/lib/format";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { EventBadgeTag } from "@/components/Badge";
-import { hasRequiredOptions, productQtyCap } from "@/lib/product-options";
+import { hasRequiredOptions, productQtyCap, priceLabel } from "@/lib/product-options";
 import { isListingOrderable } from "@/lib/order-policy";
 import { WishlistButton } from "@/components/WishlistButton";
 
@@ -55,7 +54,7 @@ export function ProductGridCard({ product, rankBadge, closed }: { product: Produ
         {product.name}
       </Link>
       <div className="flex items-center justify-between">
-        <span className="text-[13.5px] font-bold">{formatPrice(product.price)}</span>
+        <span className="text-[13.5px] font-bold">{priceLabel(product)}</span>
         {isClosed ? (
           <span className="shrink-0 rounded-full bg-bg-sunken px-2.5 py-1 text-[11px] font-bold text-text-muted">마감</span>
         ) : optionsRequired ? (

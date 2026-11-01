@@ -16,7 +16,7 @@ import { ShareButton } from "@/components/ShareButton";
 import { WishlistButton } from "@/components/WishlistButton";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { ProductGridCard } from "@/components/ProductGridCard";
-import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
+import { unitPrice, priceLabel, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 import { flyToCart, showAddedToast } from "@/lib/cart-feedback";
 import { describeDiscount, describeVarietyTiers } from "@/lib/discount";
@@ -306,7 +306,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
         {event.notice && <p className="mt-1.5 rounded-[8px] bg-bg-sunken px-2.5 py-1.5 text-[12px] whitespace-pre-line">📢 {event.notice}</p>}
 
         <p className="mt-2 text-[17px] font-extrabold">{product.name}</p>
-        <p className="my-1.5 text-xl font-extrabold">{formatPrice(unitPriceWithOptions)}</p>
+        <p className="my-1.5 text-xl font-extrabold">{selectedOptionValueIds.length === 0 ? priceLabel(product) : formatPrice(unitPriceWithOptions)}</p>
         {product.discount && (
           <p className="mb-1.5 -mt-1 inline-block rounded-[6px] bg-accent-soft px-1.5 py-0.5 text-[11.5px] font-bold text-accent-dark">
             {describeDiscount(product.discount)}

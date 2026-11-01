@@ -5,12 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getEvent } from "@/lib/data";
 import type { MarketEvent } from "@/types";
-import { formatDeadlineLabel, formatEventDateChip, formatPrice } from "@/lib/format";
+import { formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
 import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
-import { hasRequiredOptions, productQtyCap } from "@/lib/product-options";
+import { hasRequiredOptions, productQtyCap, priceLabel } from "@/lib/product-options";
 
 export function EventDetailView({ eventId }: { eventId: string }) {
   const router = useRouter();
@@ -75,7 +75,7 @@ export function EventDetailView({ eventId }: { eventId: string }) {
                   </Link>
                   <EventBadgeTag badge={product.badge} />
                 </div>
-                <p className="text-[13.5px] font-bold">{formatPrice(product.price)}</p>
+                <p className="text-[13.5px] font-bold">{priceLabel(product)}</p>
               </div>
               {!itemClosed && product.stock !== 0 && hasRequiredOptions(product) ? (
                 <Link

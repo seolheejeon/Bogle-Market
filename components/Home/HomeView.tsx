@@ -7,7 +7,8 @@ import { resolveBannerHref } from "@/lib/banner-link";
 import { ENABLED_EVENT_TYPES, isEventOrderable, isEventVisibleToCustomers, isListingOrderable } from "@/lib/order-policy";
 import type { Banner, EventType, MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
-import { formatCountdownShort, formatDeadlineShort, formatPrice } from "@/lib/format";
+import { formatCountdownShort, formatDeadlineShort } from "@/lib/format";
+import { priceLabel } from "@/lib/product-options";
 import { Countdown } from "@/components/Countdown";
 import { ProductGridCard } from "@/components/ProductGridCard";
 import { ProductPhoto } from "@/components/ProductPhoto";
@@ -223,7 +224,7 @@ export function HomeView() {
               {autoHeroSlides[activeIndex].badge}
             </span>
             <p className="mt-2.5 line-clamp-2 text-[18px] font-extrabold text-text">{autoHeroSlides[activeIndex].product.name}</p>
-            <p className="mt-1.5 text-[18px] font-extrabold text-accent-dark">{formatPrice(autoHeroSlides[activeIndex].product.price)}</p>
+            <p className="mt-1.5 text-[18px] font-extrabold text-accent-dark">{priceLabel(autoHeroSlides[activeIndex].product)}</p>
             <span className="mt-2.5 inline-flex w-fit rounded-lg bg-accent px-3 py-2 text-[13px] font-bold text-white">지금 주문하기 ›</span>
             {heroDots}
           </div>
