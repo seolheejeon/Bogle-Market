@@ -74,6 +74,7 @@ function mergeListing(listing: EventProductSeed, catalog: CatalogProduct | undef
     // 카탈로그 상품의 공유 재고를 그대로 내려준다 — 리스팅 자체엔 재고가 없다.
     stock: catalog?.stock,
     minQty: catalog?.minQty,
+    maxQty: catalog?.maxQty,
     badge: catalog?.badge ?? "NONE",
     shippingFee: catalog?.shippingFee,
     shippingFeeType: catalog?.shippingFeeType,
@@ -127,16 +128,17 @@ function orderNumber(): string {
 // lite=true면 이 두 컬럼만 빼고 가져온다(그 외 화면이 쓰는 필드는 그대로).
 // 상품 상세/관리자 화면은 상세설명이 필요하니 기본값(전체)을 그대로 쓴다.
 const LITE_PRODUCT_COLUMNS =
-  "id,name,emoji,photos,origin,weight,storage,eat,expiry_label,expiry_value,base_price,stock,min_qty,badge,shipping_fee,shipping_fee_type,free_shipping_threshold,shipping_fee_qty_unit,courier_code,fulfillment_type,ships_at,discount";
+  "id,name,emoji,photos,origin,weight,storage,eat,expiry_label,expiry_value,base_price,stock,min_qty,max_qty,badge,shipping_fee,shipping_fee_type,free_shipping_threshold,shipping_fee_qty_unit,courier_code,fulfillment_type,ships_at,discount";
+
+function eventSelect(lite?: boolean): string {
+  const productColumns = lite ? LITE_PRODUCT_COLUMNS : "*";
+  return `*, event_products(*, products(${productColumns}, product_option_groups(*, product_option_values(*))), event_option_stock(*))`;
+}
 
 export async function listEvents(options?: { lite?: boolean }): Promise<MarketEvent[]> {
   if (isSupabaseConfigured) {
     const supabase = getSupabaseBrowserClient()!;
-    const productColumns = options?.lite ? LITE_PRODUCT_COLUMNS : "*";
-    const { data, error } = await supabase
-      .from("events")
-      .select(`*, event_products(*, products(${productColumns}, product_option_groups(*, product_option_values(*))), event_option_stock(*))`)
-      .order("deadline_at", { ascending: true });
+    const { data, error } = await supabase.from("events").select(eventSelect(options?.lite)).order("deadline_at", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(mapSupabaseEvent);
   }
@@ -150,12 +152,30 @@ export async function listEvents(options?: { lite?: boolean }): Promise<MarketEv
   }));
 }
 
+// 회차 하나만 조회 — 예전엔 모든 회차의 모든 상품(상세설명 포함)을 받아서 그중 하나를
+// 골랐다. 인기 상품 오픈 때 손님들이 상품 상세를 계속 새로고침하자 그 큰 조회가 몰려
+// DB가 느려지고 화면이 깜빡였다(2026-11-01) — 필요한 회차만 받는다.
 export async function getEvent(id: string): Promise<MarketEvent | null> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data, error } = await supabase.from("events").select(eventSelect()).eq("id", id).maybeSingle();
+    if (error) throw error;
+    return data ? mapSupabaseEvent(data) : null;
+  }
   const events = await listEvents();
   return events.find((e) => e.id === id) ?? null;
 }
 
 export async function findProductWithEvent(productId: string): Promise<{ product: Product; event: MarketEvent } | null> {
+  if (isSupabaseConfigured) {
+    const supabase = getSupabaseBrowserClient()!;
+    const { data: listing, error } = await supabase.from("event_products").select("event_id").eq("id", productId).maybeSingle();
+    if (error) throw error;
+    if (!listing) return null;
+    const event = await getEvent(listing.event_id);
+    const product = event?.products.find((p) => p.id === productId);
+    return event && product ? { product, event } : null;
+  }
   const events = await listEvents();
   for (const event of events) {
     const product = event.products.find((p) => p.id === productId);
@@ -195,7 +215,7 @@ export async function getRecommendedProducts(catalogProductId: string): Promise<
     ids = [...new Set([...forward, ...reverse])].filter((id) => id !== catalogProductId);
   }
   if (ids.length === 0) return [];
-  const events = await listEvents();
+  const events = await listEvents({ lite: true });
   const allListings = events.flatMap((e) => e.products);
   return ids
     .map((id) => resolveListingId(id, events))
@@ -211,7 +231,7 @@ export async function getRecommendedProducts(catalogProductId: string): Promise<
 // 넘긴 id 순서를 그대로 유지한다(최근 본 순서 등 호출부가 이미 정렬해서 줌).
 export async function getProductsByListingIds(listingIds: string[]): Promise<Product[]> {
   if (listingIds.length === 0) return [];
-  const events = await listEvents();
+  const events = await listEvents({ lite: true });
   const byId = new Map(events.flatMap((e) => e.products).map((p) => [p.id, p]));
   return listingIds.map((id) => byId.get(id)).filter((p): p is Product => p !== undefined);
 }
@@ -360,6 +380,7 @@ export async function createCatalogProduct(input: Omit<CatalogProduct, "id">): P
         base_price: input.basePrice ?? 0,
         stock: input.stock ?? null,
         min_qty: input.minQty ?? 1,
+        max_qty: input.maxQty ?? null,
         badge: input.badge ?? "NONE",
         shipping_fee: input.shippingFee ?? 0,
         shipping_fee_type: input.shippingFeeType ?? "fixed",
@@ -422,6 +443,8 @@ export async function updateCatalogProduct(catalogProductId: string, patch: Part
     // 채로 명시적으로 전달된 경우와 애초에 patch에 없는 경우를 구분해야 한다.
     if ("stock" in patch) row.stock = patch.stock ?? null;
     if (patch.minQty !== undefined) row.min_qty = patch.minQty;
+    // stock처럼 "제한 없음"으로 비우는 것도 유효한 변경이라 in으로 확인한다.
+    if ("maxQty" in patch) row.max_qty = patch.maxQty ?? null;
     if (patch.badge !== undefined) row.badge = patch.badge;
     if (patch.shippingFee !== undefined) row.shipping_fee = patch.shippingFee;
     if (patch.shippingFeeType !== undefined) row.shipping_fee_type = patch.shippingFeeType;
@@ -1099,7 +1122,7 @@ async function assertEventOrderable(eventId: string): Promise<void> {
 // 모든 조합의 합계로 따진다(1번 옵션 1개 + 2번 옵션 2개도 합쳐서 3개면
 // 충족) — 그래서 order_item 라인별로 보지 않고 productId로 합산한 뒤 비교한다.
 async function assertMinQuantities(items: OrderItem[]): Promise<void> {
-  const events = await listEvents();
+  const events = await listEvents({ lite: true });
   const qtyByProduct = new Map<string, number>();
   for (const item of items) {
     qtyByProduct.set(item.productId, (qtyByProduct.get(item.productId) ?? 0) + item.quantity);
@@ -1111,6 +1134,9 @@ async function assertMinQuantities(items: OrderItem[]): Promise<void> {
       const minQty = product.minQty ?? 1;
       if (qty < minQty) {
         throw new Error(`${product.name}은(는) 최소 ${minQty}개부터 주문할 수 있어요.`);
+      }
+      if (product.maxQty !== undefined && qty > product.maxQty) {
+        throw new Error(`${product.name}은(는) 한 번에 최대 ${product.maxQty}개까지 주문할 수 있어요.`);
       }
       break;
     }
@@ -2134,6 +2160,7 @@ function mapSupabaseCatalogProduct(row: Record<string, any>): CatalogProduct {
     basePrice: row.base_price ?? 0,
     stock: row.stock ?? undefined,
     minQty: row.min_qty ?? 1,
+    maxQty: row.max_qty ?? undefined,
     badge: row.badge ?? "NONE",
     shippingFee: row.shipping_fee ?? 0,
     shippingFeeType: row.shipping_fee_type ?? "fixed",
@@ -2180,6 +2207,7 @@ function mapSupabaseEventProduct(row: Record<string, any>): Product {
     // 카탈로그 상품(products.stock)의 공유 재고를 그대로 내려준다.
     stock: catalog.stock ?? undefined,
     minQty: catalog.min_qty ?? 1,
+    maxQty: catalog.max_qty ?? undefined,
     badge: catalog.badge ?? "NONE",
     shippingFee: catalog.shipping_fee ?? 0,
     shippingFeeType: catalog.shipping_fee_type ?? "fixed",

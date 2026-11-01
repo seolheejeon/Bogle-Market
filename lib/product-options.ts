@@ -107,6 +107,13 @@ export function comboKey(product: Pick<Product, "optionGroups">, optionValueIds:
 // 켜면 행이 안 생기는데, 예전엔 여기서 0(품절)으로 봐서 관리자 화면·옵션 버튼은
 // "3개 남음"인데 담기지는 않았다(2026-10-25). 관리자 화면과 DB의
 // decrement_option_stock도 행이 없으면 같은 기본값을 쓴다.
+// 이 상품 전체(옵션 조합 합계)가 담을 수 있는 한도 — 공유 재고(stock)와 최대 구매
+// 수량(maxQty, 주문 1건당) 중 작은 값. 둘 다 없으면 undefined(무제한).
+export function productQtyCap(product: Pick<Product, "stock" | "maxQty">): number | undefined {
+  const caps = [product.stock, product.maxQty].filter((v): v is number => v !== undefined);
+  return caps.length > 0 ? Math.min(...caps) : undefined;
+}
+
 function comboStockFor(product: Pick<Product, "optionGroups" | "optionStockByCombo">, optionValueIds: string[]): number | undefined {
   const ids = comboValueIds(product, optionValueIds);
   if (ids.length === 0) return undefined;
@@ -120,11 +127,12 @@ function comboStockFor(product: Pick<Product, "optionGroups" | "optionStockByCom
 // 옵션 조합의 재고 중 더 작은 값(전부 만족해야 하므로). 아무 제한도 없으면
 // undefined(무제한).
 export function maxQtyForSelection(
-  product: Pick<Product, "stock" | "optionGroups" | "optionStockByCombo">,
+  product: Pick<Product, "stock" | "maxQty" | "optionGroups" | "optionStockByCombo">,
   optionValueIds: string[],
 ): number | undefined {
   const limits: number[] = [];
-  if (product.stock !== undefined) limits.push(product.stock);
+  const cap = productQtyCap(product);
+  if (cap !== undefined) limits.push(cap);
   const comboStock = comboStockFor(product, optionValueIds);
   if (comboStock !== undefined) limits.push(comboStock);
   return limits.length > 0 ? Math.min(...limits) : undefined;
@@ -140,7 +148,7 @@ export function maxQtyForSelection(
 // 진짜 재고 검증에서만 걸려서 "이유 없이 주문 실패"처럼 보이는 원인이었다).
 // otherLines는 "지금 보는 줄 자신은 뺀, 같은 상품의 다른 줄들"이어야 한다.
 export function remainingForCombo(
-  product: Pick<Product, "stock" | "optionGroups" | "optionStockByCombo">,
+  product: Pick<Product, "stock" | "maxQty" | "optionGroups" | "optionStockByCombo">,
   optionValueIds: string[],
   otherLines: { optionValueIds: string[]; qty: number }[],
 ): number | undefined {
@@ -148,7 +156,8 @@ export function remainingForCombo(
   const key = comboKey(product, optionValueIds);
   const usedForCombo = key === "" ? 0 : otherLines.filter((l) => comboKey(product, l.optionValueIds) === key).reduce((sum, l) => sum + l.qty, 0);
   const limits: number[] = [];
-  if (product.stock !== undefined) limits.push(Math.max(0, product.stock - usedForProduct));
+  const cap = productQtyCap(product);
+  if (cap !== undefined) limits.push(Math.max(0, cap - usedForProduct));
   const comboStock = comboStockFor(product, optionValueIds);
   if (comboStock !== undefined) limits.push(Math.max(0, comboStock - usedForCombo));
   return limits.length > 0 ? Math.min(...limits) : undefined;
@@ -159,7 +168,7 @@ export function remainingForCombo(
 // 각각 확인하면(예전 방식) product.stock을 조합마다 따로 확인하는 셈이 돼서
 // 위 remainingForCombo와 같은 문제가 생기므로, 상품 전체 합계 / 조합 전체
 // 합계를 먼저 구해두고 그 기준으로 넘는 라인을 찾는다.
-export function findOverStockLines<T extends { product: Pick<Product, "id" | "stock" | "optionGroups" | "optionStockByCombo">; optionValueIds: string[]; qty: number }>(
+export function findOverStockLines<T extends { product: Pick<Product, "id" | "stock" | "maxQty" | "optionGroups" | "optionStockByCombo">; optionValueIds: string[]; qty: number }>(
   lines: T[],
 ): T[] {
   const productTotals = new Map<string, number>();
@@ -173,7 +182,8 @@ export function findOverStockLines<T extends { product: Pick<Product, "id" | "st
     }
   }
   return lines.filter((l) => {
-    if (l.product.stock !== undefined && (productTotals.get(l.product.id) ?? 0) > l.product.stock) return true;
+    const cap = productQtyCap(l.product);
+    if (cap !== undefined && (productTotals.get(l.product.id) ?? 0) > cap) return true;
     const key = comboKey(l.product, l.optionValueIds);
     if (key === "") return false;
     const comboStock = comboStockFor(l.product, l.optionValueIds);

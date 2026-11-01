@@ -4,7 +4,7 @@ import { formatPrice } from "@/lib/format";
 import { QtyControl } from "@/components/QtyControl";
 import { ProductPhoto } from "@/components/ProductPhoto";
 import { EventBadgeTag } from "@/components/Badge";
-import { hasRequiredOptions } from "@/lib/product-options";
+import { hasRequiredOptions, productQtyCap } from "@/lib/product-options";
 import { isListingOrderable } from "@/lib/order-policy";
 import { WishlistButton } from "@/components/WishlistButton";
 
@@ -63,7 +63,7 @@ export function ProductGridCard({ product, rankBadge, closed }: { product: Produ
             옵션선택
           </Link>
         ) : (
-          <QtyControl productId={product.id} max={product.stock} minQty={product.minQty} photo={product.photos?.[0] ?? product.emoji} />
+          <QtyControl productId={product.id} max={productQtyCap(product)} minQty={product.minQty} photo={product.photos?.[0] ?? product.emoji} />
         )}
       </div>
     </div>
