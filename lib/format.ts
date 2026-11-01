@@ -46,6 +46,27 @@ export function formatCountdownShort(targetIso: string): string {
 
 const WEEKDAY_KR = ["일", "월", "화", "수", "목", "금", "토"];
 
+// 예약 오픈 안내 — "11/5(수) 오후 8:00 오픈"
+export function formatOpenLabel(iso: string): string {
+  const date = new Date(iso);
+  const time = date.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit", hour12: true });
+  return `${date.getMonth() + 1}/${date.getDate()}(${WEEKDAY_KR[date.getDay()]}) ${time} 오픈`;
+}
+
+// 예약 오픈까지 남은 시간 — 하루 넘게 남으면 "2일 3시간 후 오픈", 아니면 "오픈까지 01:02:03".
+export function formatOpenCountdown(iso: string): string {
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return "오픈!";
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const h = Math.floor((totalSeconds % 86400) / 3600);
+  if (days > 0) return `${days}일 ${h}시간 후 오픈`;
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `오픈까지 ${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
 // e.g. "7/24(금)" — used for the category screen's event date chips.
 export function formatEventDateChip(iso: string): string {
   const date = new Date(iso);

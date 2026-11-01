@@ -1,3 +1,4 @@
+import { formatPrice } from "@/lib/format";
 // 상품 옵션(색상/사이즈/중량/추가옵션 등) 관련 순수 계산 헬퍼 — 장바구니,
 // 상품 상세, 체크아웃, 주문 스냅샷이 전부 같은 규칙으로 가격/재고/선택
 // 완료 여부를 계산하도록 여기 한 곳에 모아둔다.
@@ -28,6 +29,16 @@ export function optionPriceDelta(product: Pick<Product, "optionGroups">, optionV
 // 옵션이 반영된 최종 단가.
 export function unitPrice(product: Pick<Product, "price" | "optionGroups">, optionValueIds: string[]): number {
   return product.price + optionPriceDelta(product, optionValueIds);
+}
+
+// 목록·상세에 보여줄 가격 — 필수 옵션을 꼭 골라야 하는 상품은 가장 싼 조합 가격에
+// "~"를 붙인다. 기본가 0원에 옵션으로만 가격이 정해지는 상품이 "0원"으로 보여
+// 헷갈렸다(2026-11-01). 필수 옵션에 추가금이 없으면 예전처럼 기본가 그대로.
+export function priceLabel(product: Pick<Product, "price" | "optionGroups">): string {
+  const extra = (product.optionGroups ?? [])
+    .filter((g) => g.required && g.values.length > 0)
+    .reduce((sum, g) => sum + Math.min(...g.values.map((v) => v.priceDelta)), 0);
+  return extra > 0 ? `${formatPrice(product.price + extra)}~` : formatPrice(product.price);
 }
 
 // required 그룹마다 최소 1개, multi=false 그룹은 최대 1개를 골랐는지 확인 —

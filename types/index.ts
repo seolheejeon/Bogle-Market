@@ -245,6 +245,8 @@ export interface Product {
   // isListingOrderable), closed와 달리 "예정된 시각"이라 그 시각이 되기 전엔
   // 정상 주문되고, 관리자가 이 값을 지우거나 미래로 늦추면 다시 열린다.
   orderDeadlineAt?: string;
+  // 예약 오픈 — 이 시각 전엔 상품은 보이지만 주문이 막히고 카운트다운이 뜬다.
+  orderOpenAt?: string;
   // 색상/사이즈/중량/추가옵션 등 — 그룹 구조(required/multi/이름)는 카탈로그와
   // 동일하지만, 재고관리(hasStock) 대상 값의 stock은 이 리스팅(event_option_stock)
   // 기준으로 온다. 재고관리 그룹이 하나뿐이면 이 stock이 곧 그 값 하나의 재고고,
@@ -359,6 +361,7 @@ export interface EventProductSeed {
   visible?: boolean;
   closed?: boolean;
   orderDeadlineAt?: string;
+  orderOpenAt?: string;
   // 이 이벤트 안에서 노출되는 순서(오름차순) — 이벤트마다 독립적. 관리자가
   // ▲▼로 바꾸며, 새로 추가된 리스팅은 기존 최댓값+1로 맨 뒤에 붙는다.
   sortOrder?: number;

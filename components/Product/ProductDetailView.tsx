@@ -6,8 +6,10 @@ import { findProductWithEvent } from "@/lib/data";
 import { recordRecentlyViewed } from "@/lib/recently-viewed";
 import type { MarketEvent, Product } from "@/types";
 import { EVENT_TYPE_LABEL, COURIER_LABEL, FULFILLMENT_TYPE_LABEL } from "@/types";
-import { formatPrice, formatDeadlineLabel, formatEventDateChip } from "@/lib/format";
-import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
+import { formatPrice, formatDeadlineLabel, formatEventDateChip, formatOpenCountdown, formatOpenLabel } from "@/lib/format";
+import { isEventOrderable, isListingBeforeOpen, isListingClosed } from "@/lib/order-policy";
+import { useRerenderAt } from "@/lib/use-rerender-at";
+import { Countdown } from "@/components/Countdown";
 import { useCart } from "@/lib/cart-context";
 import { ProductDetailContent } from "@/components/Product/ProductDetailContent";
 import { DUMMY_DETAIL_BLOCKS } from "@/lib/dummy-detail-content";
@@ -16,7 +18,7 @@ import { ShareButton } from "@/components/ShareButton";
 import { WishlistButton } from "@/components/WishlistButton";
 import { EventTypeBadge, EventBadgeTag } from "@/components/Badge";
 import { ProductGridCard } from "@/components/ProductGridCard";
-import { unitPrice, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
+import { unitPrice, priceLabel, maxQtyForSelection, validateOptionSelection, stockTrackedGroupCount, optionSelectionLabel, remainingForCombo } from "@/lib/product-options";
 import type { ProductOptionGroup, ProductOptionValue } from "@/types";
 import { flyToCart, showAddedToast } from "@/lib/cart-feedback";
 import { describeDiscount, describeVarietyTiers } from "@/lib/discount";
@@ -62,6 +64,9 @@ export function ProductDetailView({ productId }: { productId: string }) {
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
   }, []);
 
+  // 예약 오픈 시각이 되면 새로고침 없이 바로 담기 버튼이 열리게 다시 그린다.
+  useRerenderAt([data?.product.orderOpenAt]);
+
   if (data === undefined) return <p className="p-4 text-sm text-text-muted">불러오는 중...</p>;
   if (data === null) return <p className="p-4 text-sm text-text-muted">상품을 찾을 수 없어요.</p>;
 
@@ -71,7 +76,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
   // 숨긴 상품, 마감(수동 마감·상품별 마감시간 지남)된 상품, 품절 상품은 빼고,
   // 회차 자체가 마감됐으면 아예 안 보여준다. 순서는 이벤트에서 정한 노출 순서.
   const recommended = isEventOrderable(event)
-    ? event.products.filter((p) => p.id !== product.id && p.visible !== false && isListingOrderable(p) && p.stock !== 0)
+    ? event.products.filter((p) => p.id !== product.id && p.visible !== false && !isListingClosed(p) && p.stock !== 0)
     : [];
 
   // 카테고리 화면(문고리/사다드림/택배 탭 + 날짜)에서 들어온 경우, "←"를 누르면
@@ -98,7 +103,10 @@ export function ProductDetailView({ productId }: { productId: string }) {
   // 이벤트 전체는 진행 중이어도 이 상품 하나만 관리자가 따로 마감시켰거나
   // (수동) 예약 마감시간이 지났을 수 있다 — 이벤트 마감(closed)과 구분해
   // 안내 문구를 다르게 준다.
-  const listingClosed = !isListingOrderable(product);
+  const listingClosed = isListingClosed(product);
+  // 예약 오픈 전 — 옵션은 미리 골라둘 수 있게 보여주고, 장바구니 담기 버튼 자리에만
+  // 카운트다운을 띄운다(정각이 되면 useRerenderAt으로 저절로 버튼이 열림).
+  const beforeOpen = !closed && !listingClosed && isListingBeforeOpen(product);
   const maxQty = maxQtyForSelection(product, selectedOptionValueIds);
   const remaining = maxQty !== undefined ? Math.max(0, maxQty - inCart) : undefined;
   // 필수 옵션이 여러 개인 상품은 전부 고르기 전까지 수량 조절/담기 자체를
@@ -264,12 +272,17 @@ export function ProductDetailView({ productId }: { productId: string }) {
           <ProductPhoto
             photo={photos[photoIndex]}
             fit="contain"
-            className={`flex h-full w-full items-center justify-center rounded-[inherit] text-[76px] ${closed || listingClosed ? "opacity-45 grayscale" : ""}`}
+            className={`flex h-full w-full items-center justify-center rounded-[inherit] text-[76px] ${closed || listingClosed ? "opacity-45 grayscale" : beforeOpen ? "opacity-50" : ""}`}
           />
           {/* 마감된 상품은 대표 사진 위에 크게 "주문 마감" — 아래 버튼까지 안 내려봐도 바로 알게. */}
           {(closed || listingClosed) && (
             <span className="absolute inset-0 flex items-center justify-center">
               <span className="rounded-full bg-black/70 px-5 py-2.5 text-[17px] font-extrabold text-white">주문 마감</span>
+            </span>
+          )}
+          {beforeOpen && product.orderOpenAt && (
+            <span className="absolute inset-x-3 bottom-3 rounded-xl bg-black/70 px-3 py-2 text-center text-[14px] font-extrabold text-white">
+              {formatOpenLabel(product.orderOpenAt)}
             </span>
           )}
           {photos.length > 1 && (
@@ -306,7 +319,7 @@ export function ProductDetailView({ productId }: { productId: string }) {
         {event.notice && <p className="mt-1.5 rounded-[8px] bg-bg-sunken px-2.5 py-1.5 text-[12px] whitespace-pre-line">📢 {event.notice}</p>}
 
         <p className="mt-2 text-[17px] font-extrabold">{product.name}</p>
-        <p className="my-1.5 text-xl font-extrabold">{formatPrice(unitPriceWithOptions)}</p>
+        <p className="my-1.5 text-xl font-extrabold">{selectedOptionValueIds.length === 0 ? priceLabel(product) : formatPrice(unitPriceWithOptions)}</p>
         {product.discount && (
           <p className="mb-1.5 -mt-1 inline-block rounded-[6px] bg-accent-soft px-1.5 py-0.5 text-[11.5px] font-bold text-accent-dark">
             {describeDiscount(product.discount)}
@@ -487,6 +500,15 @@ export function ProductDetailView({ productId }: { productId: string }) {
               <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">마감된 이벤트라 더 이상 주문할 수 없어요.</p>
               <button className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-40" disabled>
                 마감
+              </button>
+            </>
+          ) : beforeOpen && product.orderOpenAt ? (
+            <>
+              <p className="mb-2.5 text-center text-[13px] font-semibold text-text-muted">
+                {formatOpenLabel(product.orderOpenAt)} 예정이에요. 새로고침 안 하셔도 시간이 되면 바로 담을 수 있어요.
+              </p>
+              <button className="w-full rounded-[10px] bg-accent py-3 text-[13.5px] font-bold text-white disabled:opacity-60" disabled>
+                <Countdown targetIso={product.orderOpenAt} format={formatOpenCountdown} />
               </button>
             </>
           ) : listingClosed ? (

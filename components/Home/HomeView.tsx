@@ -4,10 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { listEvents, listBanners, isBannerLive, getPopularListingIds } from "@/lib/data";
 import { resolveBannerHref } from "@/lib/banner-link";
-import { ENABLED_EVENT_TYPES, isEventOrderable, isEventVisibleToCustomers, isListingOrderable } from "@/lib/order-policy";
+import { ENABLED_EVENT_TYPES, isEventOrderable, isEventVisibleToCustomers, isListingClosed, isListingOrderable } from "@/lib/order-policy";
 import type { Banner, EventType, MarketEvent } from "@/types";
 import { EVENT_TYPE_LABEL } from "@/types";
-import { formatCountdownShort, formatDeadlineShort, formatPrice } from "@/lib/format";
+import { formatCountdownShort, formatDeadlineShort } from "@/lib/format";
+import { priceLabel } from "@/lib/product-options";
 import { Countdown } from "@/components/Countdown";
 import { ProductGridCard } from "@/components/ProductGridCard";
 import { ProductPhoto } from "@/components/ProductPhoto";
@@ -112,7 +113,8 @@ export function HomeView() {
         .flatMap((e) => e.products)
         // 품절(재고 0)·상품별 마감은 순위에서 뺀다 — 많이 팔려서 품절된 상품이
         // BEST 1·2·3을 다 차지해 지금 살 수 있는 상품이 안 보이는 문제.
-        .filter((p) => p.stock !== 0 && isListingOrderable(p))
+        // 예약 오픈 전 상품은 그대로 보여준다(카드에 카운트다운이 뜸 — "곧 오픈" 홍보).
+        .filter((p) => p.stock !== 0 && !isListingClosed(p))
         .map((p, order) => ({ p, order, rank: rankOf.get(p.id) }))
         .sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity) || a.order - b.order)
         .slice(0, 4);
@@ -223,7 +225,7 @@ export function HomeView() {
               {autoHeroSlides[activeIndex].badge}
             </span>
             <p className="mt-2.5 line-clamp-2 text-[18px] font-extrabold text-text">{autoHeroSlides[activeIndex].product.name}</p>
-            <p className="mt-1.5 text-[18px] font-extrabold text-accent-dark">{formatPrice(autoHeroSlides[activeIndex].product.price)}</p>
+            <p className="mt-1.5 text-[18px] font-extrabold text-accent-dark">{priceLabel(autoHeroSlides[activeIndex].product)}</p>
             <span className="mt-2.5 inline-flex w-fit rounded-lg bg-accent px-3 py-2 text-[13px] font-bold text-white">지금 주문하기 ›</span>
             {heroDots}
           </div>

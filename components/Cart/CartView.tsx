@@ -12,7 +12,7 @@ import { ProductPhoto } from "@/components/ProductPhoto";
 import { unitPrice, remainingForCombo, optionSelectionLabel } from "@/lib/product-options";
 import { totalShippingFee } from "@/lib/shipping";
 import { eventDiscountTotal } from "@/lib/discount";
-import { isEventOrderable, isListingOrderable } from "@/lib/order-policy";
+import { isEventOrderable, isListingBeforeOpen, isListingOrderable } from "@/lib/order-policy";
 
 // 체크아웃 화면과 동일한 순서(components/Checkout/CheckoutView.tsx의
 // DELIVERY_TYPE_ORDER 참고) — 장바구니에서부터 체크아웃에서 나뉠 그룹을
@@ -189,7 +189,7 @@ export function CartView() {
                           </div>
                           <div className={`min-w-0 flex-1 ${isLineClosed(event, product) ? "opacity-50" : ""}`}>
                             <p className="truncate text-[13.5px] font-semibold">
-                              {isLineClosed(event, product) && <span className="mr-1 rounded bg-red-600 px-1 py-0.5 text-[10px] font-bold text-white">주문 마감</span>}
+                              {isLineClosed(event, product) && <span className="mr-1 rounded bg-red-600 px-1 py-0.5 text-[10px] font-bold text-white">{isEventOrderable(event) && isListingBeforeOpen(product) ? "오픈 전" : "주문 마감"}</span>}
                               {product.name}
                             </p>
                             {line.optionValueIds.length > 0 && (
